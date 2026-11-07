@@ -6,6 +6,19 @@
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Storm/H/stpl.h"
 
+// Input to CMap::ObjectCreate, separate from entity static/runtime flags.
+enum MAP_OBJECT_CREATE_FLAGS : uint32_t {
+    MAP_OBJECT_CREATE_FLAG_COLLIDABLE = 0x1,
+    MAP_OBJECT_CREATE_FLAG_NO_BLOB_SHADOW = 0x2,
+    MAP_OBJECT_CREATE_FLAG_ALWAYS_ANIMATE = 0x4,
+    MAP_OBJECT_CREATE_FLAG_LINK_MULTIPLE_WMO_GROUPS = 0x8,
+    MAP_OBJECT_CREATE_FLAG_USE_CHARACTER_AMBIENT = 0x10,
+    MAP_OBJECT_CREATE_FLAG_UNKNOWN_5 = 0x20,
+};
+
+// Keep native allocation-bit extraction in its original shift/AND form.
+constexpr int32_t MAP_OBJECT_CREATE_MULTIPLE_GROUPS_SHIFT = 3;
+
 class CMapChunk;
 class CMapChunkDoodadDefLink;
 class CMapDoodadDef;
@@ -93,6 +106,7 @@ enum MapObjFlag {
     MAPOBJ_FLAG_BIODOME = 0x800,
     MAPOBJ_FLAG_PROJ_TEX = 0x1000,
     MAPOBJ_FLAG_NO_MAPOBJ_LINK = 0x2000,
+    MAPOBJ_FLAG_ALL_LOADED = 0x4000,
     MAPOBJ_FLAG_INT_FOG = 0x8000,
     MAPOBJ_FLAG_MAPOBJDEF = 0x10000,
     MAPOBJ_FLAG_SHADOW_20000 = 0x20000,
@@ -108,10 +122,21 @@ struct SMLayer {
     /* 0000 */ uint32_t m_textureId;
     /* 0004 */ uint32_t m_flags;
     /* 0008 */ uint32_t m_offsetInMCAL;
-    /* 000C */ uint32_t m_offectId;
+    /* 000C */ uint32_t m_effectId; // GroundEffectTexture ID; remains 32-bit in 3.3.5.
 };
 
 struct SMOPoly {
+    enum FLAGS : uint8_t {
+        F_TRANSITION = 0x01,
+        F_NOCAMCOLLIDE = 0x02,
+        F_DETAIL = 0x04,
+        F_COLLISION = 0x08,
+        F_HINT = 0x10, // 0.5.3 name; no 3.3.5 reader found.
+        F_RENDER = 0x20,
+        UNKNOWN_0x40 = 0x40,
+        F_COLLIDE_HIT = 0x80, // Temporary BSP-query mark, cleared after the query.
+    };
+
     /* 0000 */ uint8_t m_flags;
     /* 0001 */ uint8_t m_materialId;
 };

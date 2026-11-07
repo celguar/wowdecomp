@@ -1,4 +1,5 @@
 #include "PaperDollInfoFrame.h"
+#include "WoW/Common/ComponentCore/Types.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
 #include "WoW/Source/DB/DBClient/DBCacheInstances.h"
@@ -69,7 +70,7 @@ static int32_t Script_GetInventoryItemTexture(lua_State* L) {
             } else {
                 const CGItem_C* item = static_cast<const CGBag_C*>(unit->GetBag())->GetItemPointer(slot);
 
-                if (item && !(item->m_modelFlags & 0x10000)) {
+                if (item && !(item->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLED)) {
                     displayId = item->GetDisplayID();
                 }
             }
@@ -123,9 +124,9 @@ static int32_t Script_KeyRingButtonIDToInvSlotID(lua_State* L) {
 // OFFSET: 0x005EAC10
 static int32_t Script_OffhandHasWeapon(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
-    CGItem_C* item = player ? player->m_bag.GetItemPointer(16) : nullptr;
+    CGItem_C* item = player ? player->m_bag.GetItemPointer(INVSLOT_OFFHAND) : nullptr;
 
-    if (item && item->GetClassID() == 2) {
+    if (item && item->GetClassID() == ITEM_CLASS::ITEM_CLASS_WEAPON) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -153,10 +154,10 @@ static int32_t Script_GetInventoryAlertStatus(lua_State* L) {
 static int32_t Script_HasWandEquipped(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (player && static_cast<uint32_t>(player->m_bag.m_numSlots) > 17 && player->m_bag.m_slots[17]) {
-        CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(player->m_bag.m_slots[17], TYPE_ITEM, __FILE__, __LINE__));
+    if (player && static_cast<uint32_t>(player->m_bag.m_numSlots) > INVSLOT_RANGED && player->m_bag.m_slots[INVSLOT_RANGED]) {
+        CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(player->m_bag.m_slots[INVSLOT_RANGED], TYPE_ITEM, __FILE__, __LINE__));
 
-        if (item && item->GetSubtypeID() == 19) {
+        if (item && item->GetSubtypeID() == ITEM_SUBCLASS_WEAPON::ITEM_SUBCLASS_WEAPON_WAND) {
             lua_pushnumber(L, 1.0);
             return 1;
         }
@@ -219,7 +220,7 @@ static int32_t Script_IsInventoryItemLocked(lua_State* L) {
     CGPlayer_C* player = slot != -1 ? static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__)) : nullptr;
     const CGItem_C* item = player ? static_cast<const CGBag_C*>(&player->m_bag)->GetItemPointer(slot) : nullptr;
 
-    if (item && (item->m_itemFlags & 1)) {
+    if (item && (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -335,7 +336,7 @@ static int32_t Script_GetInventoryItemCount(lua_State* L) {
             continue;
         }
 
-        if (!(rec->m_displayFlags & 0x4)) {
+        if (!(rec->m_displayFlags & ITEM_SUBCLASS_DISPLAY_FLAG_SHOW_CONTENTS_COUNT)) {
             break;
         }
 
@@ -606,7 +607,7 @@ static int32_t Script_GetInventoryItemsForSlot(lua_State* L) {
     }
 
     CGBag_C* inventory = player->GetBag();
-    ChrClassesRec* chrClass = g_chrClassesDB.GetRecord(player->m_unit->m_unitFieldBytes0[1]);
+    ChrClassesRec* chrClass = g_chrClassesDB.GetRecord(player->m_unit->m_classID);
 
     if (!chrClass) {
         return 0;
@@ -1014,7 +1015,7 @@ static int32_t Script_ShowInventorySellCursor(lua_State* L) {
 
     CGItem_C* item = player->GetBag()->GetItemPointer(slot);
 
-    if (item && !(item->m_itemFlags & 0x1)) {
+    if (item && !(item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
         CursorSetMode(BUY_CURSOR);
     }
 

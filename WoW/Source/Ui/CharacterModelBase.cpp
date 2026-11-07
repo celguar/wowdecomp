@@ -38,7 +38,7 @@ CDataAllocator CGCharacterModelBase::s_characterModelHeap(sizeof(CGCharacterMode
 // VERIFY: 80f18f2c auto
 // OFFSET: 0x00597290
 static int32_t IsUnitDrawable(CGUnit_C* unit) {
-    if (unit->m_clientFlags & 0x400000) {
+    if (unit->m_clientFlags & UNIT_CLIENT_FLAGS::UNIT_CLIENT_FLAG_COMPONENT_INITIALIZATION_PENDING) {
         return 0;
     }
 
@@ -103,7 +103,7 @@ void CGCharacterModelBase::UpdateModel() {
     CSimpleModel::UpdateModel();
 
     if (!this->m_sequenceSet && OsGetAsyncTimeMs() > this->m_sequenceResetTime && this->m_model->GetBoneSequenceId(-1)) {
-        this->m_model->SetBoneSequence(-1, 0, -1, 0, 1.0f, 1, 1);
+        this->m_model->SetBoneSequence(-1, ANIM_STAND, -1, 0, 1.0f, 1, 1);
         this->m_sequenceResetTime = 0;
     }
 
@@ -257,24 +257,24 @@ void CGCharacterModelBase::SetUpModel(CGUnit_C* unit) {
         return;
     }
 
-    if (!(model->m_fFlags & 0x1)) {
+    if (!(model->m_runtimeFlags & 0x1)) {
         model->WaitForLoad(nullptr);
     }
 
     CCharacterComponent::RemoveVisuals(model);
     this->SetModel(model);
     this->SetFrameAlpha(static_cast<uint8_t>(unit->GetBaseAlpha() * 255.0f));
-    model->SetBoneSequence(0xFFFFFFFF, 0, 0xFFFFFFFF, 0, 1.0f, 1, 1);
+    model->SetBoneSequence(0xFFFFFFFF, ANIM_STAND, 0xFFFFFFFF, 0, 1.0f, 1, 1);
 
     for (CM2Model* attached = model->m_attachList; attached; attached = attached->m_attachNext) {
-        if (attached->m_attachmentId == 2) {
+        if (attached->m_attachmentId == MODEL_ATTACHMENT_ID::ATTACH_HANDL) {
             CCharacterComponent::ComponentCloseFingers(model, COMP_HAND_LEFT);
             break;
         }
     }
 
     for (CM2Model* attached = model->m_attachList; attached; attached = attached->m_attachNext) {
-        if (attached->m_attachmentId == 1) {
+        if (attached->m_attachmentId == MODEL_ATTACHMENT_ID::ATTACH_HANDR) {
             CCharacterComponent::ComponentCloseFingers(model, COMP_HAND_RIGHT);
             break;
         }
@@ -310,7 +310,7 @@ void CGCharacterModelBase::SetUpModel(CreatureStats_C* stats) {
 
     CCharacterComponent::ReplaceMonsterSkin(model, displayRec, modelRec);
     this->SetModel(model);
-    model->SetBoneSequence(0xFFFFFFFF, 0, 0xFFFFFFFF, 0, 1.0f, 1, 1);
+    model->SetBoneSequence(0xFFFFFFFF, ANIM_STAND, 0xFFFFFFFF, 0, 1.0f, 1, 1);
     model->Release();
 }
 

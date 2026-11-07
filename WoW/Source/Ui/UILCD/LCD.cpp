@@ -1,4 +1,6 @@
 #include "LCD.h"
+#include "WoW/Common/ComponentCore/Types.h"
+#include "WoW/Common/Types.h"
 #include <cmath>
 #include <cstring>
 #include <new>
@@ -305,7 +307,7 @@ void CGLCD::Login() {
     s_subscreen = 0;
     CGLCD::m_inWorld = 1;
 
-    ChrClassesRec* classRec = g_chrClassesDB.GetRecord(player->m_unit->m_unitFieldBytes0[1]);
+    ChrClassesRec* classRec = g_chrClassesDB.GetRecord(player->m_unit->m_classID);
 
     if (classRec) {
         s_classFlag8 = (classRec->m_flags >> 3) & 1;
@@ -313,10 +315,10 @@ void CGLCD::Login() {
 
     int32_t soulShard;
 
-    switch (player->m_unit->m_unitFieldBytes0[1]) {
-        case 1:
-        case 3:
-        case 4: {
+    switch (player->m_unit->m_classID) {
+        case CLASS_WARRIOR:
+        case CLASS_HUNTER:
+        case CLASS_ROGUE: {
             CGLCD::m_lcd->SetVisible(CGLCD::GetHandle("AMMO"), 1);
             CGLCD::m_lcd->SetVisible(CGLCD::GetHandle("AMMO_FLD"), 1);
             CGLCD::m_lcd->SetVisible(CGLCD::GetHandle("SOUL_SHARD"), 0);
@@ -324,7 +326,7 @@ void CGLCD::Login() {
             break;
         }
 
-        case 9: {
+        case CLASS_WARLOCK: {
             CGLCD::m_lcd->SetVisible(CGLCD::GetHandle("AMMO"), 0);
             CGLCD::m_lcd->SetVisible(CGLCD::GetHandle("AMMO_FLD"), 0);
             CGLCD::m_lcd->SetVisible(CGLCD::GetHandle("SOUL_SHARD"), 1);
@@ -472,13 +474,13 @@ static const char* GetAmmoToken() {
         return "";
     }
 
-    switch (CGLCD::m_player->m_unit->m_unitFieldBytes0[1]) {
-        case 1:
-        case 3:
-        case 4:
+    switch (CGLCD::m_player->m_unit->m_classID) {
+        case CLASS_WARRIOR:
+        case CLASS_HUNTER:
+        case CLASS_ROGUE:
             return "AMMO";
 
-        case 9:
+        case CLASS_WARLOCK:
             return "SOUL_SHARD";
 
         default:
@@ -670,7 +672,7 @@ static int32_t GetAmmoCount() {
     CGPlayer_C* player = CGLCD::m_player;
     int32_t ammoId = player->m_obj->m_guid == ClntObjMgrGetActivePlayer() ? player->m_player->m_playerAmmoId : 0;
 
-    if (CGLCD::m_player->m_unit->m_unitFieldBytes0[1] == 9) {
+    if (CGLCD::m_player->m_unit->m_classID == CLASS_WARLOCK) {
         return CGLCD::m_player->m_bag.GetItemTypeCount(6265, 0);
     }
 
@@ -927,7 +929,7 @@ void CGLCD::DisplayMeleeStats() {
 
     CGLCD::SetStat("DAMAGE", minDamage, ceil(maxDamage) <= 1 ? 1 : static_cast<int32_t>(ceil(maxDamage)));
     float speed = CGLCD::m_player->m_unit->m_unitFieldBaseattacktime[0] * 0.001f;
-    CGItem_C* offhand = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(WOWGUID{ CGLCD::m_player->m_bag.GetItemGuid(16) }, TYPE_ITEM, __FILE__, __LINE__));
+    CGItem_C* offhand = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(WOWGUID{ CGLCD::m_player->m_bag.GetItemGuid(INVSLOT_OFFHAND) }, TYPE_ITEM, __FILE__, __LINE__));
 
     if (offhand) {
         offhand->GetClassID();
@@ -1037,7 +1039,7 @@ void CGLCD::DisplaySpellStats() {
     CGLCD::SetStat("SPELL_HASTE", static_cast<int32_t>(CGLCD::m_player->m_player->m_playerFieldCombatRating1[19]));
     int32_t manaRegen = 0;
 
-    if (!CGLCD::m_player->m_unit->m_unitFieldBytes0[3]) {
+    if (!CGLCD::m_player->m_unit->m_displayPower) {
         float regen = CGLCD::m_player->GetPowerRegen(POWER_TYPE_MANA, false);
         manaRegen = static_cast<int32_t>(floor((regen + 0.001f) * 5.0f));
     }
@@ -1345,7 +1347,7 @@ int32_t CGLCD::Update(const void* data, void* param) {
 // VERIFY: bc2eb3a6 manual
 // OFFSET: 0x0084B410
 bool CGLCD::LoadLCDMap(int32_t screen, XMLNode* node, CStatus* status, int32_t subscreen) {
-    MAPDATA* map = CGLCD::m_mapData.NewNode(2, 0, 0);
+    MAPDATA* map = CGLCD::m_mapData.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     map->m_screen = screen;
 
     for (XMLNode* child = node->m_child; child; child = child->m_next) {
@@ -1721,7 +1723,7 @@ bool CGLCD::GeneratePOIs(XMLNode* node) {
             handle->m_x = static_cast<int32_t>(originX);
             handle->m_y = static_cast<int32_t>(originY);
 
-            POIIcon* icon = CGLCD::m_POIIcons.NewNode(2, 0, 0);
+            POIIcon* icon = CGLCD::m_POIIcons.NewNode(TSLIST_LINK_BEFORE, 0, 0);
             icon->m_handle = lcdBitmap;
             icon->m_id = rec->m_id;
             SStrCopy(icon->m_name, name, STORM_MAX_STR);
@@ -1743,7 +1745,14 @@ bool CGLCD::LoadScreen(XMLNode* node, CStatus* status) {
     }
 
     int32_t screen = CGLCD::GetScreenFromName(name);
+#if defined(WOWDECOMP_ARCH_64)
+    if (screen < 0 || CGLCD::m_lcd->AddNewPage(screen) < 0) {
+        status->Add(STATUS_WARNING, "Invalid LCD screen: %s", name);
+        return false;
+    }
+#else
     CGLCD::m_lcd->AddNewPage(screen);
+#endif
     CGLCD::m_lcd->ModifyControlsOnPage(screen);
     CGLCD::m_lcd->ShowPage(screen);
 

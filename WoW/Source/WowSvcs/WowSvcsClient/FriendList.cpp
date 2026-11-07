@@ -577,7 +577,7 @@ static void PrintWho(const char* name, int32_t race, int32_t classId, const char
 // VERIFY: b37debf7 manual
 // OFFSET: 0x006B5400
 void __stdcall FriendList::AddFriend(const char* name, const char* note) {
-    CGTutorial::FlagTutorial(21);
+    CGTutorial::FlagTutorial(TUTORIAL::TUTORIAL_FRIENDS);
     char noteBuffer[512];
     SStrCopy(noteBuffer, note, sizeof(noteBuffer));
     char nameBuffer[308];
@@ -808,13 +808,13 @@ bool __stdcall FriendList::MatchesFilter(CGPlayer_C* player, const char* filter)
         return true;
     }
 
-    ChrRacesRec* race = g_chrRacesDB.GetRecord(player->m_unit->m_unitFieldBytes0[0]);
+    ChrRacesRec* race = g_chrRacesDB.GetRecord(player->m_unit->m_raceID);
 
     if (race && SStrStrUTF8I(race->m_name, filter)) {
         return true;
     }
 
-    ChrClassesRec* chrClass = g_chrClassesDB.GetRecord(player->m_unit->m_unitFieldBytes0[1]);
+    ChrClassesRec* chrClass = g_chrClassesDB.GetRecord(player->m_unit->m_classID);
 
     if (chrClass && SStrStrUTF8I(chrClass->m_name, filter)) {
         return true;
@@ -881,8 +881,8 @@ int32_t FriendList::DoLocalWho() {
             continue;
         }
 
-        uint8_t race = player->m_unit->m_unitFieldBytes0[0];
-        uint8_t classId = player->m_unit->m_unitFieldBytes0[1];
+        uint8_t race = player->m_unit->m_raceID;
+        uint8_t classId = player->m_unit->m_classID;
 
         if (!((1 << race) & this->m_whoRaceMask) || !((1 << classId) & this->m_whoClassMask)) {
             continue;
@@ -955,8 +955,8 @@ int32_t FriendList::DoLocalWho() {
 
             WhoResult& entry = FriendList::s_whoResults[FriendList::s_numWhoResults];
             entry.m_level = player->m_unit->m_unitFieldLevel;
-            entry.m_class = player->m_unit->m_unitFieldBytes0[1];
-            entry.m_race = player->m_unit->m_unitFieldBytes0[0];
+            entry.m_class = player->m_unit->m_classID;
+            entry.m_race = player->m_unit->m_raceID;
             entry.m_gender = player->GetDisplaySex();
             entry.m_zone = CGGameUI::m_areaID;
             FriendList::s_totalWhoResults++;
@@ -965,7 +965,7 @@ int32_t FriendList::DoLocalWho() {
         }
 
         if (print) {
-            PrintWho(buffer, player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[1], player->GetPlayerGuildNameText(), player->m_unit->m_unitFieldLevel, CGGameUI::m_areaID, player->GetDisplaySex());
+            PrintWho(buffer, player->m_unit->m_raceID, player->m_unit->m_classID, player->GetPlayerGuildNameText(), player->m_unit->m_unitFieldLevel, CGGameUI::m_areaID, player->GetDisplaySex());
         }
     }
 
@@ -1029,7 +1029,7 @@ int32_t Packet_SMSG_WHO(void* param, NETMESSAGE msgId, uint32_t time, CDataStore
 
     MapRec* map = g_mapDB.GetRecord(CGGameUI::m_iCurrentMapID);
 
-    if ((map && map->m_instanceType == 3) || map->m_instanceType == 4) {
+    if ((map && map->m_instanceType == MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_PVP_BATTLEFIELD) || map->m_instanceType == MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_ARENA_BATTLEFIELD) {
         if (FriendList::s_friendList) {
             count += FriendList::s_friendList->DoLocalWho();
         }
@@ -1819,7 +1819,7 @@ void FriendList::HandleStatus(FRIEND_RESULT status, WOWGUID guid, CDataStore* ms
             CGGameUI::DisplayError(ERR_VOICE_IGNORE_AMBIGUOUS);
             return;
 
-        case FRIEND_UNKNOWN_25:
+        case FRIEND_NOOP:
             CGGameUI::DisplayError(error);
             return;
 

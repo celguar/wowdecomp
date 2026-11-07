@@ -1,4 +1,5 @@
 #include "ShadowQuery.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "WoW/Source/WorldClient/WorldConstants.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/ConsoleBase/Types.h"
@@ -72,8 +73,8 @@ void CShadowQuery::FreeBuffers() {
             SMemFree(buffers->m_groups, nullptr, 0, 0);
         }
 
-        if (buffers->m_groupData) {
-            SMemFree(buffers->m_groupData, nullptr, 0, 0);
+        if (buffers->m_groupMatrices) {
+            SMemFree(buffers->m_groupMatrices, nullptr, 0, 0);
         }
 
         delete[] buffers->m_untextured.m_batches;
@@ -204,11 +205,11 @@ void CShadowQuery::FrustumCallback(CFrustum& frustum, C44Matrix& matrix, const C
     frustum.InvertPlanes();
     frustum.SwapCorners();
 
-    float* rect = data.m_cullRects[band];
-    rect[0] = -1.0f;
-    rect[1] = -1.0f;
-    rect[2] = 1.0f;
-    rect[3] = 1.0f;
+    CRect& rect = data.m_cullRects[band];
+    rect.minY = -1.0f;
+    rect.minX = -1.0f;
+    rect.maxY = 1.0f;
+    rect.maxX = 1.0f;
 
     CFrustum& cull = data.m_bandFrustums[band];
     cull = frustum;
@@ -232,10 +233,10 @@ void CShadowQuery::FrustumCallback(CFrustum& frustum, C44Matrix& matrix, const C
         cull.CalcPlanesFromCorners(corners);
         cull.InvertPlanes();
         cull.SwapCorners();
-        rect[1] = box.b.x;
-        rect[3] = box.t.x;
-        rect[0] = -box.t.y;
-        rect[2] = -box.b.y;
+        rect.minX = box.b.x;
+        rect.maxX = box.t.x;
+        rect.minY = -box.t.y;
+        rect.maxY = -box.b.y;
     }
 }
 
@@ -251,11 +252,11 @@ void CShadowQuery::AllocBuffers() {
         buffers.m_textured.m_maxCount = 0x2000;
 
         if (!buffers.m_groups) {
-            buffers.m_groups = SMemAlloc(0x800 * sizeof(CMapObjGroup*), __FILE__, __LINE__, 0);
+            buffers.m_groups = static_cast<CMapObjGroup**>(SMemAlloc(0x800 * sizeof(CMapObjGroup*), __FILE__, __LINE__, 0));
         }
 
-        if (!buffers.m_groupData) {
-            buffers.m_groupData = SMemAlloc(0x800 * sizeof(C44Matrix*), __FILE__, __LINE__, 0);
+        if (!buffers.m_groupMatrices) {
+            buffers.m_groupMatrices = static_cast<C44Matrix**>(SMemAlloc(0x800 * sizeof(C44Matrix*), __FILE__, __LINE__, 0));
         }
 
         if (!buffers.m_untextured.m_batches) {
@@ -390,16 +391,16 @@ int32_t CShadowQuery::RenderCallback(CShadowCacheQueryData& data, int32_t band, 
     CShaderEffect::UpdateProjMatrix();
     GxRsSet(GxRs_ScissorTest, 0);
     g_theGxDevicePtr->DeviceSetRenderTarget(GxBuffers_Color, target, 0);
-    GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+    GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, CImVector(COLOR_WHITE_BGRA));
 
     if (g_shadowScissor->m_intValue) {
         GxRsSet(GxRs_ScissorTest, 1);
-        float* rect = data.m_cullRects[band];
+        CRect& rect = data.m_cullRects[band];
         CRect scissor;
-        scissor.minY = (rect[0] + 1.0f) * 0.5f;
-        scissor.minX = (rect[1] + 1.0f) * 0.5f;
-        scissor.maxY = (rect[2] + 1.0f) * 0.5f;
-        scissor.maxX = 0.5f * (rect[3] + 1.0f);
+        scissor.minY = (rect.minY + 1.0f) * 0.5f;
+        scissor.minX = (rect.minX + 1.0f) * 0.5f;
+        scissor.maxY = (rect.maxY + 1.0f) * 0.5f;
+        scissor.maxX = 0.5f * (rect.maxX + 1.0f);
         g_theGxDevicePtr->SetScissor(scissor);
     }
 
@@ -409,7 +410,7 @@ int32_t CShadowQuery::RenderCallback(CShadowCacheQueryData& data, int32_t band, 
     g_theGxDevicePtr->ShaderConstantsSet(GxSh_Vertex, 14, &texMatrix.a0, 3);
 
     if (buffers.m_groupCount) {
-        CMapObj::RenderMapObjGroupsShadowMap(buffers.m_groups, buffers.m_groupCount, buffers.m_groupData, translation, data.m_frustums[band]);
+        CMapObj::RenderMapObjGroupsShadowMap(buffers.m_groups, buffers.m_groupCount, buffers.m_groupMatrices, translation, data.m_frustums[band]);
     }
 
     if (buffers.m_untextured.m_count || buffers.m_textured.m_count) {
@@ -457,7 +458,7 @@ void CShadowQuery::GatherShadowCasters(CShadowCacheQueryData& data, int32_t firs
     minRadius[2] = 10.0f;
 
     for (CMapEntity* entity = CMap::entityList.Head(); entity; entity = CMap::entityList.Next(entity)) {
-        if (entity->m_staticFlags & 0x4) {
+        if (entity->m_staticFlags & MAP_STATIC_FLAGS::MAP_STATIC_FLAG_HIDDEN) {
             continue;
         }
 
@@ -469,11 +470,11 @@ void CShadowQuery::GatherShadowCasters(CShadowCacheQueryData& data, int32_t firs
 
         int32_t isUnit = 1;
 
-        if (!(entity->m_type & CMapBaseObj::Type_Entity) || (entity->m_staticFlags & 0x2000)) {
+        if (!(entity->m_type & CMapBaseObj::Type_Entity) || (entity->m_staticFlags & MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LINK_MULTIPLE_WMO_GROUPS)) {
             isUnit = 0;
         }
 
-        uint32_t doodad = (model->m_fFlags & 0x1) ? model->m_shared->m_billboardBoneCount : 0;
+        uint32_t doodad = (model->m_runtimeFlags & 0x1) ? model->m_shared->m_billboardBoneCount : 0;
 
         for (int32_t band = firstBand; band <= lastBand; band++) {
             int32_t queryFlags = data.m_queryFlags[band];
@@ -497,7 +498,7 @@ void CShadowQuery::GatherShadowCasters(CShadowCacheQueryData& data, int32_t firs
                 flags = entity->m_flags;
 
                 if (flags & 0x2) {
-                    if (!(entity->m_staticFlags & 0x1000)) {
+                    if (!(entity->m_staticFlags & MAP_STATIC_FLAGS::MAP_STATIC_FLAG_BLEND_OUTDOOR_LIGHT)) {
                         continue;
                     }
 
@@ -548,7 +549,7 @@ void CShadowQuery::Clear(CGxTex* target, CGxTex* depthTarget, float* rect) {
     GxRenderTargetSet(GxBuffers_Depth, depthTarget, 0);
     GxRenderTargetSet(GxBuffers_Color, target, 0);
     GxXformSetViewport(rect[0], rect[1], rect[2], rect[3], 0.0f, 1.0f);
-    GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+    GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, CImVector(COLOR_WHITE_BGRA));
     GxXformSetViewport(viewportMinX, viewportMaxX, viewportMinY, viewportMaxY, viewportMinZ, viewportMaxZ);
     GxRenderTargetSet(GxBuffers_Color, oldTarget, 0);
 }
@@ -676,7 +677,7 @@ void CShadowQuery::QueryMapObjDefsBand(CShadowCacheQueryData& data, int32_t band
             CMapObjDefGroup* defGroup = def->m_defGroups[i];
             CMapObjGroup* group = def->m_owner->GetGroup(i, 0);
 
-            if (!group || !(group->m_flags & 0x48)) {
+            if (!group || !(group->m_flags & CMapObjGroup::MOGP_FLAGS::F_EXTERIOR_CLASSIFICATION_MASK)) {
                 continue;
             }
 
@@ -695,8 +696,8 @@ void CShadowQuery::QueryMapObjDefsBand(CShadowCacheQueryData& data, int32_t band
                     break;
                 }
 
-                static_cast<C44Matrix**>(buffers.m_groupData)[buffers.m_groupCount] = &def->m_mat;
-                static_cast<CMapObjGroup**>(buffers.m_groups)[buffers.m_groupCount++] = group;
+                buffers.m_groupMatrices[buffers.m_groupCount] = &def->m_mat;
+                buffers.m_groups[buffers.m_groupCount++] = group;
             }
 
             for (CMapBaseObjLink* link = defGroup->m_doodadDefLinkList.Head(); link; link = defGroup->m_doodadDefLinkList.Next(link)) {
@@ -749,7 +750,7 @@ void CShadowQuery::QueryMapObjDefs(CShadowCacheQueryData& data, int32_t firstBan
             CMapObjDefGroup* defGroup = def->m_defGroups[i];
             CMapObjGroup* group = def->m_owner->GetGroup(i, 0);
 
-            if (!group || !(group->m_flags & 0x48)) {
+            if (!group || !(group->m_flags & CMapObjGroup::MOGP_FLAGS::F_EXTERIOR_CLASSIFICATION_MASK)) {
                 continue;
             }
 
@@ -765,8 +766,8 @@ void CShadowQuery::QueryMapObjDefs(CShadowCacheQueryData& data, int32_t firstBan
                         break;
                     }
 
-                    static_cast<C44Matrix**>(buffers.m_groupData)[buffers.m_groupCount] = &def->m_mat;
-                    static_cast<CMapObjGroup**>(buffers.m_groups)[buffers.m_groupCount++] = group;
+                    buffers.m_groupMatrices[buffers.m_groupCount] = &def->m_mat;
+                    buffers.m_groups[buffers.m_groupCount++] = group;
                 }
             }
 
@@ -815,7 +816,7 @@ void CShadowQuery::QueryTerrainBand(CShadowCacheQueryData& data, int32_t band) {
                 continue;
             }
 
-            CMapChunk* chunk = area->m_mapChunks[(col & 0xF) + 16 * (row & 0xF)];
+            CMapChunk* chunk = area->m_mapChunks[(col & MAP_CHUNK_INDEX_MASK) + MAP_CHUNKS_PER_AREA_AXIS * (row & MAP_CHUNK_INDEX_MASK)];
 
             if (!chunk) {
                 continue;
@@ -871,7 +872,7 @@ void CShadowQuery::QueryTerrain(CShadowCacheQueryData& data, int32_t firstBand, 
                 continue;
             }
 
-            CMapChunk* chunk = area->m_mapChunks[(col & 0xF) + 16 * (row & 0xF)];
+            CMapChunk* chunk = area->m_mapChunks[(col & MAP_CHUNK_INDEX_MASK) + MAP_CHUNKS_PER_AREA_AXIS * (row & MAP_CHUNK_INDEX_MASK)];
 
             if (!chunk) {
                 continue;

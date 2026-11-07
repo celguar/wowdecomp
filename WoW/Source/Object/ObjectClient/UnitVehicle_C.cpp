@@ -1,4 +1,5 @@
 #include "UnitVehicle_C.h"
+#include "WoW/Source/Object/Types.h"
 #include "Engine/Source/Base/CDataStore.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/Tempest/CMath.h"
@@ -117,7 +118,7 @@ bool CGUnit_C::IsVehiclePreventingTurning() const {
     }
 
     VehicleSeatRec* seat = transport->m_vehicle->GetVehicleSeatRec(static_cast<uint8_t>(this->m_movementData.m_transportSeat));
-    return seat && !(seat->m_flags & 0x400);
+    return seat && !(seat->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_ALLOW_TURNING);
 }
 
 // VERIFY: 08c11781 manual
@@ -129,11 +130,11 @@ bool CGUnit_C::IsAlteredFormTransitionPreventingMovement() const {
 
     CVehiclePassenger_C* passenger = this->m_vehiclePassenger;
 
-    if (passenger && passenger->m_state && passenger->m_state != 3) {
+    if (passenger && passenger->m_state && passenger->m_state != CVehiclePassenger_C::TRANSITION_STATE::STATE_RIDING) {
         return true;
     }
 
-    if (passenger && (passenger->m_flags & 0x200)) {
+    if (passenger && (passenger->m_flags & VEHICLE_PASSENGER_FLAGS::VEHICLE_PASSENGER_FLAG_WAITING_FOR_TRANSITION_ANIM)) {
         return true;
     }
 
@@ -142,14 +143,16 @@ bool CGUnit_C::IsAlteredFormTransitionPreventingMovement() const {
     if (charmer) {
         CVehiclePassenger_C* charmerPassenger = charmer->m_vehiclePassenger;
 
-        if (!charmerPassenger || ((!charmerPassenger->m_state || charmerPassenger->m_state == 3) && !(charmerPassenger->m_flags & 0x200))) {
-            return charmer->IsInVehicle() && (charmerPassenger->m_flags & 0x8);
+        if (!charmerPassenger
+            || ((!charmerPassenger->m_state || charmerPassenger->m_state == 3)
+                && !(charmerPassenger->m_flags & VEHICLE_PASSENGER_FLAGS::VEHICLE_PASSENGER_FLAG_WAITING_FOR_TRANSITION_ANIM))) {
+            return charmer->IsInVehicle() && (charmerPassenger->m_flags & VEHICLE_PASSENGER_FLAGS::VEHICLE_PASSENGER_FLAG_MOVEMENT_STOPPED);
         }
 
         return true;
     }
 
-    if (!(this->m_unit->m_unitFieldFlags & 0x1000000) && this->m_obj->m_guid != ClntObjMgrGetActivePlayer()) {
+    if (!(this->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) && this->m_obj->m_guid != ClntObjMgrGetActivePlayer()) {
         return true;
     }
 
@@ -231,25 +234,27 @@ int32_t CGUnit_C::VehiclePassengerShouldWaitForVehicleTransitionAnim(uint64_t tr
     CVehicle_C* animVehicle = vehicle->FindVehicleToPlayBoneAnim();
 
     if (entering) {
-        if (!(seatRec->m_flags & 0x400000)) {
+        if (!(seatRec->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_HAS_VEHICLE_ENTER_ANIM)) {
             return 0;
         }
 
         uint32_t anim = seatRec->m_vehicleEnterAnim;
 
-        if (anim > 0x1F9) {
+        if (anim > (ANIM_COUNT - 1)) {
             return 0;
         }
 
         return animVehicle->CanPlayBoneAnim(anim) ? 1 : 0;
     }
 
-    if (!(seatRec->m_flags & ((this->m_movementData.m_flags2 & 0x40) ? 0x40000 : 0x80000))) {
+    if (!(seatRec->m_flags & ((this->m_movementData.m_flags2 & MovementFlags2::MOVEMENTFLAG2_VEHICLE_EXIT_VOLUNTARY)
+        ? VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_HAS_VEHICLE_EXIT_ANIM_ON_VOLUNTARY_EXIT
+        : VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_HAS_VEHICLE_EXIT_ANIM_ON_FORCED_EXIT))) {
         return 0;
     }
 
     uint32_t anim = seatRec->m_vehicleExitAnim;
-    return anim <= 0x1F9 && animVehicle->CanPlayBoneAnim(anim);
+    return anim <= (ANIM_COUNT - 1) && animVehicle->CanPlayBoneAnim(anim);
 }
 
 // VERIFY: 0d563d24 manual
@@ -294,17 +299,23 @@ int32_t CGUnit_C::VehiclePassengerStartWaitingForVehicleTransitionAnim(uint64_t 
     CVehicle_C* animVehicle = vehicle->FindVehicleToPlayBoneAnim();
 
     if (entering) {
-        if (!(seatRec->m_flags & 0x400000) || static_cast<uint32_t>(seatRec->m_vehicleEnterAnim) > 0x1F9 || !animVehicle->PlayBoneAnim(seatRec->m_field33512213034, seatRec->m_vehicleEnterAnim)) {
+        if (!(seatRec->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_HAS_VEHICLE_ENTER_ANIM)
+            || static_cast<uint32_t>(seatRec->m_vehicleEnterAnim) > (ANIM_COUNT - 1)
+            || !animVehicle->PlayBoneAnim(seatRec->m_field33512213034, seatRec->m_vehicleEnterAnim)) {
             return 0;
         }
 
         animVehicle->InstallBoneAnimListener(this->m_obj->m_guid, seatRec->m_field33512213034, &CVehiclePassenger_C::OnVehicleTransitionAnimEnd);
 
-        if (seatRec->m_flagsB & 0x800000) {
+        if (seatRec->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_FORCE_ENTER_ANIM_FACING) {
             animVehicle->SetBoneAnimForceFacing(this->m_obj->m_guid, seatRec->m_field33512213034);
         }
     } else {
-        if (!(seatRec->m_flags & ((this->m_movementData.m_flags2 & 0x40) ? 0x40000 : 0x80000)) || static_cast<uint32_t>(seatRec->m_vehicleExitAnim) > 0x1F9 || !animVehicle->PlayBoneAnim(seatRec->m_vehicleExitAnimBone, seatRec->m_vehicleExitAnim)) {
+        if (!(seatRec->m_flags & ((this->m_movementData.m_flags2 & MovementFlags2::MOVEMENTFLAG2_VEHICLE_EXIT_VOLUNTARY)
+            ? VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_HAS_VEHICLE_EXIT_ANIM_ON_VOLUNTARY_EXIT
+            : VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_HAS_VEHICLE_EXIT_ANIM_ON_FORCED_EXIT))
+            || static_cast<uint32_t>(seatRec->m_vehicleExitAnim) > (ANIM_COUNT - 1)
+            || !animVehicle->PlayBoneAnim(seatRec->m_vehicleExitAnimBone, seatRec->m_vehicleExitAnim)) {
             return 0;
         }
 
@@ -358,21 +369,21 @@ CGUnit_C* CGUnit_C::GetRootVehicleUnit() {
 // VERIFY: 218b4093 auto
 // OFFSET: 0x0074B9C0
 void CGUnit_C::PlayVehicleExitEndAnimation(const VehicleSeatRec* seat, uint32_t anim) {
-    if (!seat || !(seat->m_flags & 0x200000) || anim == 0xFFFFFFFF) {
+    if (!seat || !(seat->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_FORCE_EXIT_END_ANIM) || anim == INVALID_ANIMATION) {
         uint32_t flags = this->m_movement->m_flags;
 
-        if (flags & 0x1000) {
+        if (flags & MOVEMENTFLAG_FALLING) {
             this->PlayBaseAnimation(ANIM_FALL, 0);
-            this->m_animationState |= 0x1000000;
+            this->m_animFlags |= UNIT_ANIM_FLAGS::UNIT_ANIM_FLAG_FALL_LAND_PENDING;
             return;
         }
 
-        if (flags & 0x200000) {
+        if (flags & MOVEMENTFLAG_SWIMMING) {
             this->PlayBaseAnimation(ANIM_SWIM_IDLE, 0);
             return;
         }
 
-        if ((flags & 0x2000000) || anim == 0xFFFFFFFF) {
+        if ((flags & MOVEMENTFLAG_FLYING) || anim == INVALID_ANIMATION) {
             return;
         }
     }
@@ -419,7 +430,7 @@ void CGUnit_C::OnVehicleCameraPossiblyUnneeded() {
 // VERIFY: 6c23ff21 auto
 // OFFSET: 0x0074CF30
 void CGUnit_C::VehiclePassengerOnUpdateTransport(WOWGUID transport, uint8_t seat, int32_t a3) {
-    if (!(this->m_clientFlags & 0x80000) && !a3) {
+    if (!(this->m_clientFlags & UNIT_CLIENT_FLAGS::UNIT_CLIENT_FLAG_POST_INIT_COMPLETE) && !a3) {
         return;
     }
 
@@ -496,7 +507,9 @@ void CGUnit_C::OnChangeSeatsOnControlledVehicleLocal(uint32_t eventTime, WOWGUID
 // VERIFY: 561780c9 auto
 // OFFSET: 0x0074BB60
 int32_t CGUnit_C::ShouldUseVehicleSeatExitAnimation(const VehicleSeatRec* seat) const {
-    return seat->m_flags & ((this->m_movementData.m_flags2 & 0x40) ? 0x8 : 0x8000);
+    return seat->m_flags & ((this->m_movementData.m_flags2 & MovementFlags2::MOVEMENTFLAG2_VEHICLE_EXIT_VOLUNTARY)
+        ? VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_USE_EXIT_ANIM_ON_VOLUNTARY_EXIT
+        : VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_USE_EXIT_ANIM_ON_FORCED_EXIT);
 }
 
 // VERIFY: d8212e45 auto
@@ -508,7 +521,7 @@ uint32_t CGUnit_C::IsVehicleCurrentlyUnstoppable() const {
         return 0;
     }
 
-    return vehicle->m_flags & ((this->m_movement->m_flags & (MOVEMENTFLAG_SWIMMING | MOVEMENTFLAG_FLYING)) ? 0x100 : 0x80);
+    return vehicle->m_flags & ((this->m_movement->m_flags & MOVEMENTFLAG_SWIMMING_OR_FLYING_MASK) ? 0x100 : 0x80);
 }
 
 // VERIFY: 2533cf6d auto
@@ -576,7 +589,7 @@ void CGUnit_C::VehiclePassengerUpdateWorldCameraState(VehicleRec* vehicleRec, Ve
 
     uint32_t active = 0;
 
-    if (this->m_vehiclePassenger && (this->m_vehiclePassenger->m_state == 1 || this->m_vehiclePassenger->m_state == 2 || this->m_vehiclePassenger->m_state == 3)) {
+    if (this->m_vehiclePassenger && (this->m_vehiclePassenger->m_state == CVehiclePassenger_C::TRANSITION_STATE::STATE_ENTER_DELAY || this->m_vehiclePassenger->m_state == CVehiclePassenger_C::TRANSITION_STATE::STATE_ENTERING || this->m_vehiclePassenger->m_state == CVehiclePassenger_C::TRANSITION_STATE::STATE_RIDING)) {
         active = 1;
     }
 
@@ -584,7 +597,7 @@ void CGUnit_C::VehiclePassengerUpdateWorldCameraState(VehicleRec* vehicleRec, Ve
         return;
     }
 
-    uint32_t restoreZoom = camera->m_flags & 0x20;
+    uint32_t restoreZoom = camera->m_flags & CGCamera::FLAGS::FLAG_VEHICLE_EXIT_ZOOM;
     CGUnit_C::s_vehiclePassengerCameraVehicle = vehicleRec;
     CGUnit_C::s_vehiclePassengerCameraActive = active;
     CGUnit_C::s_vehiclePassengerCameraSeat = seatRec;
@@ -596,31 +609,31 @@ void CGUnit_C::VehiclePassengerUpdateWorldCameraState(VehicleRec* vehicleRec, Ve
         camera->SetVehicleZoomEnabled(0, duration, restoreZoom == 0);
         camera->SetDesiredVehicleYawOffset(0.0f, startTime, endTime);
         camera->SetDesiredVehiclePitchOffset(0.0f, startTime, endTime);
-        camera->SetVehicleTrackingStyle(0);
+        camera->SetVehicleTrackingStyle(CGCamera::VEHICLE_TRACKING_STYLE::TRACKING_USER_STYLE);
     } else {
-        if (seatRec && (seatRec->m_flags & 0x1000000)) {
+        if (seatRec && (seatRec->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_ENABLE_VEHICLE_ZOOM)) {
             camera->SetVehicleZoomEnabled(1, duration, 1);
             restoreZoom = 0;
-        } else if (seatRec && (seatRec->m_flagsB & 0x400)) {
+        } else if (seatRec && (seatRec->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_CAMERA_USE_SEAT_ZOOM)) {
             camera->SetVehicleZoomEnabled(0, duration, 0);
             float current = camera->m_distance;
             float target = current;
             uint32_t flagsB = seatRec->m_flagsB;
-            int32_t hasMin = flagsB & 0x4000;
-            int32_t hasMax = flagsB & 0x8000;
+            int32_t hasMin = flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_CAMERA_HAS_ZOOM_MIN;
+            int32_t hasMax = flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_CAMERA_HAS_ZOOM_MAX;
             uint32_t wasRestore = restoreZoom;
             restoreZoom = 0;
             float minDistance = hasMin ? seatRec->m_field33512213054 : camera->GetDefaultZoomMinDistance();
             float maxDistance = hasMax ? seatRec->m_field33512213055 : CGCamera::GetDefaultZoomMaxDistance();
 
-            if (seatRec->m_flagsB & 0x800) {
+            if (seatRec->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_CAMERA_HAS_ENTER_ZOOM) {
                 float preferred = seatRec->m_field33512213053;
 
-                if (preferred > current && !(seatRec->m_flagsB & 0x1000)) {
+                if (preferred > current && !(seatRec->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_CAMERA_SKIP_ZOOM_OUT)) {
                     target = preferred;
                 }
 
-                if (preferred < target && !(seatRec->m_flagsB & 0x2000)) {
+                if (preferred < target && !(seatRec->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_CAMERA_SKIP_ZOOM_IN)) {
                     target = preferred;
                 }
 
@@ -667,10 +680,12 @@ void CGUnit_C::VehiclePassengerUpdateWorldCameraState(VehicleRec* vehicleRec, Ve
         camera->SetDesiredVehicleYawOffset(vehicleRec ? vehicleRec->m_cameraYawOffset : 0.0f, startTime, endTime);
         camera->SetDesiredVehiclePitchOffset(vehicleRec ? vehicleRec->m_cameraPitchOffset : 0.0f, startTime, endTime);
 
-        if (seatRec && (seatRec->m_flags & 0x800) && (seatRec->m_flagsB & 0x80001)) {
-            camera->SetVehicleTrackingStyle(1);
+        if (seatRec
+            && (seatRec->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_CAN_CONTROL)
+            && (seatRec->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_CAMERA_FACING_INTERPOLATION_MASK)) {
+            camera->SetVehicleTrackingStyle(CGCamera::VEHICLE_TRACKING_STYLE::TRACKING_IGNORE_FACING);
         } else {
-            camera->SetVehicleTrackingStyle(2);
+            camera->SetVehicleTrackingStyle(CGCamera::VEHICLE_TRACKING_STYLE::TRACKING_FOLLOW_FACING);
         }
     }
 
@@ -711,7 +726,7 @@ void CGUnit_C::CreateVehicleData(const CClientObjCreate* create, int32_t vehicle
 
     this->m_vehicle = CVehicle_C::Create(create, this, vehicleId);
 
-    if ((this->m_modelFlags & 0x40000) && this->IsActivePlayer()) {
+    if ((this->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_POST_INITED) && this->IsActivePlayer()) {
         this->SignalPlayerGainsVehicleDataEvent();
     }
 }
@@ -802,7 +817,11 @@ int32_t CGUnit_C::SwitchToVehicleSeat(CGUnit_C* vehicle, int32_t virtualSeat) {
 
     VehicleSeatRec* seatRec = target->GetVehicleSeatRec(seat);
 
-    if (!seatRec || const_cast<CVehicle_C*>(target)->FindPassengerUnit(seat) || !(seatRec->m_flags & 0x4000000) || !CGInputControl::GetActive() || !CGInputControl::GetActive()->IsVehicleSeatFlagSet(0x4000000)) {
+    if (!seatRec
+        || const_cast<CVehicle_C*>(target)->FindPassengerUnit(seat)
+        || !(seatRec->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_CAN_SWITCH)
+        || !CGInputControl::GetActive()
+        || !CGInputControl::GetActive()->IsVehicleSeatFlagSet(VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_CAN_SWITCH)) {
         return 0;
     }
 
@@ -837,7 +856,7 @@ int32_t CGUnit_C::SwitchToVehicleSeat(CGUnit_C* vehicle, int32_t virtualSeat) {
 void CGUnit_C::CheckVehicleExitOnCast() {
     VehicleSeatRec* seat = this->m_vehiclePassenger ? this->m_vehiclePassenger->m_seatRec : nullptr;
 
-    if (!seat || !(seat->m_flagsB & 0x100000)) {
+    if (!seat || !(seat->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_EXIT_ON_CAST)) {
         return;
     }
 

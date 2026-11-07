@@ -1,4 +1,5 @@
 #include "RaidInfo.h"
+#include "WoW/Source/Ui/LFGInfo.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
 #include <cstdint>
 #include "Engine/Source/FrameScript/FrameScript.h"
@@ -151,7 +152,7 @@ static int32_t Script_ConfirmReadyCheck(lua_State* L) {
 static int32_t Script_IsRaidOfficer(lua_State* L) {
     CGRaidMember* member = CGRaidInfo::FindMemberByGuid(ClntObjMgrGetActivePlayer());
 
-    if (member && member->m_rank > 0) {
+    if (member && member->m_rank > CGRaidMember::RANK::MEMBER) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -205,7 +206,7 @@ static int32_t Script_GetReadyCheckStatus(lua_State* L) {
 
     CGRaidMember* self = CGRaidInfo::FindMemberByGuid(ClntObjMgrGetActivePlayer());
 
-    if (!self || self->m_rank <= 0) {
+    if (!self || self->m_rank <= CGRaidMember::RANK::MEMBER) {
         lua_pushstring(L, status);
         return 1;
     }
@@ -349,9 +350,9 @@ static int32_t Script_GetRaidRosterInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (member->m_assignments & 2) {
+    if (member->m_assignments & CGPartyInfo::ASSIGNMENT_FLAGS::MAIN_TANK) {
         lua_pushstring(L, "MAINTANK");
-    } else if (member->m_assignments & 4) {
+    } else if (member->m_assignments & CGPartyInfo::ASSIGNMENT_FLAGS::MAIN_ASSIST) {
         lua_pushstring(L, "MAINASSIST");
     } else {
         lua_pushnil(L);
@@ -363,19 +364,19 @@ static int32_t Script_GetRaidRosterInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (member->m_groupRole & 2) {
+    if (member->m_groupRole & ROLE_FLAGS::TANK) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (member->m_groupRole & 4) {
+    if (member->m_groupRole & ROLE_FLAGS::HEALER) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (member->m_groupRole & 8) {
+    if (member->m_groupRole & ROLE_FLAGS::DAMAGER) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -392,7 +393,7 @@ static int32_t Script_SetRaidSubgroup(lua_State* L) {
         return 0;
     }
 
-    if (!CGGameUI::CanPerformAction(11)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_RAID_SUBGROUP)) {
         return 0;
     }
 
@@ -434,7 +435,7 @@ static int32_t Script_SwapRaidSubgroup(lua_State* L) {
         return 0;
     }
 
-    if (!CGGameUI::CanPerformAction(11)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_RAID_SUBGROUP)) {
         return 0;
     }
 

@@ -60,8 +60,8 @@ void CChunkLiquid::UpdateResourcePurging() {
 // OFFSET: 0x007CDE80
 void CChunkLiquid::GetAaBox(CAaBox& box) const {
     box = this->m_owner->m_bbox;
-    box.b.z = this->m_height.x;
-    box.t.z = this->m_height.y;
+    box.b.z = this->m_height.m_l;
+    box.t.z = this->m_height.m_h;
 }
 
 // VERIFY: ab9c5bab auto
@@ -128,7 +128,7 @@ bool CChunkLiquid::GetTileInfo(const C2iVector& tile, int32_t* type, int32_t* fl
         return false;
     }
 
-    const uint8_t* entry = &this->m_tiles[tile.x + 8 * tile.y];
+    const uint8_t* entry = &reinterpret_cast<const uint8_t*>(this->m_tiles)[tile.x + LIQUID_TILES_PER_CHUNK_AXIS * tile.y];
     *type = *entry & 0xF;
     *flag6 = (*entry >> 6) & 1;
     *flag7 = *entry >> 7;
@@ -272,9 +272,9 @@ void CChunkLiquid::BuildVertices(const C44Matrix* transform, uint32_t stride, C3
 CAaSphere* CChunkLiquid::GetSphere() {
     if (this->m_sphere.r < 0.0f) {
         CAaBox& bbox = this->m_owner->m_bbox;
-        float top = this->m_height.y;
+        float top = this->m_height.m_h;
 
-        this->m_sphere.c = C3Vector((bbox.b.x + bbox.t.x) * 0.5f, (bbox.b.y + bbox.t.y) * 0.5f, 0.5f * (this->m_height.x + top));
+        this->m_sphere.c = C3Vector((bbox.b.x + bbox.t.x) * 0.5f, (bbox.b.y + bbox.t.y) * 0.5f, 0.5f * (this->m_height.m_l + top));
 
         float dy = bbox.t.y - this->m_sphere.c.y;
         float dx = bbox.t.x - this->m_sphere.c.x;
@@ -429,12 +429,12 @@ void CChunkLiquid::Batch() {
 
     if (CMap::enableChunkBatching) {
         CMapArea* area = static_cast<CMapArea*>(this->m_owner->m_parentLinkList.Head()->m_ref);
-        CMapChunk** row = &area->m_mapChunks[16 * (this->m_owner->m_aIndex.y & ~1) + (this->m_owner->m_aIndex.x & ~1)];
+        CMapChunk** row = &area->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * (this->m_owner->m_aIndex.y & ~(MAP_CHUNKS_PER_BATCH_AXIS - 1)) + (this->m_owner->m_aIndex.x & ~(MAP_CHUNKS_PER_BATCH_AXIS - 1))];
 
-        for (int32_t y = 0; y < 2; y++) {
+        for (int32_t y = 0; y < MAP_CHUNKS_PER_BATCH_AXIS; y++) {
             CMapChunk** slot = row;
 
-            for (int32_t x = 0; x < 2; x++) {
+            for (int32_t x = 0; x < MAP_CHUNKS_PER_BATCH_AXIS; x++) {
                 CMapChunk* chunk = *slot;
 
                 for (CChunkLiquid* liquid = chunk->m_liquidChunkLinkList.Head(); liquid; liquid = chunk->m_liquidChunkLinkList.Next(liquid)) {
@@ -446,7 +446,7 @@ void CChunkLiquid::Batch() {
                 slot++;
             }
 
-            row += 16;
+            row += MAP_CHUNKS_PER_AREA_AXIS;
         }
     } else {
         CChunkLiquid* self = this;
@@ -466,7 +466,7 @@ void CChunkLiquid::Batch() {
         maxXY.x = maxXY.x + liquid->m_tileEnd.y * SMOLTILE_SIZE;
         maxXY.y = maxXY.y + SMOLTILE_SIZE * liquid->m_tileEnd.x;
 
-        CAaBox box(C3Vector(minXY.x, minXY.y, liquid->m_height.x), C3Vector(maxXY.x, maxXY.y, liquid->m_height.y));
+        CAaBox box(C3Vector(minXY.x, minXY.y, liquid->m_height.m_l), C3Vector(maxXY.x, maxXY.y, liquid->m_height.m_h));
 
         if (i) {
             bounds.t.z = bounds.t.z > box.t.z ? bounds.t.z : box.t.z;
@@ -705,7 +705,7 @@ bool CChunkLiquid::GetTris(World::TriData* triData, const CAaBox& box, const CiR
     start.x = clip.minX;
     start.y = clip.minY;
     const C3Vector* vert = &this->m_verts[(clip.minY - this->m_tileBegin.x) * stride - this->m_tileBegin.y + clip.minX];
-    uint8_t codes[81];
+    uint8_t codes[LIQUID_VERTEX_COUNT_PER_CHUNK];
     uint8_t* code = codes;
 
     for (int32_t y = 0; y < size.y + 1; y++) {
@@ -740,7 +740,7 @@ bool CChunkLiquid::GetTris(World::TriData* triData, const CFrustum& frustum, con
     start.x = clip.minX;
     start.y = clip.minY;
     const C3Vector* vert = &this->m_verts[(clip.minY - this->m_tileBegin.x) * stride - this->m_tileBegin.y + clip.minX];
-    uint8_t codes[81];
+    uint8_t codes[LIQUID_VERTEX_COUNT_PER_CHUNK];
     uint8_t* code = codes;
 
     for (int32_t y = 0; y < size.y + 1; y++) {

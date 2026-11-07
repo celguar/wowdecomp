@@ -1,3 +1,4 @@
+#include "Engine/Source/Tempest/CMath.h"
 #include "DetailDoodad.h"
 #include <cmath>
 #include "Engine/Source/Base/Handle.h"
@@ -201,7 +202,7 @@ void CDetailDoodadInstBatch::FillIndices() {
     for (uint32_t i = 0; i < this->m_adds.Count(); i++) {
         CM2Model* model = CDetailDoodad::s_doodadList[this->m_adds[i].m_doodadId]->m_model;
 
-        if (!(model->m_fFlags & 1)) {
+        if (!(model->m_runtimeFlags & 1)) {
             model->WaitForLoad(nullptr);
         }
 
@@ -321,7 +322,7 @@ void CDetailDoodadData::ModelLoadedCallback(CM2Model* model, void* arg) {
     CDetailDoodadData* data = static_cast<CDetailDoodadData*>(arg);
     CM2Model* doodadModel = data->m_model;
 
-    if (!(doodadModel->m_fFlags & 1)) {
+    if (!(doodadModel->m_runtimeFlags & 1)) {
         doodadModel->WaitForLoad(nullptr);
     }
 
@@ -351,14 +352,14 @@ void CDetailDoodadInstBatch::FillVertices() {
         CDetailDoodadData* data = CDetailDoodad::s_doodadList[add.m_doodadId];
         CM2Model* model = data->m_model;
 
-        if (!(model->m_fFlags & 1)) {
+        if (!(model->m_runtimeFlags & 1)) {
             model->WaitForLoad(nullptr);
         }
 
         M2Data* m2Data = model->m_shared->m_data;
         model = data->m_model;
 
-        if (!(model->m_fFlags & 1)) {
+        if (!(model->m_runtimeFlags & 1)) {
             model->WaitForLoad(nullptr);
         }
 
@@ -617,7 +618,7 @@ int32_t CDetailDoodad::InitializeRenderState() {
     C44Matrix matrix;
     float dist = CWorld::detailDoodadDist;
     matrix.Scale(1.0f / (dist * 0.15f));
-    matrix.RotateAroundY(1.5707964f);
+    matrix.RotateAroundY(HALF_PI);
     matrix.Translate(C3Vector(0.0f, 0.0f, dist * -0.85f));
 
     CGxMatrixStack& stack = g_theGxDevicePtr->m_xforms[GxXform_Tex1];
@@ -662,7 +663,7 @@ void CDetailDoodadInst::AddDoodad(uint32_t id, const C3Vector& position, float r
     CDetailDoodadData* data = CDetailDoodad::s_doodadList[id];
     CM2Model* model = data->m_model;
 
-    if (!(model->m_fFlags & 1)) {
+    if (!(model->m_runtimeFlags & 1)) {
         model->WaitForLoad(nullptr);
     }
 

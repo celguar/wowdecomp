@@ -308,7 +308,7 @@ void CGReputationInfo::SetAtWar(int32_t faction, bool atWar) {
         return;
     }
 
-    if (!atWar && player && (player->m_unit->m_unitFieldFlags & 0x80000)) {
+    if (!atWar && player && (player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_IN_COMBAT)) {
         CGGameUI::DisplayError(ERR_NOT_IN_COMBAT);
         return;
     }
@@ -361,8 +361,8 @@ static bool FactionHasReputationForPlayer(const FactionRec* faction) {
         return false;
     }
 
-    uint8_t classId = player->m_unit->m_unitFieldBytes0[1];
-    uint8_t race = player->m_unit->m_unitFieldBytes0[0];
+    uint8_t classId = player->m_unit->m_classID;
+    uint8_t race = player->m_unit->m_raceID;
 
     for (uint32_t i = 0; i < 4; i++) {
         int32_t raceMask = faction->m_reputationRaceMask[i];
@@ -701,8 +701,8 @@ void CGReputationInfo::EnterWorld() {
     }
 
     CGReputationInfo::m_factions.InternalClear(0);
-    uint8_t race = player->m_unit->m_unitFieldBytes0[0];
-    uint8_t classId = player->m_unit->m_unitFieldBytes0[1];
+    uint8_t race = player->m_unit->m_raceID;
+    uint8_t classId = player->m_unit->m_classID;
     CGReputationInfo::m_collapsedHeaders = 0xFFFFFFFF;
     CGReputationInfo::m_numFactions = 0;
     CGReputationInfo::m_numShownFactions = 0;
@@ -985,12 +985,12 @@ int32_t Packet_SMSG_SET_FACTION_STANDING(void* param, NETMESSAGE msgId, uint32_t
         CEffect* effect = memory ? new (memory) CEffect() : nullptr;
         WOWGUID guid = player->m_obj->m_guid;
         effect->AddSpecialEffect(SPECIALEFFECT_REPUTATION, guid, CGObject_C::EffectOnceHandler);
-        effect->m_flags |= 0x20;
+        effect->m_flags |= CEffect::EFFECT_FLAGS::EFFECT_CALLBACK_LIFETIME;
         effect->Release();
     }
 
     if (player && static_cast<int32_t>(player->m_unit->m_unitFieldLevel) >= 10) {
-        CGTutorial::TriggerTutorial(15);
+        CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_REPUTATION);
     }
 
     FrameScript_SignalEvent(SCRIPT_EVENT_UPDATE_FACTION, nullptr);

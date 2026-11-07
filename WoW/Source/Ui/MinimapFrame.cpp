@@ -1,4 +1,5 @@
 #include "WoW/Source/WorldClient/WorldConstants.h"
+#include "WoW/Common/Types.h"
 #include "MinimapFrame.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Services/Texture.h"
@@ -206,19 +207,19 @@ static uint64_t s_hoverRaid;
 
 // STATIC: 0x00A11C50
 const TrackingTypeInfo CGMinimapFrame::s_trackingTypes[15] = {
-    { 1, 0x1000, "MINIMAP_TRACKING_REPAIR", "Repair", 0x0 },
-    { 1, 0x200, "MINIMAP_TRACKING_VENDOR_FOOD", "Food", 0x0 },
-    { 1, 0x400, "MINIMAP_TRACKING_VENDOR_POISON", "Poisons", 0x10 },
-    { 1, 0x100, "MINIMAP_TRACKING_VENDOR_AMMO", "Ammunition", 0x1A },
-    { 1, 0x800, "MINIMAP_TRACKING_VENDOR_REAGENT", "Reagents", 0x0 },
-    { 1, 0x10000, "MINIMAP_TRACKING_INNKEEPER", "Innkeeper", 0x0 },
-    { 1, 0x2000, "MINIMAP_TRACKING_FLIGHTMASTER", "FlightMaster", 0x0 },
-    { 1, 0x400000, "MINIMAP_TRACKING_STABLEMASTER", "StableMaster", 0x8 },
-    { 1, 0x100000, "MINIMAP_TRACKING_BATTLEMASTER", "BattleMaster", 0x0 },
-    { 1, 0x20, "MINIMAP_TRACKING_TRAINER_CLASS", "Class", 0x0 },
-    { 1, 0x40, "MINIMAP_TRACKING_TRAINER_PROFESSION", "Profession", 0x0 },
-    { 1, 0x200000, "MINIMAP_TRACKING_AUCTIONEER", "Auctioneer", 0x0 },
-    { 1, 0x20000, "MINIMAP_TRACKING_BANKER", "Banker", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_REPAIR, "MINIMAP_TRACKING_REPAIR", "Repair", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR_FOOD, "MINIMAP_TRACKING_VENDOR_FOOD", "Food", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR_POISON, "MINIMAP_TRACKING_VENDOR_POISON", "Poisons", 1u << CLASS_ROGUE },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR_AMMO, "MINIMAP_TRACKING_VENDOR_AMMO", "Ammunition", (1u << CLASS_WARRIOR) | (1u << CLASS_HUNTER) | (1u << CLASS_ROGUE) },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR_REAGENT, "MINIMAP_TRACKING_VENDOR_REAGENT", "Reagents", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_INNKEEPER, "MINIMAP_TRACKING_INNKEEPER", "Innkeeper", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_FLIGHT_MASTER, "MINIMAP_TRACKING_FLIGHTMASTER", "FlightMaster", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_STABLE_MASTER, "MINIMAP_TRACKING_STABLEMASTER", "StableMaster", 1u << CLASS_HUNTER },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_BATTLEMASTER, "MINIMAP_TRACKING_BATTLEMASTER", "BattleMaster", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_TRAINER_CLASS, "MINIMAP_TRACKING_TRAINER_CLASS", "Class", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_TRAINER_PROFESSION, "MINIMAP_TRACKING_TRAINER_PROFESSION", "Profession", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_AUCTIONEER, "MINIMAP_TRACKING_AUCTIONEER", "Auctioneer", 0x0 },
+    { 1, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_BANKER, "MINIMAP_TRACKING_BANKER", "Banker", 0x0 },
     { 2, 0x13, "MINIMAP_TRACKING_MAILBOX", "Mailbox", 0x0 },
     { 3, 0x0, "MINIMAP_TRACKING_TRIVIAL_QUESTS", "TrivialQuests", 0x0 },
 };
@@ -415,7 +416,7 @@ static float s_mapObjRotation = 90.0f;
 static C2Vector s_tileSize(1066.6666f, 1066.6666f);
 
 // STATIC: 0x00A41EF0
-static const int32_t s_tileOffsets[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+static const C2iVector s_tileOffsets[4] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
 
 // INLINED
 void CGMinimapFrame::operator delete(void* ptr) {
@@ -706,7 +707,7 @@ void CGMinimapFrame::InitializeGame() {
 int32_t CGMinimapFrame::CountAvailableTrackingTypes() {
     int32_t count = 0;
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
-    uint32_t classMask = player ? 1 << player->m_unit->m_unitFieldBytes0[1] : 0;
+    uint32_t classMask = player ? 1 << player->m_unit->m_classID : 0;
 
     for (uint32_t i = 0; i < sizeof(CGMinimapFrame::s_trackingTypes) / sizeof(CGMinimapFrame::s_trackingTypes[0]); i++) {
         uint32_t mask = CGMinimapFrame::s_trackingTypes[i].m_classMask;
@@ -724,7 +725,7 @@ int32_t CGMinimapFrame::CountAvailableTrackingTypes() {
 const TrackingTypeInfo* CGMinimapFrame::GetTrackingTypeByIndex(int32_t index) {
     int32_t count = 0;
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
-    uint32_t classMask = player ? 1 << player->m_unit->m_unitFieldBytes0[1] : 0;
+    uint32_t classMask = player ? 1 << player->m_unit->m_classID : 0;
 
     for (uint32_t i = 0; i < sizeof(CGMinimapFrame::s_trackingTypes) / sizeof(CGMinimapFrame::s_trackingTypes[0]); i++) {
         uint32_t mask = CGMinimapFrame::s_trackingTypes[i].m_classMask;
@@ -1278,19 +1279,19 @@ static void SetupTextureHandles(const int32_t* tile, int32_t reset, MINIMAPTILE*
 
     if (!reset) {
         for (uint32_t i = 0; i < 4; i++) {
-            int32_t x = tile[0] + s_tileOffsets[i][0];
-            int32_t y = tile[1] + s_tileOffsets[i][1];
+            int32_t x = tile[0] + s_tileOffsets[i].x;
+            int32_t y = tile[1] + s_tileOffsets[i].y;
 
             for (uint32_t j = 0; j < 4; j++) {
-                if (tiles[j].m_x == x && tiles[j].m_y == y) {
+                if (tiles[j].m_tileCoords.x == x && tiles[j].m_tileCoords.y == y) {
                     if (j != i) {
                         if (tiles[i].m_texture) {
                             HandleClose(reinterpret_cast<HOBJECT>(tiles[i].m_texture));
                         }
 
                         tiles[i].m_texture = tiles[j].m_texture;
-                        tiles[i].m_x = x;
-                        tiles[i].m_y = y;
+                        tiles[i].m_tileCoords.x = x;
+                        tiles[i].m_tileCoords.y = y;
                         tiles[j].m_texture = nullptr;
                     }
 
@@ -1306,8 +1307,8 @@ static void SetupTextureHandles(const int32_t* tile, int32_t reset, MINIMAPTILE*
         }
 
         int32_t source[2];
-        source[0] = tile[0] + s_tileOffsets[i][0];
-        source[1] = tile[1] + s_tileOffsets[i][1];
+        source[0] = tile[0] + s_tileOffsets[i].x;
+        source[1] = tile[1] + s_tileOffsets[i].y;
         char path[260];
         MinimapBuildSource(source, path, sizeof(path));
 
@@ -1321,8 +1322,8 @@ static void SetupTextureHandles(const int32_t* tile, int32_t reset, MINIMAPTILE*
             CTexture* texture = TextureCreate(path, CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
             tiles[i].m_flags |= 2;
             tiles[i].m_texture = texture;
-            tiles[i].m_x = source[0];
-            tiles[i].m_y = source[1];
+            tiles[i].m_tileCoords.x = source[0];
+            tiles[i].m_tileCoords.y = source[1];
         } else {
             SysMsgPrintf(SYSMSG_ERROR, 4, "MINIMAPCHUNKNOTFOUND|%d|%d", source[0], source[1]);
         }
@@ -1443,7 +1444,7 @@ static MINIMAPTILE* MinimapFindTile(MINIMAPTILE* tiles, const MINIMAPQUADINFO* q
     for (uint32_t i = 0; i < 256; i++) {
         MINIMAPTILE* tile = &tiles[i];
 
-        if (tile->m_groupId == quad->m_groupId && tile->m_x == quad->m_x && tile->m_y == quad->m_y) {
+        if (tile->m_groupId == quad->m_groupId && tile->m_tileCoords.x == quad->m_quad.x && tile->m_tileCoords.y == quad->m_quad.y) {
             if (tile->m_groupId == currentGroup) {
                 tile->m_flags |= 2;
                 tile->m_depth = 3.4028235e38f;
@@ -1475,7 +1476,7 @@ static void SetupQuad(MINIMAPTILE* tiles, const MINIMAPQUADINFO* quad, int32_t c
 
     tiles->m_flags |= 2;
     char path[260];
-    SStrPrintf(path, sizeof(path), s_minimapQuadFormat, mapObjName, quad->m_groupId, quad->m_x, quad->m_y);
+    SStrPrintf(path, sizeof(path), s_minimapQuadFormat, mapObjName, quad->m_groupId, quad->m_quad.x, quad->m_quad.y);
     MINIMAPMD5NAME* name = s_md5Names.Ptr(path);
 
     if (name) {
@@ -1499,8 +1500,8 @@ static void SetupQuad(MINIMAPTILE* tiles, const MINIMAPQUADINFO* quad, int32_t c
         tiles->m_texture = nullptr;
     }
 
-    tiles->m_x = quad->m_x;
-    tiles->m_y = quad->m_y;
+    tiles->m_tileCoords.x = quad->m_quad.x;
+    tiles->m_tileCoords.y = quad->m_quad.y;
     tiles->m_bounds = quad->m_bounds;
     tiles->m_groupId = quad->m_groupId;
 
@@ -1746,7 +1747,7 @@ done:
 // VERIFY: 49439d70 manual
 // OFFSET: 0x00581E80
 void CGMinimapFrame::Render() {
-    if (!s_maskTexture || !(this->m_layoutFlags & 0x100) || !s_inWorld) {
+    if (!s_maskTexture || !(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID) || !s_inWorld) {
         return;
     }
 
@@ -2066,7 +2067,7 @@ void CGMinimapFrame::Render() {
             WOWGUID playerGuid = param.m_player->m_obj->m_guid;
             CGUnitData* unitData = vehicle->m_unit;
 
-            if (unitData->m_unitFieldFlags & 0x1000000) {
+            if (unitData->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) {
                 const WOWGUID& controller = unitData->m_unitFieldCharmedby ? unitData->m_unitFieldCharmedby : unitData->m_unitFieldCreatedby;
 
                 if (playerGuid == controller) {
@@ -2085,11 +2086,11 @@ void CGMinimapFrame::Render() {
 
             switch (vehicleRec->m_uiLocomotionType) {
                 case 0:
-                    list = (vehicle->m_unit->m_unitFieldFlags & 0x1000000) ? &s_objInfo[MINIMAP_VEHICLE_GROUND_OCCUPIED] : &s_objInfo[MINIMAP_VEHICLE_GROUND_UNOCCUPIED];
+                    list = (vehicle->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) ? &s_objInfo[MINIMAP_VEHICLE_GROUND_OCCUPIED] : &s_objInfo[MINIMAP_VEHICLE_GROUND_UNOCCUPIED];
                     break;
 
                 case 1:
-                    list = (vehicle->m_unit->m_unitFieldFlags & 0x1000000) ? &s_objInfo[MINIMAP_VEHICLE_AIR_OCCUPIED] : &s_objInfo[MINIMAP_VEHICLE_AIR_UNOCCUPIED];
+                    list = (vehicle->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) ? &s_objInfo[MINIMAP_VEHICLE_AIR_OCCUPIED] : &s_objInfo[MINIMAP_VEHICLE_AIR_UNOCCUPIED];
                     break;
 
                 case 3:
@@ -2316,7 +2317,7 @@ int32_t CGMinimapFrame::ObjectEnumProc(WOWGUID guid, void* param) {
             }
 
             if (unit->IsTracked() && player->CanInteract(unit)) {
-                if (CGMinimapFrame::s_trackingInfo->m_npcFlags & 0x40) {
+                if (CGMinimapFrame::s_trackingInfo->m_npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_TRAINER_PROFESSION) {
                     tracked = 1;
                 }
 
@@ -2407,7 +2408,7 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
                 bool shown = vehicleRec && (vehicleRec->m_flags & 0x10000000);
                 CGUnitData* unitData = vehicle->m_unit;
 
-                if (unitData->m_unitFieldFlags & 0x1000000) {
+                if (unitData->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) {
                     const WOWGUID& controller = unitData->m_unitFieldCharmedby ? unitData->m_unitFieldCharmedby : unitData->m_unitFieldCreatedby;
 
                     if (guid == controller && shown) {
@@ -2422,7 +2423,7 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
         dx = dx - unit->GetPosition().x;
         dy = dy - unit->GetPosition().y;
         position = unit->GetPosition();
-        member->m_class = unit->m_unit->m_unitFieldBytes0[1];
+        member->m_class = unit->m_unit->m_classID;
     } else {
         if (guid == player->m_obj->m_guid) {
             member->m_offMap = 0;
@@ -2677,8 +2678,8 @@ void CGMinimapFrame::LeaveWorld() {
         }
 
         s_tiles[i].m_flags = 0;
-        s_tiles[i].m_x = -1;
-        s_tiles[i].m_y = -1;
+        s_tiles[i].m_tileCoords.x = -1;
+        s_tiles[i].m_tileCoords.y = -1;
     }
 
     if (s_indoor.m_texture) {

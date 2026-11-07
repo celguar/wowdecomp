@@ -3,6 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "WoW/Source/Magic/MagicClient/SpellEnums.h"
+#include "WoW/Source/Game/GameClient/tables.h"
 #include "WoW/Source/Object/Types.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C3Vector.h"
@@ -48,15 +50,15 @@ class PendingSpellCast : public TSLinkedNode<PendingSpellCast> {
 struct SPELLHISTORY : public TSLinkedNode<SPELLHISTORY> {
     /* 0008 */ int32_t m_spellId;
     /* 000C */ int32_t m_itemId;
-    /* 0010 */ uint32_t m_time;
-    /* 0014 */ uint32_t m_recoveryTime;
+    /* 0010 */ uint32_t m_recoveryStart; // Spell cooldown start timestamp, in milliseconds.
+    /* 0014 */ uint32_t m_recoveryTime; // Spell cooldown duration, in milliseconds.
     /* 0018 */ int32_t m_category;
-    /* 001C */ uint32_t m_categoryTime;
-    /* 0020 */ uint32_t m_categoryRecoveryTime;
+    /* 001C */ uint32_t m_categoryRecoveryStart; // Category cooldown start timestamp, in milliseconds.
+    /* 0020 */ uint32_t m_categoryRecoveryTime; // Category cooldown duration, in milliseconds.
     /* 0024 */ uint8_t m_onHold;
     /* 0025 */ uint8_t unused_0025[3];
     /* 0028 */ int32_t m_startRecoveryCategory;
-    /* 002C */ uint32_t m_startRecoveryTime;
+    /* 002C */ uint32_t m_startRecoveryTime; // Start-recovery category duration in milliseconds; added to m_recoveryStart.
 };
 
 struct SpellCastTargetPoint {
@@ -190,7 +192,7 @@ bool Spell_C_CanTargetObject(const CGGameObject_C* object);
 bool Spell_C_IsTargeting();
 bool Spell_C_RangeCheckSelected(CGUnit_C* caster, const SpellRec* spell, WOWGUID target, uint8_t* inRange, bool report, PendingSpellCast* cast);
 extern PendingSpellCast* s_targetingSpell;
-extern uint32_t s_needTargets;
+extern uint32_t s_needTargets; // SPELL_TARGET_TYPE
 int32_t Spell_C_IsCursorWorldObjectHousing();
 void Spell_C_CursorWorldObjectRotate();
 void Spell_C_CancelPlayerSpells();
@@ -227,7 +229,7 @@ bool Spell_C_HaveSpellPower(CGUnit_C* unit, const SpellRec* spell);
 int32_t Spell_C_IsActionOnHold(const int32_t* spellId, int32_t index);
 int32_t Spell_C_NeedsCooldownEvent(int32_t itemId);
 bool Spell_C_IsUsableAction(CGUnit_C* unit, const SpellRec* spell, const WOWGUID& target, const ItemStats_C* item, bool ignoreControl);
-bool Spell_C_GetSpellModifiers(const SpellRec* spell, int32_t modifier, int32_t& flat, int32_t& pct);
+bool Spell_C_GetSpellModifiers(const SpellRec* spell, SPELL_MOD_OP modifier, int32_t& flat, int32_t& pct);
 bool Spell_C_CancelsAuraEffect(const CGUnit_C* unit, const SpellRec* spell, int32_t auraType, int32_t* reason);
 bool Spell_C_CancelsStun(const CGUnit_C* unit, const SpellRec* spell, int32_t* reason);
 bool Spell_C_CancelsSilence(const CGUnit_C* unit, const SpellRec* spell, int32_t* reason);
@@ -237,7 +239,6 @@ bool Spell_C_CancelsConfuse(const CGUnit_C* unit, const SpellRec* spell, int32_t
 bool Spell_C_CancelsCharm(const CGUnit_C* unit, const SpellRec* spell, int32_t* reason);
 bool Spell_C_HaveSpellTokens(CGUnit_C* unit, const SpellRec* spell, bool report, PendingSpellCast* cast);
 bool Spell_C_HaveEquippedSpellItems(CGUnit_C* unit, const SpellRec* spell, bool checkAmmo, bool report, PendingSpellCast* cast);
-float GetGameTableValue(int32_t table, int32_t index, int32_t row);
 void ItemCheckCooldownCallback(int32_t id, const WOWGUID& guid, void* param, bool success);
 
 class QuestTextParser {
@@ -279,8 +280,8 @@ void CreateMissilesForTargets(const TSStackArray<WOWGUID>& targets, CGUnit_C* un
 void CreateMissilesForTargetPoints(const TSStackArray<SpellCastTargetPoint>& points, CGUnit_C* unit, const SpellRec* spell, const SpellVisualRec* visual, uint32_t ammoDisplayId, uint32_t ammoInventoryType, PendingSpellCastData* data, uint32_t delay);
 bool Spell_C_HasCooldownOnEvent(const SpellRec* spell, WOWGUID guid);
 void Spell_C_ModifyCategoryRecovery(int32_t& recovery, const SpellRec* spell, int32_t pet);
-bool Spell_C_ModifySpellValue(const SpellRec* spell, int32_t& value, int32_t modifier);
-bool Spell_C_ModifySpellValue(const SpellRec* spell, float& value, int32_t modifier);
+bool Spell_C_ModifySpellValue(const SpellRec* spell, int32_t& value, SPELL_MOD_OP modifier);
+bool Spell_C_ModifySpellValue(const SpellRec* spell, float& value, SPELL_MOD_OP modifier);
 uint32_t Spell_C_GetSpellLevel(const SpellRec* spell, int32_t isPet, int32_t isUnit);
 int32_t Spell_C_GetPowerCostPerSecond(const SpellRec* spell, const CGUnit_C* unit);
 void Spell_C_GetMinMaxPoints(const SpellRec* spell, uint32_t effectIndex, float* minPoints, float* maxPoints, int32_t spellLevel, int32_t isPet, int32_t isUnit, int32_t noModifiers);

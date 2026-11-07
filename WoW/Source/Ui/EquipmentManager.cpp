@@ -109,7 +109,7 @@ void CGEquipmentManager::CreateEquipmentSet(const char* name, const char* icon) 
 
     EQUIPMENT_SET* set = AllocSet(CGEquipmentManager::s_equipmentSetHeap);
     set->m_id = id;
-    EQUIPMENT_SET_NODE* node = CGEquipmentManager::s_equipmentSets.NewNode(2, 0, 8);
+    EQUIPMENT_SET_NODE* node = CGEquipmentManager::s_equipmentSets.NewNode(TSLIST_LINK_BEFORE, 0, SMEM_FLAG_ZEROMEMORY);
     node->m_set = set;
     CGEquipmentManager::SaveSet(set, name, icon);
     set->m_isNew = 1;
@@ -355,7 +355,7 @@ int32_t Packet_SMSG_EQUIPMENT_SET_LIST(void* param, NETMESSAGE msgId, uint32_t t
             set->m_items[slot] = item;
         }
 
-        EQUIPMENT_SET_NODE* node = CGEquipmentManager::s_equipmentSets.NewNode(2, 0, 0);
+        EQUIPMENT_SET_NODE* node = CGEquipmentManager::s_equipmentSets.NewNode(TSLIST_LINK_BEFORE, 0, 0);
         node->m_set = set;
     }
 
@@ -382,7 +382,7 @@ int32_t CGEquipmentManager::SetContainsLockedItems(const EQUIPMENT_SET* set) {
         if (set->m_items[i].m_guid > 1) {
             CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(set->m_items[i], TYPE_ITEM, __FILE__, __LINE__));
 
-            if (item && (item->m_itemFlags & 0x1) && !CGMerchantInfo::IsBuybackItem(set->m_items[i])) {
+            if (item && (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED) && !CGMerchantInfo::IsBuybackItem(set->m_items[i])) {
                 return 1;
             }
         }
@@ -411,7 +411,7 @@ int32_t CGEquipmentManager::SetUsesLockedSlots(const EQUIPMENT_SET* set) {
 
         CGItem_C* item = player->m_bag.GetItemPointer(slot);
 
-        if (item && (item->m_itemFlags & 0x1)) {
+        if (item && (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
             return 1;
         }
     }
@@ -537,7 +537,7 @@ bool CGEquipmentManager::UseEquipmentSet(const EQUIPMENT_SET* set) {
 
     WDataStore msg;
     msg.Put(static_cast<uint32_t>(CMSG_EQUIPMENT_SET_USE));
-    bool inCombat = (player->m_unit->m_unitFieldFlags & 0x80000) != 0;
+    bool inCombat = (player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_IN_COMBAT) != 0;
     bool combatWarned = false;
     bool missingWarned = false;
     char buffer[3000];
@@ -567,8 +567,8 @@ bool CGEquipmentManager::UseEquipmentSet(const EQUIPMENT_SET* set) {
                     bagSlot = 0;
                 } else if (static_cast<uint8_t>(bagSlot - 39) <= 27 && !CGBankInfo::m_banker) {
                     bagSlot = 0;
-                } else if (bagSlot != 0xFF) {
-                    bag = 0xFF;
+                } else if (bagSlot != INVENTORY_SLOT_INVALID) {
+                    bag = INVENTORY_BAG_PLAYER;
                     itemGuid.m_guid = guid.m_guid;
                 } else {
                     for (uint32_t i = 19; i <= 22; i++) {
@@ -577,7 +577,7 @@ bool CGEquipmentManager::UseEquipmentSet(const EQUIPMENT_SET* set) {
                         if (container) {
                             bagSlot = CGPlayer_C::FindItemSlot(container, item);
 
-                            if (bagSlot != 0xFF) {
+                            if (bagSlot != INVENTORY_SLOT_INVALID) {
                                 bag = static_cast<uint8_t>(i);
                                 itemGuid.m_guid = guid.m_guid;
                                 break;
@@ -592,7 +592,7 @@ bool CGEquipmentManager::UseEquipmentSet(const EQUIPMENT_SET* set) {
                             if (container) {
                                 bagSlot = CGPlayer_C::FindItemSlot(container, item);
 
-                                if (bagSlot != 0xFF) {
+                                if (bagSlot != INVENTORY_SLOT_INVALID) {
                                     bag = static_cast<uint8_t>(i);
                                     itemGuid.m_guid = guid.m_guid;
                                     break;

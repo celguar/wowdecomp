@@ -8,10 +8,12 @@
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C2Vector.h"
+#include "Engine/Source/Tempest/CRange.h"
 #include "Engine/Source/Tempest/C2iVector.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Tempest/CAaSphere.h"
+#include "WoW/Source/WorldClient/WorldConstants.h"
 
 class CMapChunk;
 
@@ -24,7 +26,10 @@ namespace Liquid {
 namespace World { class TriData; }
 class CiRect;
 class CFrustum;
+struct SLTiles;
 
+// Runtime terrain-liquid instance in 3.3.5. The 0.5.3 CChunkLiquid embedded
+// the legacy payload now described by SMLiquidChunk; its runtime layout differs.
 class CChunkLiquid {
     public:
     static Liquid::CWaveManager* s_waveManager;
@@ -35,19 +40,19 @@ class CChunkLiquid {
     /* 0008 */ int32_t m_vertexFormat;
     /* 000C */ C3Vector m_topLeftCoords;
     /* 0018 */ CAaSphere m_sphere;
-    /* 0028 */ C2Vector m_height;
+    /* 0028 */ CRange m_height{}; // Preserve the native constructor's zeroed endpoints.
     /* 0030 */ float m_resPurgeTimer;
     /* 0034 */ C2iVector m_tileBegin;
     /* 003C */ C2iVector m_tileEnd;
     /* 0044 */ Liquid::IVertexData* m_vertexData;
     /* 0048 */ CBitArray m_tileBits;
-    /* 0054 */ uint8_t* m_tiles;
+    /* 0054 */ SLTiles* m_tiles;
     /* 0058 */ Liquid::CInstance* m_instance;
     /* 005C */ CMapChunk* m_owner;
     /* 0060 */ TSLink<CChunkLiquid> m_link;
     /* 0068 */ TSLink<CChunkLiquid> m_updateLink;
     /* 0070 */ TSLink<CChunkLiquid> m_chunkLink;
-    /* 0078 */ C3Vector m_verts[81];
+    /* 0078 */ C3Vector m_verts[LIQUID_VERTEX_COUNT_PER_CHUNK];
 
     CChunkLiquid();
     ~CChunkLiquid();

@@ -203,7 +203,7 @@ static int32_t Script_GetContainerItemInfo(lua_State* L) {
     lua_pushstring(L, texture);
     lua_pushnumber(L, item->m_item->m_itemFieldStackCount);
 
-    if (item->m_itemFlags & 0x1) {
+    if (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -223,7 +223,7 @@ static int32_t Script_GetContainerItemInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (item->GetItemStaticFlags(0) & ITEM_FLAG_HAS_LOOT) {
+    if (item->GetItemStaticFlags(0) & ITEM_STATIC_FLAGS::ITEM_FLAG_HAS_LOOT) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -294,7 +294,7 @@ static int32_t Script_UseContainerItem(lua_State* L) {
     CGGameUI::ClearCursor(1, 1);
     CGItem_C* item = bag->GetItemPointer(slot);
 
-    if (!item || (item->m_itemFlags & 1)) {
+    if (!item || (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
         return 0;
     }
 
@@ -396,14 +396,14 @@ static int32_t Script_UseContainerItem(lua_State* L) {
     ItemStats_C* stats = g_itemDBCache.GetRecord(item->m_obj->m_entryID, none, nullptr, nullptr, false);
 
     if (item->GetInventoryType() && (!stats || !stats->m_startQuest)) {
-        if (CGGameUI::m_hasControl || (player->m_unit->m_unitFieldFlags & 0x100000)) {
+        if (CGGameUI::m_hasControl || (player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_ON_TAXI)) {
             player->AutoEquipItem(bag->m_guid, slot, 0);
         }
 
         return 0;
     }
 
-    if (stats && stats->m_class == 16) {
+    if (stats && stats->m_class == ITEM_CLASS::ITEM_CLASS_GLYPH) {
         FrameScript_SignalEvent(SCRIPT_EVENT_USE_GLYPH, nullptr);
     }
 
@@ -424,7 +424,7 @@ static int32_t Script_PickupContainerItem(lua_State* L) {
     int32_t slot;
     int32_t bank;
 
-    if (!player || (!CGGameUI::m_hasControl && !(player->m_unit->m_unitFieldFlags & 0x100000)) || !CGContainerInfo::GetLuaBagAndSlot(L, &bag, &slot, &bank)) {
+    if (!player || (!CGGameUI::m_hasControl && !(player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_ON_TAXI)) || !CGContainerInfo::GetLuaBagAndSlot(L, &bag, &slot, &bank)) {
         return 0;
     }
 
@@ -451,7 +451,7 @@ static int32_t Script_PickupContainerItem(lua_State* L) {
         if (CGGameUI::m_stackSplit) {
             player->SplitItem(cursorItem, cursorContainer, cursorSlot, bag->m_guid, slot, CGGameUI::m_stackSplit);
             CGGameUI::ClearCursor(0, 1);
-        } else if ((!itemGuid || cursorContainer) && (!item || !(item->m_itemFlags & 1))) {
+        } else if ((!itemGuid || cursorContainer) && (!item || !(item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED))) {
             CGGameUI::LockItem(itemGuid);
             player->SwapItems(cursorItem, cursorContainer, cursorSlot, bag->m_guid, slot, 0);
         }
@@ -567,7 +567,7 @@ static int32_t Script_PickupContainerItem(lua_State* L) {
         return 0;
     }
 
-    if (!(item->m_itemFlags & 1)) {
+    if (!(item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
         CGGameUI::SetCursorItem(itemGuid, bag->m_guid, slot, 1, 0, 1);
         CGGameUI::LockItem(itemGuid);
     }
@@ -597,7 +597,7 @@ static int32_t Script_ShowContainerSellCursor(lua_State* L) {
 
     CGItem_C* item = bag->GetItemPointer(slot);
 
-    if (!item || (item->m_itemFlags & 1)) {
+    if (!item || (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
         return 0;
     }
 
@@ -662,7 +662,7 @@ static int32_t Script_GetContainerItemQuestInfo(lua_State* L) {
         return 3;
     }
 
-    if (stats->m_bonding == 4) {
+    if (stats->m_bonding == ITEM_BINDING::ITEM_BINDING_QUEST) {
         lua_pushboolean(L, 1);
     } else {
         lua_pushnil(L);
@@ -726,7 +726,7 @@ static int32_t Script_GetContainerItemPurchaseInfo(lua_State* L) {
         return 0;
     }
 
-    int32_t timeLeft = data->m_refundTimeLeft - player->GetPlayedTime() + 7200;
+    int32_t timeLeft = data->m_purchasePlayedTime - player->GetPlayedTime() + CGItem_C::ItemPurchaseData::REFUND_PERIOD_SECONDS;
 
     if (timeLeft <= 0) {
         return 0;
@@ -734,7 +734,7 @@ static int32_t Script_GetContainerItemPurchaseInfo(lua_State* L) {
 
     int32_t itemCount = 0;
 
-    for (uint32_t i = 0; i < 5; i++) {
+    for (uint32_t i = 0; i < CGItem_C::ItemPurchaseData::NUM_REFUND_ITEMS; i++) {
         if (static_cast<int32_t>(data->m_itemCount[i]) > 0) {
             itemCount++;
         }
@@ -787,14 +787,14 @@ static int32_t Script_SplitContainerItem(lua_State* L) {
     int32_t slot;
     int32_t bank;
 
-    if (!player || (!CGGameUI::m_hasControl && !(player->m_unit->m_unitFieldFlags & 0x100000)) || !CGContainerInfo::GetLuaBagAndSlot(L, &bag, &slot, &bank)) {
+    if (!player || (!CGGameUI::m_hasControl && !(player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_ON_TAXI)) || !CGContainerInfo::GetLuaBagAndSlot(L, &bag, &slot, &bank)) {
         return 0;
     }
 
     CGItem_C* item = bag->GetItemPointer(slot);
     WOWGUID itemGuid = item ? item->m_obj->m_guid : WOWGUID();
 
-    if (!item || (item->m_itemFlags & 1)) {
+    if (!item || (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
         return 0;
     }
 
@@ -839,7 +839,7 @@ static int32_t Script_SocketContainerItem(lua_State* L) {
 
     CGItem_C* item = bag->GetItemPointer(slot);
 
-    if (!item || (item->m_itemFlags & 1) || !item->GetNumSockets()) {
+    if (!item || (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED) || !item->GetNumSockets()) {
         return 0;
     }
 
@@ -1050,7 +1050,7 @@ static int32_t Script_GetContainerItemPurchaseItem(lua_State* L) {
 
     CGItem_C::ItemPurchaseData* data = item->m_itemPurchaseData;
 
-    if (!data || item->HasEnchantments() || static_cast<int32_t>(data->m_refundTimeLeft + 7200 - player->GetPlayedTime()) <= 0) {
+    if (!data || item->HasEnchantments() || static_cast<int32_t>(data->m_purchasePlayedTime + CGItem_C::ItemPurchaseData::REFUND_PERIOD_SECONDS - player->GetPlayedTime()) <= 0) {
         return 0;
     }
 
@@ -1058,7 +1058,7 @@ static int32_t Script_GetContainerItemPurchaseItem(lua_State* L) {
     int32_t found = 0;
     uint32_t i;
 
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < CGItem_C::ItemPurchaseData::NUM_REFUND_ITEMS; i++) {
         if (static_cast<int32_t>(data->m_itemId[i]) <= 0) {
             continue;
         }
@@ -1070,7 +1070,7 @@ static int32_t Script_GetContainerItemPurchaseItem(lua_State* L) {
         found++;
     }
 
-    if (i >= 5) {
+    if (i >= CGItem_C::ItemPurchaseData::NUM_REFUND_ITEMS) {
         return 0;
     }
 
@@ -1158,7 +1158,7 @@ static int32_t Script_GetContainerItemGems(lua_State* L) {
 
         if (item) {
             for (int32_t i = 0; i < 3; i++) {
-                int32_t enchantId = (item->GetItemStaticFlags(0) & ITEM_FLAG_PETITION) ? 0 : item->m_item->m_itemFieldEnchantment[2 + i].m_id;
+                int32_t enchantId = (item->GetItemStaticFlags(0) & ITEM_STATIC_FLAGS::ITEM_FLAG_PETITION) ? 0 : item->m_item->m_itemFieldEnchantment[2 + i].m_id;
                 SpellItemEnchantmentRec* enchant = g_spellItemEnchantmentDB.GetRecord(enchantId);
 
                 if (enchant && enchant->m_srcItemID) {

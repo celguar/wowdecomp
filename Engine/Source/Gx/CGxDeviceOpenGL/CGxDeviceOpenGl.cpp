@@ -25,7 +25,7 @@ static const GLenum s_glBufferTarget[GxPoolTargets_Last] = { GL_ARRAY_BUFFER_ARB
 static const CGxDeviceOpenGl::EDeviceState s_bufferState[GxPoolTargets_Last] = { CGxDeviceOpenGl::Ds_ArrayBuffer, CGxDeviceOpenGl::Ds_ElementArrayBuffer };
 
 // STATIC: 0x00A2E010
-static const GLenum s_glBufferUsage[3] = { GL_STATIC_DRAW_ARB, GL_DYNAMIC_DRAW_ARB, GL_STREAM_DRAW_ARB };
+static const GLenum s_glBufferUsage[GxPoolUsages_Last] = { GL_STATIC_DRAW_ARB, GL_DYNAMIC_DRAW_ARB, GL_STREAM_DRAW_ARB };
 
 // STATIC: 0x00A2E05C
 static const GLenum s_glTexTarget[4] = { GL_TEXTURE_2D, GL_TEXTURE_CUBE_MAP_ARB, GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_2D };
@@ -77,13 +77,13 @@ static GlTexEnvOp s_texEnvOps[GxTexOps_Last] = {
 static GLfloat s_texEnvColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
 // STATIC: 0x00A2E01C
-static const GLint s_glAttribSize[7] = { 4, 4, 4, 2, 3, 2, 1 };
+static const GLint s_glAttribSize[GxVertexAttribTypes_Last] = { 4, 4, 4, 2, 3, 2, 1 };
 
 // STATIC: 0x00A2E038
-static const GLenum s_glAttribType[7] = { GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE, GL_FLOAT, GL_FLOAT, GL_SHORT, GL_FLOAT };
+static const GLenum s_glAttribType[GxVertexAttribTypes_Last] = { GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE, GL_FLOAT, GL_FLOAT, GL_SHORT, GL_FLOAT };
 
 // STATIC: 0x00A2E054
-static const GLboolean s_glAttribNormalized[7] = { GL_TRUE, GL_FALSE, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+static const GLboolean s_glAttribNormalized[GxVertexAttribTypes_Last] = { GL_TRUE, GL_FALSE, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
 
 // STATIC: 0x00AD8D90
 static GLenum s_glBlendSrc[12] = { GL_ONE, GL_ONE, GL_SRC_ALPHA, GL_SRC_ALPHA, GL_DST_COLOR, GL_DST_COLOR, GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE, GL_CONSTANT_ALPHA_EXT };
@@ -144,11 +144,11 @@ CGxDeviceOpenGl::CGxDeviceOpenGl() {
     this->m_ambientOnlyMode = 0;
     this->DsInit();
     this->unused_3AD0 = 0;
-    this->m_materialDirty = 7;
+    this->m_materialDirty = CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_ALL;
     this->m_sphereMapMode = GL_SPHERE_MAP;
 
     for (uint32_t target = 0; target < GxPoolTargets_Last; target++) {
-        for (uint32_t usage = 0; usage < 3; usage++) {
+        for (uint32_t usage = 0; usage < GxPoolUsages_Last; usage++) {
             this->m_useVbo[target][usage] = 1;
             this->m_useVboBroker[target][usage] = 0;
         }
@@ -533,50 +533,50 @@ void CGxDeviceOpenGl::DeviceOverride(EGxOverride override, uint32_t value) {
     CGxDevice::DeviceOverride(override, value);
 
     switch (override) {
-        case 0:
+        case GxOverride_PixelShader:
             this->m_caps.m_shaderTargets[GxSh_Pixel] = value;
             break;
 
-        case 1:
+        case GxOverride_VertexBufferObject:
             if (!value) {
                 glARBVertexBufferObject = 0;
             }
 
             break;
 
-        case 2:
+        case GxOverride_StreamVertexBufferObject:
             if (!value) {
                 this->m_useVbo[0][2] = 0;
             }
 
             break;
 
-        case 3:
+        case GxOverride_StreamIndexBufferObject:
             if (!value) {
                 this->m_useVbo[1][2] = 0;
             }
 
             break;
 
-        case 4:
+        case GxOverride_StreamVertexBufferBroker:
             if (value) {
                 this->m_useVboBroker[0][2] = 1;
             }
 
             break;
 
-        case 5:
+        case GxOverride_StreamIndexBufferBroker:
             if (value) {
                 this->m_useVboBroker[1][2] = 1;
             }
 
             break;
 
-        case 6:
+        case GxOverride_SphereMapReflection:
             this->m_sphereMapMode = value != 0 ? GL_REFLECTION_MAP_ARB : GL_SPHERE_MAP;
             break;
 
-        case 7:
+        case GxOverride_TexNonPow2:
             this->m_caps.m_texNonPow2 = value != 0;
             break;
 
@@ -962,7 +962,7 @@ bool CGxDeviceOpenGl::QueryGetParam(CGxQuery* query, EGxQueryParam param, uint32
 
     GLenum error = GL_INVALID_OPERATION;
 
-    if (param == 0) {
+    if (param == GxQueryParam_DataSize) {
         GLint bits;
         glGetQueryivARB(s_glQueryTarget[query->m_type], GL_QUERY_COUNTER_BITS_ARB, &bits);
         error = glGetError();
@@ -970,7 +970,7 @@ bool CGxDeviceOpenGl::QueryGetParam(CGxQuery* query, EGxQueryParam param, uint32
         if (!error) {
             data = bits / 8;
         }
-    } else if (param == 1) {
+    } else if (param == GxQueryParam_ResultAvailable) {
         GLuint available;
         glGetQueryObjectuivARB(static_cast<GLuint>(reinterpret_cast<uintptr_t>(query->m_apiSpecific)), GL_QUERY_RESULT_AVAILABLE_ARB, &available);
         error = glGetError();
@@ -3192,7 +3192,7 @@ void CGxDeviceOpenGl::IStateSyncLights() {
             this->m_ambientOnlyMode = 0;
         }
 
-        if (this->m_appMasterEnables & 0x1) {
+        if (this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_Lighting)) {
             glEnable(GL_LIGHTING);
         } else {
             glDisable(GL_LIGHTING);
@@ -3328,7 +3328,7 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
     int32_t colorMaterial = this->m_appRenderStates[GxRs_ColorMaterial].m_value.m_data.i[0];
 
     if (this->m_primVertexDirty & (1 << GxVA_Color0)) {
-        this->m_materialDirty |= 1 << colorMaterial;
+        this->m_materialDirty |= CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_DIFFUSE << colorMaterial;
     }
 
     if (!this->m_materialDirty) {
@@ -3337,7 +3337,7 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
 
     GLfloat color[4];
 
-    if (this->m_materialDirty & 0x1) {
+    if (this->m_materialDirty & CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_DIFFUSE) {
         ColorToFloats(color, reinterpret_cast<const CImVector&>(this->m_appRenderStates[GxRs_MatDiffuse].m_value.m_data.u[0]));
 
         if (colorMaterial) {
@@ -3348,7 +3348,7 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
         }
     }
 
-    if (this->m_materialDirty & 0x2) {
+    if (this->m_materialDirty & CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_SPECULAR) {
         ColorToFloats(color, reinterpret_cast<const CImVector&>(this->m_appRenderStates[GxRs_MatSpecular].m_value.m_data.u[0]));
 
         if (colorMaterial == 1) {
@@ -3360,13 +3360,13 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
         }
     }
 
-    if (this->m_materialDirty & 0x4) {
+    if (this->m_materialDirty & CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_EMISSIVE) {
         ColorToFloats(color, reinterpret_cast<const CImVector&>(this->m_appRenderStates[GxRs_MatEmissive].m_value.m_data.u[0]));
 
         if (colorMaterial == 2) {
             if (!(this->m_primVertexMask & (1 << GxVA_Color0))) {
                 glColor4fv(color);
-                this->m_materialDirty = 0;
+                this->m_materialDirty = CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_NONE;
                 return;
             }
         } else {
@@ -3374,7 +3374,7 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
         }
     }
 
-    this->m_materialDirty = 0;
+    this->m_materialDirty = CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_NONE;
 }
 
 // VERIFY: 3bd05b04 manual
@@ -3575,15 +3575,15 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
             break;
 
         case GxRs_MatDiffuse:
-            this->m_materialDirty |= 0x1;
+            this->m_materialDirty |= CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_DIFFUSE;
             break;
 
         case GxRs_MatEmissive:
-            this->m_materialDirty |= 0x4;
+            this->m_materialDirty |= CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_EMISSIVE;
             break;
 
         case GxRs_MatSpecular:
-            this->m_materialDirty |= 0x2;
+            this->m_materialDirty |= CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_SPECULAR;
             break;
 
         case GxRs_MatSpecularExp:
@@ -3638,7 +3638,7 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
         }
 
         case GxRs_Lighting:
-            if ((this->m_appMasterEnables & 0x1) && value.m_data.i[0]) {
+            if ((this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_Lighting)) && value.m_data.i[0]) {
                 glEnable(GL_LIGHTING);
             } else {
                 glDisable(GL_LIGHTING);
@@ -3647,7 +3647,7 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
             break;
 
         case GxRs_Fog:
-            if ((this->m_appMasterEnables & 0x2) && value.m_data.i[0]) {
+            if ((this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_Fog)) && value.m_data.i[0]) {
                 glEnable(GL_FOG);
             } else {
                 glDisable(GL_FOG);
@@ -3656,7 +3656,7 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
             break;
 
         case GxRs_DepthTest:
-            if ((this->m_appMasterEnables & 0x4) && value.m_data.i[0]) {
+            if ((this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_DepthTest)) && value.m_data.i[0]) {
                 glEnable(GL_DEPTH_TEST);
             } else {
                 glDisable(GL_DEPTH_TEST);
@@ -3669,15 +3669,15 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
             break;
 
         case GxRs_DepthWrite:
-            this->DsSet(Ds_DepthMask, (this->m_appMasterEnables & 0x8) ? value.m_data.u[0] : 0, 0);
+            this->DsSet(Ds_DepthMask, (this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_DepthWrite)) ? value.m_data.u[0] : 0, 0);
             break;
 
         case GxRs_ColorWrite:
-            this->DsSet(Ds_ColorMask, (this->m_appMasterEnables & 0x10) ? value.m_data.u[0] : 0, 0);
+            this->DsSet(Ds_ColorMask, (this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_ColorWrite)) ? value.m_data.u[0] : 0, 0);
             break;
 
         case GxRs_Culling: {
-            if (!(this->m_appMasterEnables & 0x20)) {
+            if (!(this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_Culling))) {
                 glDisable(GL_CULL_FACE);
                 break;
             }
@@ -3841,7 +3841,7 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
 
         case GxRs_ColorMaterial:
             glColorMaterial(GL_FRONT_AND_BACK, s_glColorMaterial[value.m_data.i[0]]);
-            this->m_materialDirty = 7;
+            this->m_materialDirty = CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_ALL;
             break;
 
         default:
@@ -3905,7 +3905,7 @@ void CGxDeviceOpenGl::ScenePresent() {
 
     this->ICursorDraw();
 
-    if (this->m_hwMasterEnables & 0x40) {
+    if (this->m_hwMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_DoubleBuffering)) {
         wglSwapLayerBuffers(this->m_hdc, WGL_SWAP_MAIN_PLANE);
     } else {
         glFinish();
@@ -3926,14 +3926,14 @@ void CGxDeviceOpenGl::IXformSetProjection(const C44Matrix& matrix) {
     }
 
     if (this->m_textureTarget[GxBuffers_Color].m_apiSpecific || this->m_textureTarget[GxBuffers_Depth].m_apiSpecific) {
-        if (!g_theGxDevicePtr->Caps().unk_00B0) {
+        if (!g_theGxDevicePtr->Caps().m_rttOriginUpperLeft) {
             projection.a1 = projection.a1 * -1.0f;
             projection.b1 = projection.b1 * -1.0f;
             projection.c1 = projection.c1 * -1.0f;
             projection.d1 = -1.0f * projection.d1;
             this->DsSet(Ds_CullFace, GL_FRONT, 0);
         }
-    } else if (!g_theGxDevicePtr->Caps().unk_00B0) {
+    } else if (!g_theGxDevicePtr->Caps().m_rttOriginUpperLeft) {
         this->DsSet(Ds_CullFace, GL_BACK, 0);
     }
 

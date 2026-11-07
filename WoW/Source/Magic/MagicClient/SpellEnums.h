@@ -3,6 +3,441 @@
 
 #include <cstdint>
 
+// Results of SpellRec::IsHelpfulOrHarmful; zero is an undetermined classification.
+enum SPELL_DISPOSITION : int32_t {
+    SPELL_DISPOSITION_UNDETERMINED = 0,
+    SPELL_DISPOSITION_HELPFUL = 1,
+    SPELL_DISPOSITION_HARMFUL = 2,
+};
+
+// Spell_C_HandleTerrainRay results consumed by the targeting-cursor preview.
+enum SPELL_TERRAIN_RAY_RESULT : int32_t {
+    SPELL_TERRAIN_RAY_VALID = 0,
+    SPELL_TERRAIN_RAY_INVALID = 1,
+    SPELL_TERRAIN_RAY_OUTSIDE_PREVIEW_RANGE = 2,
+};
+
+// Spell percentages use 100 as the unmodified value; float scaling stays single precision.
+constexpr int32_t SPELL_PERCENT_BASE = 100;
+constexpr float SPELL_PERCENT_TO_FRACTION = 0.01f;
+
+// Mask storage is independent of the three effect slots.
+constexpr int32_t SPELL_MASK_BITS_PER_WORD = 32;
+constexpr int32_t SPELL_MASK_WORD_BIT_MASK = 0x1F;
+constexpr int32_t SPELL_MASK_WORD_SHIFT = 5;
+constexpr int32_t NUM_SPELL_CLASS_MASK_WORDS = 3;
+constexpr int32_t NUM_SPELL_CLASS_MASK_BITS = NUM_SPELL_CLASS_MASK_WORDS * SPELL_MASK_BITS_PER_WORD;
+constexpr int32_t NUM_SPELL_SHAPESHIFT_MASK_WORDS = 2;
+constexpr int32_t NUM_SPELL_SHAPESHIFT_FORMS = NUM_SPELL_SHAPESHIFT_MASK_WORDS * SPELL_MASK_BITS_PER_WORD;
+
+// Special IDs referenced directly by native client behavior.
+// TrinityCore 3.3.5 Battleground.h identifies 2584 as Waiting to Resurrect.
+constexpr int32_t SPELL_ID_WAITING_TO_RESURRECT = 2584;
+
+// Native reagent sentinel: skipped by use counting and reagent failure text.
+// Its underlying data meaning has not been established; it is not called unused.
+enum SPELL_REAGENT_SENTINEL : int32_t {
+    SPELL_REAGENT_UNKNOWN_MINUS_2 = -2,
+};
+
+// Invisibility-detection subtype accepted alongside zero by the native vision gate.
+// Its data label is unresolved; retain the numeric identity rather than guessing a type.
+enum SPELL_INVISIBILITY_DETECT_SUBTYPE : int32_t {
+    SPELL_INVISIBILITY_DETECT_SUBTYPE_UNKNOWN_10 = 10,
+};
+
+// Number of effect slots in a 3.3.5 SpellRec, independent of class-mask words.
+constexpr int32_t NUM_SPELL_EFFECTS = 3;
+constexpr int32_t NUM_SPELL_REAGENTS = 8;
+
+// CGUnit_C::GetSpellRank (0x0071AA70) represents each level as five rank points.
+constexpr int32_t SPELL_RANK_POINTS_PER_LEVEL = 5;
+constexpr int32_t SPELL_RANGED_CAST_TIME_EXTRA_MS = 500;
+
+enum SPELL_FACING_FLAGS : int32_t {
+    SPELL_FACING_FLAG_IN_FRONT = 0x1,
+};
+
+// Client-to-server CMSG_CAST_SPELL / CMSG_USE_ITEM / CMSG_PET_CAST_SPELL flag byte.
+// This domain is separate from incoming spell-start/go packet flags.
+enum SPELL_CLIENT_CAST_FLAGS : int32_t {
+    SPELL_CLIENT_CAST_FLAG_TRAJECTORY = 0x2,
+};
+
+// SMSG_SPELL_COOLDOWN payload flags, interpreted by Packet_SMSG_SPELL_COOLDOWN.
+enum SPELL_COOLDOWN_FLAGS : uint8_t {
+    SPELL_COOLDOWN_FLAG_INCLUDE_START_RECOVERY = 0x1,
+    SPELL_COOLDOWN_FLAG_IGNORE_COOLDOWN_ON_EVENT = 0x2,
+};
+
+// SpellRec::m_startRecoveryCategory (SpellCategory.dbc ID; other categories exist).
+enum SPELL_RECOVERY_CATEGORY : int32_t
+{
+    SPELL_RECOVERY_CATEGORY_GLOBAL = 133,
+};
+
+// Standard spell GCD: 1500 ms before haste, clamped to 1000..1500 ms.
+// These bounds do not describe every spell's DBC recovery time.
+constexpr int32_t SPELL_GLOBAL_COOLDOWN_DEFAULT_MS = 1500;
+constexpr int32_t SPELL_GLOBAL_COOLDOWN_MIN_MS = 1000;
+
+// SpellRec::m_defenseType
+enum SPELL_DAMAGE_CLASS : int32_t
+{
+    SPELL_DAMAGE_CLASS_NONE   = 0,
+    SPELL_DAMAGE_CLASS_MAGIC  = 1,
+    SPELL_DAMAGE_CLASS_MELEE  = 2,
+    SPELL_DAMAGE_CLASS_RANGED = 3,
+};
+
+// Spell modifier operation IDs. Server-side names follow TrinityCore 3.3.5;
+// they are reference names, not recovered original client enum symbols.
+// Operations 13 and 25 have no producers in the reviewed build 12340 Spell.dbc;
+// this does not prove they are unused. Operation 26's precise rate/chance meaning
+// remains uncertain. Operation 29 has a test-spell producer despite its UNUSED name.
+// Keep these existing names and values as references; their spelling alone is
+// not proof of the corresponding 3.3.5 server behavior.
+// https://github.com/TrinityCore/TrinityCore/blob/3.3.5/src/server/game/Spells/SpellDefines.h
+enum SPELL_MOD_OP : int32_t
+{
+    SPELLMOD_DAMAGE                    = 0,
+    SPELLMOD_DURATION                  = 1,
+    SPELLMOD_THREAT                    = 2,
+    SPELLMOD_EFFECT1                   = 3,
+    SPELLMOD_CHARGES                   = 4,
+    SPELLMOD_RANGE                     = 5,
+    SPELLMOD_RADIUS                    = 6,
+    SPELLMOD_CRITICAL_CHANCE           = 7,
+    SPELLMOD_ALL_EFFECTS               = 8,
+    SPELLMOD_NOT_LOSE_CASTING_TIME     = 9,
+    SPELLMOD_CASTING_TIME              = 10,
+    SPELLMOD_COOLDOWN                  = 11,
+    SPELLMOD_EFFECT2                   = 12,
+    SPELLMOD_IGNORE_ARMOR              = 13,
+    SPELLMOD_COST                      = 14,
+    SPELLMOD_CRIT_DAMAGE_BONUS         = 15,
+    SPELLMOD_RESIST_MISS_CHANCE        = 16,
+    SPELLMOD_JUMP_TARGETS              = 17,
+    SPELLMOD_CHANCE_OF_SUCCESS         = 18,
+    SPELLMOD_ACTIVATION_TIME           = 19, // Period between periodic effects, in ms.
+    SPELLMOD_DAMAGE_MULTIPLIER         = 20,
+    SPELLMOD_GLOBAL_COOLDOWN           = 21,
+    SPELLMOD_DOT                       = 22,
+    SPELLMOD_EFFECT3                   = 23,
+    SPELLMOD_BONUS_MULTIPLIER          = 24,
+    SPELLMOD_UNUSED_25                 = 25,
+    SPELLMOD_PROC_PER_MINUTE           = 26,
+    SPELLMOD_VALUE_MULTIPLIER          = 27,
+    SPELLMOD_RESIST_DISPEL_CHANCE      = 28,
+    SPELLMOD_UNUSED_CRIT_DAMAGE_BONUS_2 = 29,
+    SPELLMOD_SPELL_COST_REFUND_ON_FAIL = 30,
+    NUM_SPELL_MOD_OPS                  = 31,
+};
+
+// SpellRec attribute masks, in DBC field order (attributes, Ex, ExB through ExG).
+// Names prefer matching 3.3.5 meanings from:
+// https://wowdev.wiki/EnumeratedString#SpellMisc::Attributes
+// Wrath-specific meanings and masks are retained from:
+// https://github.com/stoneharry/WoW-Spell-Editor/blob/24ae925c3293bffa2c853f8d9cca183f3202809c/Documentation/Languages/enUS.xaml#L282
+// https://github.com/TrinityCore/TrinityCore/blob/3.3.5/src/server/shared/SharedDefines.h#L418
+// TrinityCore supplies explicit bit positions; the editor omits Attribute 3 bit 25.
+
+// SpellRec::m_attributes
+enum SPELL_ATTR0 : int32_t
+{
+    SPELL_ATTR0_PROC_FAILURE_BURNS_CHARGE                          = 0x00000001u,
+    SPELL_ATTR0_USES_RANGED_SLOT                                   = 0x00000002u,
+    SPELL_ATTR0_ON_NEXT_SWING_NO_DAMAGE                            = 0x00000004u,
+    SPELL_ATTR0_DO_NOT_LOG_IMMUNE_MISSES                           = 0x00000008u,
+    SPELL_ATTR0_IS_ABILITY                                         = 0x00000010u,
+    SPELL_ATTR0_IS_TRADESKILL                                      = 0x00000020u,
+    SPELL_ATTR0_PASSIVE                                            = 0x00000040u,
+    SPELL_ATTR0_DO_NOT_DISPLAY_SPELLBOOK_AURA_ICON_COMBAT_LOG      = 0x00000080u,
+    SPELL_ATTR0_DO_NOT_LOG                                         = 0x00000100u,
+    SPELL_ATTR0_HELD_ITEM_ONLY                                     = 0x00000200u,
+    SPELL_ATTR0_ON_NEXT_SWING                                      = 0x00000400u,
+    SPELL_ATTR0_WEARER_CASTS_PROC_TRIGGER                          = 0x00000800u,
+    SPELL_ATTR0_DAYTIME_ONLY                                       = 0x00001000u,
+    SPELL_ATTR0_NIGHT_ONLY                                         = 0x00002000u,
+    SPELL_ATTR0_ONLY_INDOORS                                       = 0x00004000u,
+    SPELL_ATTR0_ONLY_OUTDOORS                                      = 0x00008000u,
+    SPELL_ATTR0_NOT_SHAPESHIFTED                                   = 0x00010000u,
+    SPELL_ATTR0_ONLY_STEALTHED                                     = 0x00020000u,
+    SPELL_ATTR0_DO_NOT_SHEATH                                      = 0x00040000u,
+    SPELL_ATTR0_SCALES_WITH_CREATURE_LEVEL                         = 0x00080000u,
+    SPELL_ATTR0_CANCELS_AUTO_ATTACK_COMBAT                         = 0x00100000u,
+    SPELL_ATTR0_NO_ACTIVE_DEFENSE                                  = 0x00200000u,
+    SPELL_ATTR0_TRACK_TARGET_IN_CAST_PLAYER_ONLY                   = 0x00400000u,
+    SPELL_ATTR0_ALLOW_CAST_WHILE_DEAD                              = 0x00800000u,
+    SPELL_ATTR0_ALLOW_WHILE_MOUNTED                                = 0x01000000u,
+    SPELL_ATTR0_COOLDOWN_ON_EVENT                                  = 0x02000000u,
+    SPELL_ATTR0_AURA_IS_DEBUFF                                     = 0x04000000u,
+    SPELL_ATTR0_ALLOW_WHILE_SITTING                                = 0x08000000u,
+    SPELL_ATTR0_NOT_IN_COMBAT_ONLY_PEACEFUL                        = 0x10000000u,
+    SPELL_ATTR0_NO_IMMUNITIES                                      = 0x20000000u,
+    SPELL_ATTR0_HEARTBEAT_RESIST                                   = 0x40000000u,
+    SPELL_ATTR0_NO_AURA_CANCEL                                     = static_cast<int32_t>(0x80000000u),
+};
+
+// SpellRec::m_attributesEx
+enum SPELL_ATTR1 : int32_t
+{
+    SPELL_ATTR1_DISMISS_PET_FIRST                                  = 0x00000001u,
+    SPELL_ATTR1_USE_ALL_MANA                                       = 0x00000002u,
+    SPELL_ATTR1_IS_CHANNELLED                                      = 0x00000004u,
+    SPELL_ATTR1_NO_REDIRECTION                                     = 0x00000008u,
+    SPELL_ATTR1_NO_SKILL_INCREASE                                  = 0x00000010u,
+    SPELL_ATTR1_ALLOW_WHILE_STEALTHED                              = 0x00000020u,
+    SPELL_ATTR1_IS_SELF_CHANNELLED                                 = 0x00000040u,
+    SPELL_ATTR1_NO_REFLECTION                                      = 0x00000080u,
+    SPELL_ATTR1_ONLY_PEACEFUL_TARGETS                              = 0x00000100u,
+    SPELL_ATTR1_INITIATES_COMBAT_ENABLES_AUTO_ATTACK               = 0x00000200u,
+    SPELL_ATTR1_NO_THREAT                                          = 0x00000400u,
+    SPELL_ATTR1_AURA_UNIQUE                                        = 0x00000800u,
+    SPELL_ATTR1_IS_PICKPOCKET                                      = 0x00001000u,
+    SPELL_ATTR1_TOGGLE_FAR_SIGHT                                   = 0x00002000u,
+    SPELL_ATTR1_TRACK_TARGET_IN_CHANNEL                            = 0x00004000u,
+    SPELL_ATTR1_IMMUNITY_PURGES_EFFECT                             = 0x00008000u,
+    SPELL_ATTR1_IMMUNITY_TO_HOSTILE_AND_FRIENDLY_EFFECTS           = 0x00010000u,
+    SPELL_ATTR1_NO_AUTO_CAST_AI                                    = 0x00020000u,
+    SPELL_ATTR1_PREVENTS_ANIM                                      = 0x00040000u,
+    SPELL_ATTR1_EXCLUDE_CASTER                                     = 0x00080000u,
+    SPELL_ATTR1_FINISHING_MOVE_DAMAGE                              = 0x00100000u,
+    SPELL_ATTR1_THREAT_ONLY_ON_MISS                                = 0x00200000u,
+    SPELL_ATTR1_FINISHING_MOVE_DURATION                            = 0x00400000u,
+    SPELL_ATTR1_IGNORE_OWNERS_DEATH                                = 0x00800000u,
+    SPELL_ATTR1_IS_FISHING                                         = 0x01000000u,
+    SPELL_ATTR1_AURA_STAYS_AFTER_COMBAT                            = 0x02000000u,
+    SPELL_ATTR1_REQUIRE_ALL_TARGETS                                = 0x04000000u,
+    SPELL_ATTR1_DISCOUNT_POWER_ON_MISS                             = 0x08000000u,
+    SPELL_ATTR1_NO_AURA_ICON                                       = 0x10000000u,
+    SPELL_ATTR1_NAME_IN_CHANNEL_BAR                                = 0x20000000u,
+    SPELL_ATTR1_ENABLE_AT_DODGE                                    = 0x40000000u,
+    SPELL_ATTR1_CAST_WHEN_LEARNED                                  = static_cast<int32_t>(0x80000000u),
+};
+
+// SpellRec::m_attributesExB
+enum SPELL_ATTR2 : int32_t
+{
+    SPELL_ATTR2_ALLOW_DEAD_TARGET                                  = 0x00000001u,
+    SPELL_ATTR2_NO_SHAPESHIFT_UI                                   = 0x00000002u,
+    SPELL_ATTR2_IGNORE_LINE_OF_SIGHT                               = 0x00000004u,
+    SPELL_ATTR2_ALLOW_LOW_LEVEL_BUFF                               = 0x00000008u,
+    SPELL_ATTR2_USE_SHAPESHIFT_BAR                                 = 0x00000010u,
+    SPELL_ATTR2_AUTO_REPEAT                                        = 0x00000020u,
+    SPELL_ATTR2_CANNOT_CAST_ON_TAPPED                              = 0x00000040u,
+    SPELL_ATTR2_DO_NOT_REPORT_SPELL_FAILURE                        = 0x00000080u,
+    SPELL_ATTR2_INCLUDE_IN_ADVANCED_COMBAT_LOG                     = 0x00000100u,
+    SPELL_ATTR2_ALWAYS_CAST_AS_UNIT                                = 0x00000200u,
+    SPELL_ATTR2_SPECIAL_TAMING_FLAG                                = 0x00000400u,
+    SPELL_ATTR2_NO_TARGET_PER_SECOND_COSTS                         = 0x00000800u,
+    SPELL_ATTR2_CHAIN_FROM_CASTER                                  = 0x00001000u,
+    SPELL_ATTR2_PRESERVE_ENCHANT_IN_ARENA                          = 0x00002000u,
+    SPELL_ATTR2_ALLOW_WHILE_INVISIBLE                              = 0x00004000u,
+    SPELL_ATTR2_DO_NOT_CONSUME_IF_GAINED_DURING_CAST               = 0x00008000u,
+    SPELL_ATTR2_NO_ACTIVE_PETS                                     = 0x00010000u,
+    SPELL_ATTR2_DO_NOT_RESET_COMBAT_TIMERS                         = 0x00020000u,
+    SPELL_ATTR2_REQ_DEAD_PET                                       = 0x00040000u,
+    SPELL_ATTR2_ALLOW_WHILE_NOT_SHAPESHIFTED_CASTER_FORM           = 0x00080000u,
+    SPELL_ATTR2_INITIATE_COMBAT_POST_CAST_ENABLES_AUTO_ATTACK      = 0x00100000u,
+    SPELL_ATTR2_FAIL_ON_ALL_TARGETS_IMMUNE                         = 0x00200000u,
+    SPELL_ATTR2_NO_INITIAL_THREAT                                  = 0x00400000u,
+    SPELL_ATTR2_IS_ARCANE_CONCENTRATION                            = 0x00800000u,
+    SPELL_ATTR2_ITEM_CAST_WITH_OWNER_SKILL                         = 0x01000000u,
+    SPELL_ATTR2_DONT_BLOCK_MANA_REGEN                              = 0x02000000u,
+    SPELL_ATTR2_NO_SCHOOL_IMMUNITIES                               = 0x04000000u,
+    SPELL_ATTR2_IGNORE_WEAPONSKILL                                 = 0x08000000u,
+    SPELL_ATTR2_NOT_AN_ACTION                                      = 0x10000000u,
+    SPELL_ATTR2_CANT_CRIT                                          = 0x20000000u,
+    SPELL_ATTR2_ACTIVE_THREAT                                      = 0x40000000u,
+    SPELL_ATTR2_FOOD_BUFF                                          = static_cast<int32_t>(0x80000000u),
+};
+
+// SpellRec::m_attributesExC
+enum SPELL_ATTR3 : int32_t
+{
+    SPELL_ATTR3_PVP_ENABLING                                       = 0x00000001u,
+    SPELL_ATTR3_NO_PROC_EQUIP_REQUIREMENT                          = 0x00000002u,
+    SPELL_ATTR3_NO_CASTING_BAR_TEXT                                = 0x00000004u,
+    SPELL_ATTR3_COMPLETELY_BLOCKED                                 = 0x00000008u,
+    SPELL_ATTR3_NO_RES_TIMER                                       = 0x00000010u,
+    SPELL_ATTR3_NO_DURABILITY_LOSS                                 = 0x00000020u,
+    SPELL_ATTR3_NO_AVOIDANCE                                       = 0x00000040u,
+    SPELL_ATTR3_DOT_STACKING_RULE                                  = 0x00000080u,
+    SPELL_ATTR3_ONLY_ON_PLAYER                                     = 0x00000100u,
+    SPELL_ATTR3_NOT_A_PROC                                         = 0x00000200u,
+    SPELL_ATTR3_REQUIRES_MAIN_HAND_WEAPON                          = 0x00000400u,
+    SPELL_ATTR3_ONLY_BATTLEGROUNDS                                 = 0x00000800u,
+    SPELL_ATTR3_ONLY_ON_GHOSTS                                     = 0x00001000u,
+    SPELL_ATTR3_HIDE_CHANNEL_BAR                                   = 0x00002000u,
+    SPELL_ATTR3_HIDE_IN_RAID_FILTER                                = 0x00004000u,
+    SPELL_ATTR3_NORMAL_RANGED_ATTACK                               = 0x00008000u,
+    SPELL_ATTR3_SUPPRESS_CASTER_PROCS                              = 0x00010000u,
+    SPELL_ATTR3_NO_INITIAL_AGGRO                                   = 0x00020000u,
+    SPELL_ATTR3_ALWAYS_HIT                                         = 0x00040000u,
+    SPELL_ATTR3_DISABLE_PROC                                       = 0x00080000u,
+    SPELL_ATTR3_ALLOW_AURA_WHILE_DEAD                              = 0x00100000u,
+    SPELL_ATTR3_ONLY_PROC_OUTDOORS                                 = 0x00200000u,
+    SPELL_ATTR3_CASTING_CANCELS_AUTOREPEAT                         = 0x00400000u,
+    SPELL_ATTR3_NO_DAMAGE_HISTORY                                  = 0x00800000u,
+    SPELL_ATTR3_REQUIRES_OFF_HAND_WEAPON                           = 0x01000000u,
+    SPELL_ATTR3_TREAT_AS_PERIODIC                                  = 0x02000000u,
+    SPELL_ATTR3_CAN_PROC_FROM_PROCS                                = 0x04000000u,
+    SPELL_ATTR3_DRAIN_SOUL                                         = 0x08000000u,
+    SPELL_ATTR3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS              = 0x10000000u,
+    SPELL_ATTR3_IGNORE_CASTER_MODIFIERS                            = 0x20000000u,
+    SPELL_ATTR3_DO_NOT_DISPLAY_RANGE                               = 0x40000000u,
+    SPELL_ATTR3_NOT_ON_AOE_IMMUNE                                  = static_cast<int32_t>(0x80000000u),
+};
+
+// SpellRec::m_attributesExD
+enum SPELL_ATTR4 : int32_t
+{
+    SPELL_ATTR4_NO_CAST_LOG                                        = 0x00000001u,
+    SPELL_ATTR4_PROC_ONLY_ON_CASTER                                = 0x00000002u,
+    SPELL_ATTR4_AURA_EXPIRES_OFFLINE                               = 0x00000004u,
+    SPELL_ATTR4_NO_HELPFUL_THREAT                                  = 0x00000008u,
+    SPELL_ATTR4_NO_HARMFUL_THREAT                                  = 0x00000010u,
+    SPELL_ATTR4_ALLOW_CLIENT_TARGETING                             = 0x00000020u,
+    SPELL_ATTR4_CANNOT_BE_STOLEN                                   = 0x00000040u,
+    SPELL_ATTR4_ALLOW_CAST_WHILE_CASTING                           = 0x00000080u,
+    SPELL_ATTR4_IGNORE_DAMAGE_TAKEN_MODIFIERS                      = 0x00000100u,
+    SPELL_ATTR4_COMBAT_FEEDBACK_WHEN_USABLE                        = 0x00000200u,
+    SPELL_ATTR4_WEAPON_SPEED_COST_SCALING                          = 0x00000400u,
+    SPELL_ATTR4_NO_PARTIAL_IMMUNITY                                = 0x00000800u,
+    SPELL_ATTR4_AURA_IS_BUFF                                       = 0x00001000u,
+    SPELL_ATTR4_DO_NOT_LOG_CASTER                                  = 0x00002000u,
+    SPELL_ATTR4_DAMAGE_DOESNT_BREAK_AURAS                          = 0x00004000u,
+    SPELL_ATTR4_NOT_IN_SPELLBOOK                                   = 0x00008000u,
+    SPELL_ATTR4_NOT_USABLE_IN_ARENA                                = 0x00010000u,
+    SPELL_ATTR4_IGNORE_DEFAULT_ARENA_RESTRICTIONS                  = 0x00020000u,
+    SPELL_ATTR4_BOUNCY_CHAIN_MISSILES                              = 0x00040000u,
+    SPELL_ATTR4_ALLOW_PROC_WHILE_SITTING                           = 0x00080000u,
+    SPELL_ATTR4_AURA_NEVER_BOUNCES                                 = 0x00100000u,
+    SPELL_ATTR4_ALLOW_ENTERING_ARENA                               = 0x00200000u,
+    SPELL_ATTR4_PROC_SUPPRESS_SWING_ANIM                           = 0x00400000u,
+    SPELL_ATTR4_SUPPRESS_WEAPON_PROCS                              = 0x00800000u,
+    SPELL_ATTR4_AUTO_RANGED_COMBAT                                 = 0x01000000u,
+    SPELL_ATTR4_OWNER_POWER_SCALING                                = 0x02000000u,
+    SPELL_ATTR4_ONLY_FLYING_AREAS                                  = 0x04000000u,
+    SPELL_ATTR4_FORCE_DISPLAY_CASTBAR                              = 0x08000000u,
+    SPELL_ATTR4_IGNORE_COMBAT_TIMER                                = 0x10000000u,
+    SPELL_ATTR4_UNK29                                              = 0x20000000u,
+    SPELL_ATTR4_UNK30                                              = 0x40000000u,
+    SPELL_ATTR4_UNK31                                              = static_cast<int32_t>(0x80000000u),
+};
+
+// SpellRec::m_attributesExE
+enum SPELL_ATTR5 : int32_t
+{
+    SPELL_ATTR5_ALLOW_ACTIONS_DURING_CHANNEL                       = 0x00000001u,
+    SPELL_ATTR5_NO_REAGENT_COST_WITH_AURA                          = 0x00000002u,
+    SPELL_ATTR5_REMOVE_ENTERING_ARENA                              = 0x00000004u,
+    SPELL_ATTR5_ALLOW_WHILE_STUNNED                                = 0x00000008u,
+    SPELL_ATTR5_TRIGGERS_CHANNELING                                = 0x00000010u,
+    SPELL_ATTR5_LIMIT_N                                            = 0x00000020u,
+    SPELL_ATTR5_IGNORE_AREA_EFFECT_PVP_CHECK                       = 0x00000040u,
+    SPELL_ATTR5_NOT_ON_PLAYER                                      = 0x00000080u,
+    SPELL_ATTR5_NOT_ON_PLAYER_CONTROLLED_NPC                       = 0x00000100u,
+    SPELL_ATTR5_EXTRA_INITIAL_PERIOD                               = 0x00000200u,
+    SPELL_ATTR5_DO_NOT_DISPLAY_DURATION                            = 0x00000400u,
+    SPELL_ATTR5_IMPLIED_TARGETING                                  = 0x00000800u,
+    SPELL_ATTR5_MELEE_CHAIN_TARGETING                              = 0x00001000u,
+    SPELL_ATTR5_SPELL_HASTE_AFFECTS_PERIODIC                       = 0x00002000u,
+    SPELL_ATTR5_NOT_AVAILABLE_WHILE_CHARMED                        = 0x00004000u,
+    SPELL_ATTR5_TREAT_AS_AREA_EFFECT                               = 0x00008000u,
+    SPELL_ATTR5_AURA_AFFECTS_NOT_JUST_REQ_EQUIPPED_ITEM            = 0x00010000u,
+    SPELL_ATTR5_ALLOW_WHILE_FLEEING                                = 0x00020000u,
+    SPELL_ATTR5_ALLOW_WHILE_CONFUSED                               = 0x00040000u,
+    SPELL_ATTR5_AI_DOESNT_FACE_TARGET                              = 0x00080000u,
+    SPELL_ATTR5_DO_NOT_ATTEMPT_A_PET_RESUMMON_WHEN_DISMOUNTING     = 0x00100000u,
+    SPELL_ATTR5_IGNORE_TARGET_REQUIREMENTS                         = 0x00200000u,
+    SPELL_ATTR5_NOT_ON_TRIVIAL                                     = 0x00400000u,
+    SPELL_ATTR5_NO_PARTIAL_RESISTS                                 = 0x00800000u,
+    SPELL_ATTR5_IGNORE_CASTER_REQUIREMENTS                         = 0x01000000u,
+    SPELL_ATTR5_ALWAYS_LINE_OF_SIGHT                               = 0x02000000u,
+    SPELL_ATTR5_SKIP_CHECKCAST_LOS_CHECK                           = 0x04000000u,
+    SPELL_ATTR5_NO_CASTER_AURA_ICON                                = 0x08000000u,
+    SPELL_ATTR5_NO_TARGET_AURA_ICON                                = 0x10000000u,
+    SPELL_ATTR5_AURA_UNIQUE_PER_CASTER                             = 0x20000000u,
+    SPELL_ATTR5_ALWAYS_SHOW_GROUND_TEXTURE                         = 0x40000000u,
+    SPELL_ATTR5_ADD_MELEE_HIT_RATING                               = static_cast<int32_t>(0x80000000u),
+};
+
+// SpellRec::m_attributesExF
+enum SPELL_ATTR6 : int32_t
+{
+    SPELL_ATTR6_NO_COOLDOWN_ON_TOOLTIP                             = 0x00000001u,
+    SPELL_ATTR6_ONLY_IN_ARENA                                      = 0x00000002u,
+    SPELL_ATTR6_IGNORE_CASTER_AURAS                                = 0x00000004u,
+    SPELL_ATTR6_CAN_ASSIST_IMMUNE_PC                               = 0x00000008u,
+    SPELL_ATTR6_IGNORE_FOR_MOD_TIME_RATE                           = 0x00000010u,
+    SPELL_ATTR6_DONT_CONSUME_PROC_CHARGES                          = 0x00000020u,
+    SPELL_ATTR6_FLOATING_COMBAT_TEXT_ON_CAST                       = 0x00000040u,
+    SPELL_ATTR6_AURA_IS_WEAPON_PROC                                = 0x00000080u,
+    SPELL_ATTR6_DO_NOT_CHAIN_TO_CROWD_CONTROLLED_TARGETS           = 0x00000100u,
+    SPELL_ATTR6_ALLOW_ON_CHARMED_TARGETS                           = 0x00000200u,
+    SPELL_ATTR6_NO_AURA_LOG                                        = 0x00000400u,
+    SPELL_ATTR6_NOT_IN_RAID_INSTANCES                              = 0x00000800u,
+    SPELL_ATTR6_ALLOW_WHILE_RIDING_VEHICLE                         = 0x00001000u,
+    SPELL_ATTR6_CAN_TARGET_INVISIBLE                               = 0x00002000u,
+    SPELL_ATTR6_AI_PRIMARY_RANGED_ATTACK                           = 0x00004000u,
+    SPELL_ATTR6_NO_PUSHBACK                                        = 0x00008000u,
+    SPELL_ATTR6_NO_JUMP_PATHING                                    = 0x00010000u,
+    SPELL_ATTR6_ALLOW_EQUIP_WHILE_CASTING                          = 0x00020000u,
+    SPELL_ATTR6_ORIGINATE_FROM_CONTROLLER                          = 0x00040000u,
+    SPELL_ATTR6_DELAY_COMBAT_TIMER_DURING_CAST                     = 0x00080000u,
+    SPELL_ATTR6_AURA_ICON_ONLY_FOR_CASTER_LIMIT10                  = 0x00100000u,
+    SPELL_ATTR6_SHOW_MECHANIC_AS_COMBAT_TEXT                       = 0x00200000u,
+    SPELL_ATTR6_ABSORB_CANNOT_BE_IGNORE                            = 0x00400000u,
+    SPELL_ATTR6_TAPS_IMMEDIATELY                                   = 0x00800000u,
+    SPELL_ATTR6_CAN_TARGET_UNTARGETABLE                            = 0x01000000u,
+    SPELL_ATTR6_DOESNT_RESET_SWING_TIMER_IF_INSTANT                = 0x02000000u,
+    SPELL_ATTR6_VEHICLE_IMMUNITY_CATEGORY                          = 0x04000000u,
+    SPELL_ATTR6_LIMIT_PCT_HEALING_MODS                             = 0x08000000u,
+    SPELL_ATTR6_DO_NOT_AUTO_SELECT_TARGET_WITH_INITIATES_COMBAT    = 0x10000000u,
+    SPELL_ATTR6_LIMIT_PCT_DAMAGE_MODS                              = 0x20000000u,
+    SPELL_ATTR6_DISABLE_TIED_EFFECT_POINTS                         = 0x40000000u,
+    SPELL_ATTR6_NO_CATEGORY_COOLDOWN_MODS                          = static_cast<int32_t>(0x80000000u),
+};
+
+// SpellRec::m_attributesExG
+enum SPELL_ATTR7 : int32_t
+{
+    SPELL_ATTR7_ALLOW_SPELL_REFLECTION                             = 0x00000001u,
+    SPELL_ATTR7_NO_TARGET_DURATION_MOD                             = 0x00000002u,
+    SPELL_ATTR7_DISABLE_AURA_WHILE_DEAD                            = 0x00000004u,
+    SPELL_ATTR7_DEBUG_SPELL                                        = 0x00000008u,
+    SPELL_ATTR7_TREAT_AS_RAID_BUFF                                 = 0x00000010u,
+    SPELL_ATTR7_CAN_BE_MULTI_CAST                                  = 0x00000020u,
+    SPELL_ATTR7_DONT_CAUSE_SPELL_PUSHBACK                          = 0x00000040u,
+    SPELL_ATTR7_PREPARE_FOR_VEHICLE_CONTROL_END                    = 0x00000080u,
+    SPELL_ATTR7_HORDE_SPECIFIC_SPELL                               = 0x00000100u,
+    SPELL_ATTR7_ALLIANCE_SPECIFIC_SPELL                            = 0x00000200u,
+    SPELL_ATTR7_DISPEL_REMOVES_CHARGES                             = 0x00000400u,
+    SPELL_ATTR7_CAN_CAUSE_INTERRUPT                                = 0x00000800u,
+    SPELL_ATTR7_CAN_CAUSE_SILENCE                                  = 0x00001000u,
+    SPELL_ATTR7_NO_UI_NOT_INTERRUPTIBLE                            = 0x00002000u,
+    SPELL_ATTR7_RECAST_ON_RESUMMON                                 = 0x00004000u,
+    SPELL_ATTR7_RESET_SWING_TIMER_AT_SPELL_START                   = 0x00008000u,
+    SPELL_ATTR7_CAN_RESTORE_SECONDARY_POWER                        = 0x00010000u,
+    SPELL_ATTR7_DO_NOT_LOG_PVP_KILL                                = 0x00020000u,
+    SPELL_ATTR7_HAS_CHARGE_EFFECT                                  = 0x00040000u,
+    SPELL_ATTR7_ZONE_TELEPORT                                      = 0x00080000u,
+    SPELL_ATTR7_NO_CLIENT_FAIL_WHILE_STUNNED_FLEEING_CONFUSED      = 0x00100000u,
+    SPELL_ATTR7_RETAIN_COOLDOWN_THROUGH_LOAD                       = 0x00200000u,
+    SPELL_ATTR7_IGNORES_COLD_WEATHER_FLYING_REQUIREMENT            = 0x00400000u,
+    SPELL_ATTR7_NO_ATTACK_DODGE                                    = 0x00800000u,
+    SPELL_ATTR7_NO_ATTACK_PARRY                                    = 0x01000000u,
+    SPELL_ATTR7_NO_ATTACK_MISS                                     = 0x02000000u,
+    SPELL_ATTR7_TREAT_AS_NPC_AOE                                   = 0x04000000u,
+    SPELL_ATTR7_BYPASS_NO_RESURRECT_AURA                           = 0x08000000u,
+    SPELL_ATTR7_CONSOLIDATED_RAID_BUFF                             = 0x10000000u,
+    SPELL_ATTR7_REFLECTION_ONLY_DEFENDS                            = 0x20000000u,
+    SPELL_ATTR7_CAN_PROC_FROM_SUPPRESSED_TARGET_PROCS              = 0x40000000u,
+    SPELL_ATTR7_ALWAYS_CAST_LOG                                    = static_cast<int32_t>(0x80000000u),
+};
+
 enum SPELL_AURA : uint32_t
 {
     SPELL_AURA_NONE                                         = 0,
@@ -493,6 +928,262 @@ enum SPELL_EFFECT : int32_t
     SPELL_EFFECT_163                                = 163,
     SPELL_EFFECT_REMOVE_AURA                        = 164,
     TOTAL_SPELL_EFFECTS
+};
+
+// Current target requirements and serialized target flags used by s_needTargets,
+// SpellRec::m_targets, and PendingSpellCastData::m_targetFlags.
+// The 0.5.3 SPELL_TARGET_TYPE enum used ordinals; these are 3.3.5 bit masks.
+enum SPELL_TARGET_TYPE : uint32_t
+{
+    TARGET_FLAG_NONE = 0x00000000u,
+    // No verified current-client meaning; do not assume this is the old CASTER ordinal.
+    TARGET_FLAG_UNKNOWN_0                    = 0x00000001u,
+    TARGET_FLAG_UNIT                         = 0x00000002u,
+    // Raid requirement, resolved by the target-selection code.
+    TARGET_FLAG_UNIT_RAID                    = 0x00000004u,
+    // Party requirement, resolved by the target-selection code.
+    TARGET_FLAG_UNIT_PARTY                   = 0x00000008u,
+    TARGET_FLAG_ITEM                         = 0x00000010u,
+    // Packed transport GUID followed by three position floats.
+    TARGET_FLAG_SOURCE_LOCATION              = 0x00000020u,
+    // Packed transport GUID followed by three position floats.
+    TARGET_FLAG_DEST_LOCATION                = 0x00000040u,
+    TARGET_FLAG_UNIT_ENEMY                   = 0x00000080u,
+    TARGET_FLAG_UNIT_ALLY                    = 0x00000100u,
+    TARGET_FLAG_CORPSE_ENEMY                 = 0x00000200u,
+    // Dead-unit requirement; does not by itself add a GUID to WriteTargetInfo.
+    TARGET_FLAG_UNIT_DEAD                    = 0x00000400u,
+    TARGET_FLAG_GAMEOBJECT                   = 0x00000800u,
+    TARGET_FLAG_TRADE_ITEM                   = 0x00001000u,
+    TARGET_FLAG_STRING                       = 0x00002000u,
+    // A gameobject or item may satisfy this selection requirement.
+    TARGET_FLAG_GAMEOBJECT_ITEM              = 0x00004000u,
+    TARGET_FLAG_CORPSE_ALLY                  = 0x00008000u,
+    // Noncombat pet selector, matching Spell_C_CanTargetNonCombatPet.
+    TARGET_FLAG_UNIT_NON_COMBAT_PET          = 0x00010000u,
+    // Glyph selection is completed through PendingSpellCastData::m_glyphSlot.
+    TARGET_FLAG_GLYPH_SLOT                   = 0x00020000u,
+    // Sometimes called DEST_TARGET in references; no verified use in this source.
+    TARGET_FLAG_UNKNOWN_18                   = 0x00040000u,
+    // Used by OnSpellGo: count, then position/transport-GUID pairs for missile target points.
+    TARGET_FLAG_TARGET_POINTS                = 0x00080000u,
+    // References guess UNIT_PASSENGER; no verified use in this source.
+    TARGET_FLAG_UNKNOWN_20                   = 0x00100000u,
+    TARGET_FLAG_UNKNOWN_21                   = 0x00200000u,
+    TARGET_FLAG_UNKNOWN_22                   = 0x00400000u,
+    TARGET_FLAG_UNKNOWN_23                   = 0x00800000u,
+    TARGET_FLAG_UNKNOWN_24                   = 0x01000000u,
+    TARGET_FLAG_UNKNOWN_25                   = 0x02000000u,
+    TARGET_FLAG_UNKNOWN_26                   = 0x04000000u,
+    TARGET_FLAG_UNKNOWN_27                   = 0x08000000u,
+    TARGET_FLAG_UNKNOWN_28                   = 0x10000000u,
+    TARGET_FLAG_UNKNOWN_29                   = 0x20000000u,
+    TARGET_FLAG_UNKNOWN_30                   = 0x40000000u,
+    TARGET_FLAG_UNKNOWN_31                   = 0x80000000u,
+
+    TARGET_FLAG_LOCATION_MASK = TARGET_FLAG_SOURCE_LOCATION
+        | TARGET_FLAG_DEST_LOCATION,
+    TARGET_FLAG_ITEM_GUID_MASK = TARGET_FLAG_ITEM
+        | TARGET_FLAG_TRADE_ITEM,
+    // GUID payload masks are the exact masks used by WriteTargetInfo/SpellGetCastTargets.
+    TARGET_FLAG_OBJECT_GUID_MASK = TARGET_FLAG_UNIT
+        | TARGET_FLAG_CORPSE_ENEMY
+        | TARGET_FLAG_GAMEOBJECT
+        | TARGET_FLAG_CORPSE_ALLY
+        | TARGET_FLAG_UNIT_NON_COMBAT_PET,
+    TARGET_FLAG_ITEM_SELECTION_MASK = TARGET_FLAG_ITEM
+        | TARGET_FLAG_GAMEOBJECT_ITEM,
+    TARGET_FLAG_GAMEOBJECT_MASK = TARGET_FLAG_GAMEOBJECT
+        | TARGET_FLAG_GAMEOBJECT_ITEM,
+    TARGET_FLAG_CORPSE_MASK = TARGET_FLAG_CORPSE_ENEMY
+        | TARGET_FLAG_CORPSE_ALLY,
+    TARGET_FLAG_DEAD_MASK = TARGET_FLAG_CORPSE_ENEMY
+        | TARGET_FLAG_UNIT_DEAD
+        | TARGET_FLAG_CORPSE_ALLY,
+    TARGET_FLAG_FRIENDLY_UNIT_MASK = TARGET_FLAG_UNIT_RAID
+        | TARGET_FLAG_UNIT_PARTY
+        | TARGET_FLAG_UNIT_ALLY,
+    TARGET_FLAG_UNIT_OR_CORPSE_GUID_MASK = TARGET_FLAG_UNIT
+        | TARGET_FLAG_CORPSE_ENEMY
+        | TARGET_FLAG_CORPSE_ALLY
+        | TARGET_FLAG_UNIT_NON_COMBAT_PET,
+    // Exact UI-selection masks; these are broader than plain object-kind masks.
+    TARGET_FLAG_UNIT_SELECTION_MASK = TARGET_FLAG_UNIT
+        | TARGET_FLAG_UNIT_RAID
+        | TARGET_FLAG_UNIT_PARTY
+        | TARGET_FLAG_UNIT_ENEMY
+        | TARGET_FLAG_UNIT_ALLY
+        | TARGET_FLAG_CORPSE_ENEMY
+        | TARGET_FLAG_UNIT_DEAD
+        | TARGET_FLAG_CORPSE_ALLY
+        | TARGET_FLAG_UNIT_NON_COMBAT_PET,
+    TARGET_FLAG_SELF_SELECTION_MASK = TARGET_FLAG_UNIT
+        | TARGET_FLAG_UNIT_RAID
+        | TARGET_FLAG_UNIT_PARTY
+        | TARGET_FLAG_UNIT_ALLY
+        | TARGET_FLAG_UNIT_DEAD
+        | TARGET_FLAG_CORPSE_ALLY,
+    // Preserve the legacy 16-bit truncation in RangeCheckSelected.
+    TARGET_FLAG_LOW_16_MASK = 0x0000FFFFu,
+};
+
+// SpellRec::m_implicitTargetA/B target IDs, separate from the m_targets bitmask.
+// Based on the 3.3.5 target definitions and classification; UNKNOWN slots are intentional.
+// https://github.com/TrinityCore/TrinityCore/blob/3.3.5/src/server/shared/SharedDefines.h#L1428
+// https://github.com/TrinityCore/TrinityCore/blob/3.3.5/src/server/game/Spells/SpellInfo.cpp#L236
+enum SPELL_IMPLICIT_TARGET : int32_t
+{
+    TARGET_NONE                                      = 0,
+    TARGET_UNIT_CASTER                               = 1,
+    TARGET_UNIT_NEARBY_ENEMY                         = 2,
+    TARGET_UNIT_NEARBY_ALLY                          = 3,
+    TARGET_UNIT_NEARBY_PARTY                         = 4,
+    TARGET_UNIT_PET                                  = 5,
+    TARGET_UNIT_TARGET_ENEMY                         = 6,
+    TARGET_UNIT_SRC_AREA_ENTRY                       = 7,
+    TARGET_UNIT_DEST_AREA_ENTRY                      = 8,
+    TARGET_DEST_HOME                                 = 9,
+    // Unidentified IDs remain UNKNOWN; their inclusion does not establish a target behavior.
+    TARGET_UNKNOWN_10                                = 10,
+    // Unit/source selector; its selection behavior is unresolved.
+    TARGET_UNIT_SRC_UNKNOWN_11                       = 11,
+    TARGET_UNKNOWN_12                                = 12,
+    TARGET_UNKNOWN_13                                = 13,
+    TARGET_UNKNOWN_14                                = 14,
+    TARGET_UNIT_SRC_AREA_ENEMY                       = 15,
+    TARGET_UNIT_DEST_AREA_ENEMY                      = 16,
+    TARGET_DEST_DATABASE                             = 17,
+    TARGET_DEST_CASTER                               = 18,
+    TARGET_UNKNOWN_19                                = 19,
+    TARGET_UNIT_CASTER_AREA_PARTY                    = 20,
+    TARGET_UNIT_TARGET_ALLY                          = 21,
+    TARGET_SRC_CASTER                                = 22,
+    TARGET_GAMEOBJECT_TARGET                         = 23,
+    // Keep distinct numbered cone selectors; their differences are not established here.
+    TARGET_UNIT_CONE_ENEMY_24                        = 24,
+    TARGET_UNIT_TARGET_ANY                           = 25,
+    TARGET_GAMEOBJECT_ITEM_TARGET                    = 26,
+    TARGET_UNIT_MASTER                               = 27,
+    TARGET_DEST_DYNAMIC_OBJECT_ENEMY                 = 28,
+    TARGET_DEST_DYNAMIC_OBJECT_ALLY                  = 29,
+    TARGET_UNIT_SRC_AREA_ALLY                        = 30,
+    TARGET_UNIT_DEST_AREA_ALLY                       = 31,
+    // Close summon position at the caster's front left; does not use the effect radius.
+    TARGET_DEST_CASTER_SUMMON                        = 32,
+    TARGET_UNIT_SRC_AREA_PARTY                       = 33,
+    TARGET_UNIT_DEST_AREA_PARTY                      = 34,
+    TARGET_UNIT_TARGET_PARTY                         = 35,
+    // Caster-relative destination; selection behavior is unresolved.
+    TARGET_DEST_CASTER_UNKNOWN_36                    = 36,
+    TARGET_UNIT_LAST_TARGET_AREA_PARTY               = 37,
+    TARGET_UNIT_NEARBY_ENTRY                         = 38,
+    TARGET_DEST_CASTER_FISHING                       = 39,
+    TARGET_GAMEOBJECT_NEARBY_ENTRY                   = 40,
+    TARGET_DEST_CASTER_FRONT_RIGHT                   = 41,
+    TARGET_DEST_CASTER_BACK_RIGHT                    = 42,
+    TARGET_DEST_CASTER_BACK_LEFT                     = 43,
+    TARGET_DEST_CASTER_FRONT_LEFT                    = 44,
+    TARGET_UNIT_TARGET_CHAIN_HEAL_ALLY               = 45,
+    TARGET_DEST_NEARBY_ENTRY                         = 46,
+    TARGET_DEST_CASTER_FRONT                         = 47,
+    TARGET_DEST_CASTER_BACK                          = 48,
+    TARGET_DEST_CASTER_RIGHT                         = 49,
+    TARGET_DEST_CASTER_LEFT                          = 50,
+    TARGET_GAMEOBJECT_SRC_AREA                       = 51,
+    TARGET_GAMEOBJECT_DEST_AREA                      = 52,
+    TARGET_DEST_TARGET_ENEMY                         = 53,
+    TARGET_UNIT_CONE_ENEMY_54                        = 54,
+    TARGET_DEST_CASTER_FRONT_LEAP                    = 55,
+    TARGET_UNIT_CASTER_AREA_RAID                     = 56,
+    TARGET_UNIT_TARGET_RAID                          = 57,
+    TARGET_UNIT_NEARBY_RAID                          = 58,
+    TARGET_UNIT_CONE_ALLY                            = 59,
+    TARGET_UNIT_CONE_ENTRY                           = 60,
+    TARGET_UNIT_TARGET_AREA_RAID_CLASS               = 61,
+    // The client classifies this as helpful; the target behavior remains unresolved.
+    TARGET_UNKNOWN_62                                = 62,
+    TARGET_DEST_TARGET_ANY                           = 63,
+    TARGET_DEST_TARGET_FRONT                         = 64,
+    TARGET_DEST_TARGET_BACK                          = 65,
+    TARGET_DEST_TARGET_RIGHT                         = 66,
+    TARGET_DEST_TARGET_LEFT                          = 67,
+    TARGET_DEST_TARGET_FRONT_RIGHT                   = 68,
+    TARGET_DEST_TARGET_BACK_RIGHT                    = 69,
+    TARGET_DEST_TARGET_BACK_LEFT                     = 70,
+    TARGET_DEST_TARGET_FRONT_LEFT                    = 71,
+    TARGET_DEST_CASTER_RANDOM                        = 72,
+    TARGET_DEST_CASTER_RADIUS                        = 73,
+    TARGET_DEST_TARGET_RANDOM                        = 74,
+    TARGET_DEST_TARGET_RADIUS                        = 75,
+    TARGET_DEST_CHANNEL_TARGET                       = 76,
+    TARGET_UNIT_CHANNEL_TARGET                       = 77,
+    TARGET_DEST_DEST_FRONT                           = 78,
+    TARGET_DEST_DEST_BACK                            = 79,
+    TARGET_DEST_DEST_RIGHT                           = 80,
+    TARGET_DEST_DEST_LEFT                            = 81,
+    TARGET_DEST_DEST_FRONT_RIGHT                     = 82,
+    TARGET_DEST_DEST_BACK_RIGHT                      = 83,
+    TARGET_DEST_DEST_BACK_LEFT                       = 84,
+    TARGET_DEST_DEST_FRONT_LEFT                      = 85,
+    TARGET_DEST_DEST_RANDOM                          = 86,
+    TARGET_DEST_DEST                                 = 87,
+    // Dynamic-object destination without an ally/enemy selector.
+    TARGET_DEST_DYNAMIC_OBJECT                       = 88,
+    // Missile trajectory destination; handled through SpellMissileRec.
+    TARGET_DEST_TRAJECTORY                           = 89,
+    // Noncombat pet (minipet/companion), matching the client targeting API.
+    TARGET_UNIT_TARGET_NON_COMBAT_PET                = 90,
+    TARGET_DEST_DEST_RADIUS                          = 91,
+    TARGET_UNIT_SUMMONER                             = 92,
+    TARGET_CORPSE_SRC_AREA_ENEMY                     = 93,
+    TARGET_UNIT_VEHICLE                              = 94,
+    TARGET_UNIT_TARGET_PASSENGER                     = 95,
+    TARGET_UNIT_PASSENGER_0                          = 96,
+    TARGET_UNIT_PASSENGER_1                          = 97,
+    TARGET_UNIT_PASSENGER_2                          = 98,
+    TARGET_UNIT_PASSENGER_3                          = 99,
+    TARGET_UNIT_PASSENGER_4                          = 100,
+    TARGET_UNIT_PASSENGER_5                          = 101,
+    TARGET_UNIT_PASSENGER_6                          = 102,
+    TARGET_UNIT_PASSENGER_7                          = 103,
+    TARGET_UNIT_CONE_ENEMY_104                       = 104,
+    // Unit selector with an unresolved reference/selection behavior.
+    TARGET_UNIT_UNKNOWN_105                          = 105,
+    TARGET_DEST_CHANNEL_CASTER                       = 106,
+    // Unresolved selector relative to an existing destination.
+    TARGET_UNKNOWN_107                               = 107,
+    TARGET_GAMEOBJECT_CONE                           = 108,
+    TARGET_UNKNOWN_109                               = 109,
+    // Legacy UNIT_CONE_ENTRY label conflicts with the unimplemented destination classification.
+    TARGET_UNKNOWN_110                               = 110,
+    // Upper bound of the 3.3.5 ID domain; not an effect-array length.
+    TOTAL_SPELL_IMPLICIT_TARGETS = 111
+};
+
+// SMSG_PET_TAME_FAILURE reason byte and local error requests.
+// Names describe the twelve current client messages; all other bytes use UNKNOWNERROR.
+enum PET_TAME_FAILURE : uint8_t {
+    PET_TAME_INVALID_CREATURE = 1,
+    PET_TAME_TOO_MANY = 2,
+    PET_TAME_CREATURE_ALREADY_OWNED = 3,
+    PET_TAME_NOT_TAMEABLE = 4,
+    PET_TAME_ANOTHER_SUMMON_ACTIVE = 5,
+    PET_TAME_UNITS_CANT_TAME = 6,
+    PET_TAME_NO_PET_AVAILABLE = 7,
+    PET_TAME_INTERNAL_ERROR = 8,
+    PET_TAME_TOO_HIGH_LEVEL = 9,
+    PET_TAME_DEAD = 10,
+    PET_TAME_NOT_DEAD = 11,
+    PET_TAME_CANT_CONTROL_EXOTIC = 12,
+};
+
+// SMSG_PET_ACTION_FEEDBACK byte; names describe current client outcomes.
+// Other bytes have no client action, including zero.
+enum PET_ACTION_FEEDBACK : uint8_t {
+    PET_FEEDBACK_DEAD = 1,
+    PET_FEEDBACK_NO_TARGET = 2,
+    PET_FEEDBACK_INVALID_TARGET = 3,
+    PET_FEEDBACK_NO_PATH = 4,
 };
 
 #endif

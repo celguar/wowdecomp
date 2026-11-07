@@ -54,7 +54,51 @@ typedef void (*RENDER_CALLBACK)(uint32_t, void*);
 
 class CMapObj : public CMapObjIndex, public TSHashObject<CMapObj, HASHKEY_NONE> {
     public:
-    static void RenderMapObjGroupsShadowMap(void* groups, uint32_t count, void* groupData, const C44Matrix& translation, CFrustum& frustum);
+    enum SHADER_TYPE : uint32_t {
+        DIFFUSE = 0,
+        SPECULAR = 1,
+        METAL = 2,
+        ENVIRONMENT = 3,
+        OPAQUE_EFFECT = 4,
+        ENVIRONMENT_METAL = 5,
+        COMPOSITE = 6,
+        SHADER_COUNT = 7,
+    };
+
+    enum SHADER_FOG_MODE : int32_t {
+        CACHE_RESET = -1,
+        DISABLED = 0,
+        INTERIOR_COLOR = 1,
+        EXTERIOR_COLOR = 2,
+        BLACK_COLOR = 4,
+        INTERIOR_BLACK = 5,
+        EXTERIOR_BLACK = 6,
+    };
+
+    enum SHADOW_CONTEXT : int32_t {
+        INVALID = -1,
+        EXTERIOR = 0,
+        INTERIOR = 1,
+    };
+
+    enum LIGHTING_MODE : int32_t {
+        CACHE_INVALID = -1,
+        UNLIT = 0,
+        DAY_NIGHT = 1,
+        DAY_NIGHT_MID = 2,
+        PARENT_COLOR = 3,
+    };
+
+    enum RENDER_MODE : int32_t {
+        COLLISION_FACES = 0,
+        DETAIL_FACES = 1,
+        RENDER_FACES = 2,
+        TRANSPARENT_FACES = 3,
+        COLLIDABLE = 4,
+        DEFAULT_RENDER = 5,
+    };
+
+    static void RenderMapObjGroupsShadowMap(CMapObjGroup** groups, uint32_t count, C44Matrix** groupMatrices, const C44Matrix& translation, CFrustum& frustum);
     bool QueryLighting(uint32_t groupNum, const C3Vector& point, uint16_t face, CImVector* color, uint8_t* flag);
     bool QueryLighting(uint32_t groupNum, const C3Segment& seg, CImVector* color, uint8_t* flag);
     static TSList<CMapObj, TSGetExplicitLink<CMapObj> > s_asyncLoadQueue;
@@ -64,12 +108,12 @@ class CMapObj : public CMapObjIndex, public TSHashObject<CMapObj, HASHKEY_NONE> 
     static void* gRenderUserParam;
     static int32_t bPoolsDirty;
     static uint32_t* occluderHeap;
-    static int32_t s_renderMode;
+    static RENDER_MODE s_renderMode;
     static void (CMapObj::*s_renderGroupExterior)(CMapObjGroup* group, uint32_t index);
     static void (CMapObj::*s_renderGroupInterior)(CMapObjGroup* group, uint32_t index);
-    static CShaderEffect* s_classicShaders[7];
-    static CShaderEffect* s_unifiedShaders[7];
-    static int32_t s_lightingMode;
+    static CShaderEffect* s_classicShaders[SHADER_TYPE::SHADER_COUNT];
+    static CShaderEffect* s_unifiedShaders[SHADER_TYPE::SHADER_COUNT];
+    static LIGHTING_MODE s_lightingMode;
     static uint32_t s_maxLiquidQueryDepth;
 
     static void ClearCache(int32_t unused_a1);
@@ -234,6 +278,10 @@ class CMapObj : public CMapObjIndex, public TSHashObject<CMapObj, HASHKEY_NONE> 
 };
 
 struct SMOBatch {
+    enum FLAGS : uint8_t {
+        F_RENDERED = 0xF0,
+    };
+
     /* 0000 */ int16_t m_bx;
     /* 0002 */ int16_t m_by;
     /* 0004 */ int16_t m_bz;
@@ -269,7 +317,7 @@ struct SMOHeader {
     /* 0010 */ uint32_t m_nDoodadNames;
     /* 0014 */ uint32_t m_nDoodadDefs;
     /* 0018 */ uint32_t m_nDoodadSets;
-    /* 001C */ uint32_t m_ambColor;
+    /* 001C */ CImVector m_ambColor;
     /* 0020 */ uint32_t m_wmoID;
     /* 0024 */ CAaBox m_boundingBox;
     /* 003C */ uint16_t m_flags;
@@ -277,7 +325,14 @@ struct SMOHeader {
 };
 
 struct SMOLight {
-    /* 0000 */ uint8_t m_type;
+    enum LightType : uint8_t {
+        OMNI_LGT = 0x0,
+        SPOT_LGT = 0x1,
+        DIRECT_LGT = 0x2,
+        AMBIENT_LGT = 0x3,
+    };
+
+    /* 0000 */ LightType m_type;
     /* 0001 */ uint8_t m_atten;
     /* 0002 */ uint8_t m_pad [2];
     /* 0004 */ CImVector m_color;
@@ -289,6 +344,24 @@ struct SMOLight {
 };
 
 struct SMOMaterial {
+    enum FLAGS : uint32_t {
+        F_UNLIT = 0x1,
+        F_UNFOGGED = 0x2,
+        F_UNCULLED = 0x4,
+        UNKNOWN_0x08 = 0x8, // Called EXTLIGHT in 0.5.3; no 3.3.5 reader found.
+        F_SIDN = 0x10,
+        F_WINDOW = 0x20,
+        F_CLAMP_S = 0x40,
+        F_CLAMP_T = 0x80,
+        UNKNOWN_0x100 = 0x100, // Guessed bitfield entry; no 3.3.5 reader found.
+    };
+
+    enum MAPID : uint32_t {
+        MAPID_DIFFUSE = 0x0,
+        MAPID_ENV = 0x1,
+        MAPID_COUNT = 0x2,
+    };
+
     /* 0000 */ uint32_t m_flags;
     /* 0004 */ uint32_t m_shader;
     /* 0008 */ uint32_t m_blendMode;
@@ -307,7 +380,7 @@ struct SMOMaterial {
 };
 
 inline CTexture** SMOMaterial::Textures() {
-    return reinterpret_cast<CTexture**>(&this->m_runTimeData[4 - 2 * sizeof(CTexture*) / sizeof(uint32_t)]);
+    return reinterpret_cast<CTexture**>(&this->m_runTimeData[4 - SMOMaterial::MAPID_COUNT * sizeof(CTexture*) / sizeof(uint32_t)]);
 }
 
 struct SMOPortal {

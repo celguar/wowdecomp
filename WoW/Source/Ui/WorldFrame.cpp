@@ -1,4 +1,5 @@
 #include "WorldFrame.h"
+#include "WoW/Source/Object/Types.h"
 #include "Engine/Source/Base/ConvertUTF.h"
 #include <cstring>
 #include <typeinfo>
@@ -192,7 +193,7 @@ void CGWorldFrame::OnMouseModeNormal() {
 // VERIFY: f3392eff auto
 // OFFSET: 0x004F5D80
 void CGWorldFrame::SetNamePlateUpdate() {
-    this->m_namePlateFlags |= 0x1;
+    this->m_namePlateFlags |= CGWorldFrame::NAME_PLATE_FLAGS::NAME_PLATE_REPOSITION_PENDING;
 }
 
 // VERIFY: c20f460f auto
@@ -238,7 +239,7 @@ static int32_t GetObjectHitTestType(CGObject_C* object) {
 // VERIFY: d69961a6 auto
 // OFFSET: 0x004F6370
 static void AddModelToHitTest(CM2Model* model, uint32_t group, void* owner, uint32_t mode) {
-    if (model->m_fFlags & 0x1) {
+    if (model->m_runtimeFlags & 0x1) {
         if (!model->m_hitTestPrev) {
             CM2Model** head = &model->m_scene->m_hitTestList;
             model->m_hitTestPrev = head;
@@ -328,7 +329,7 @@ void CGWorldFrame::OnLayerTrackTerrain(const HITTESTRESULT& result) {
     Spell_C_SetCursorWorldObjectPosition(s_spellShadowPos);
 
     switch (Spell_C_HandleTerrainRay(evt, true)) {
-        case 0: {
+        case SPELL_TERRAIN_RAY_VALID: {
             s_spellShadowStyle = SPELL_GOOD;
             float radius = Spell_C_GetSpellRadius();
             s_spellShadowSize = radius > 20.0f ? 20.0f : Spell_C_GetSpellRadius();
@@ -336,13 +337,13 @@ void CGWorldFrame::OnLayerTrackTerrain(const HITTESTRESULT& result) {
             break;
         }
 
-        case 1:
+        case SPELL_TERRAIN_RAY_INVALID:
             s_spellShadowStyle = SPELL_BAD;
             s_spellShadowSize = 0.0f;
             CursorSetMode(CAST_ERROR_CURSOR);
             break;
 
-        case 2:
+        case SPELL_TERRAIN_RAY_OUTSIDE_PREVIEW_RANGE:
             s_spellShadowStyle = SPELL_NONE;
             s_spellShadowSize = 0.0f;
             CursorSetMode(CAST_ERROR_CURSOR);
@@ -503,7 +504,7 @@ int32_t CGWorldFrame::IsUnitLegalSelection(CGUnit_C* unit, uint32_t flags) {
         }
     }
 
-    if ((flags & 0x400000) && unit->GetCreatureType() == 12) {
+    if ((flags & 0x400000) && unit->GetCreatureType() == CREATURE_TYPE_NON_COMBAT_PET) {
         return 1;
     }
 
@@ -511,12 +512,12 @@ int32_t CGWorldFrame::IsUnitLegalSelection(CGUnit_C* unit, uint32_t flags) {
         return 1;
     }
 
-    bool restricted = (unit->m_unit->m_unitFieldFlags >> 8) & 1;
+    bool restricted = unit->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_IMMUNE_TO_PC;
 
     if (restricted) {
         SpellRec spell;
 
-        if (g_spellDB.GetRecord(Spell_C_GetTargetingSpell(), &spell) && ((spell.m_attributesExC & 0x10000000) || (spell.m_attributesExE & 0x200000))) {
+        if (g_spellDB.GetRecord(Spell_C_GetTargetingSpell(), &spell) && ((spell.m_attributesExC & SPELL_ATTR3::SPELL_ATTR3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS) || (spell.m_attributesExE & SPELL_ATTR5::SPELL_ATTR5_IGNORE_TARGET_REQUIREMENTS))) {
             return 1;
         }
     }
@@ -634,7 +635,7 @@ uint32_t CGWorldFrame::GetHitTestFilterFlags(int32_t a1) {
         uint32_t moveFlags = mover->m_movement->m_flags;
         flags = 1;
 
-        if ((moveFlags & 0x10000000) && !(moveFlags & 0x200000)) {
+        if ((moveFlags & MOVEMENTFLAG_WATERWALKING) && !(moveFlags & MOVEMENTFLAG_SWIMMING)) {
             flags = 3;
         }
     }
@@ -655,7 +656,7 @@ void __stdcall CGWorldFrame::CursorTrackUnit(CGUnit_C* unit) {
         return;
     }
 
-    if (((player->m_combatModeFlags & 1) && player->GetTransportGUID() != player->GetFarSightGuid()) || !player->VehicleAllowsInteraction()) {
+    if (((player->m_combatModeFlags & CGPlayer_C::COMBAT_MODE_FLAGS::COMBAT_MODE_FAR_SIGHT) && player->GetTransportGUID() != player->GetFarSightGuid()) || !player->VehicleAllowsInteraction()) {
         CGUnit_C* possessed = player->GetPossessedUnit();
 
         if (unit->m_unit->m_unitFieldHealth > 0 && possessed && possessed->CanAttackNow(unit)) {
@@ -686,31 +687,31 @@ void __stdcall CGWorldFrame::CursorTrackUnit(CGUnit_C* unit) {
             return;
         }
 
-        uint32_t flags = unit->m_unit->m_unitNpcFlags;
+        uint32_t npcFlags = unit->m_unit->m_unitNpcFlags;
 
-        if (flags & 0x1000) {
+        if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_REPAIR) {
             CursorSetMode(unable ? REPAIRNPC_ERROR_CURSOR : REPAIRNPC_CURSOR);
-        } else if (flags & 0x10000) {
+        } else if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_INNKEEPER) {
             CursorSetMode(unable ? INNKEEPER_ERROR_CURSOR : INNKEEPER_CURSOR);
-        } else if (flags & 0x2000) {
+        } else if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_FLIGHT_MASTER) {
             CursorSetMode(unable ? TAXI_ERROR_CURSOR : TAXI_CURSOR);
-        } else if (flags & 0x10) {
+        } else if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_TRAINER) {
             CursorSetMode(unable ? TRAINER_ERROR_CURSOR : TRAINER_CURSOR);
-        } else if ((flags & 0x4000) || (flags & 0x8000)) {
+        } else if ((npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_SPIRIT_HEALER) || (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_SPIRIT_GUIDE)) {
             CursorSetMode(unable ? SPEAK_ERROR_CURSOR : SPEAK_CURSOR);
-        } else if ((flags & 0x20000) || (flags & 0x800000)) {
+        } else if ((npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_BANKER) || (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_GUILD_BANKER)) {
             CursorSetMode(unable ? BUY_ERROR_CURSOR : BUY_CURSOR);
-        } else if ((flags & 0x40000) || (flags & 0x80000) || unit->IsGuildMaster() || (flags & 0x100000)) {
+        } else if ((npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_PETITIONER) || (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_TABARD_DESIGNER) || unit->IsGuildMaster() || (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_BATTLEMASTER)) {
             CursorSetMode(unable ? SPEAK_ERROR_CURSOR : SPEAK_CURSOR);
-        } else if (flags & 0x200000) {
+        } else if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_AUCTIONEER) {
             CursorSetMode(unable ? BUY_ERROR_CURSOR : BUY_CURSOR);
-        } else if (flags & 0x400000) {
+        } else if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_STABLE_MASTER) {
             CursorSetMode(unable ? SPEAK_ERROR_CURSOR : SPEAK_CURSOR);
-        } else if (flags & 0x80) {
+        } else if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR) {
             CursorSetMode(unable ? PICKUP_ERROR_CURSOR : PICKUP_CURSOR);
-        } else if (flags & 0x1) {
+        } else if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_GOSSIP) {
             CursorSetMode(unable ? SPEAK_ERROR_CURSOR : SPEAK_CURSOR);
-        } else if (flags & 0x1000000) {
+        } else if (npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_SPELL_CLICK) {
             CursorSetMode(unable ? INTERACT_ERROR_CURSOR : INTERACT_CURSOR);
         } else if (unit->CanBeSpellClickedByLocalPlayer(player)) {
             CursorSetMode(unable ? VEHICLE_ERROR_CURSOR : VEHICLE_CURSOR);
@@ -731,7 +732,7 @@ void __stdcall CGWorldFrame::CursorTrackUnit(CGUnit_C* unit) {
         return;
     }
 
-    if ((unit->m_unit->m_unitFieldFlags & 0x4000000) && CGSpellBook::GetSkinningSpell(unit) && !((unit->m_obj->m_type & TYPE_PLAYER) && player->CanAssist(unit, false))) {
+    if ((unit->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_SKINNABLE) && CGSpellBook::GetSkinningSpell(unit) && !((unit->m_obj->m_type & TYPE_PLAYER) && player->CanAssist(unit, false))) {
         float minRange;
         float maxRange;
         Spell_C::GetSpellRange(player, CGSpellBook::GetSkinningSpell(unit), &minRange, &maxRange, unit);
@@ -769,7 +770,7 @@ void __stdcall CGWorldFrame::CursorTrackUnit(CGUnit_C* unit) {
         }
     }
 
-    if (!player->CanAttackNow(unit) || (player->m_unit->m_unitFieldFlags & 0x20000) || !CGGameUI::m_hasControl) {
+    if (!player->CanAttackNow(unit) || (player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_PACIFIED) || !CGGameUI::m_hasControl) {
         CursorResetMode();
         return;
     }
@@ -811,7 +812,7 @@ void __stdcall CGWorldFrame::CursorTrackCorpse(CGCorpse_C* corpse) {
 
     const CGUnit_C* asUnit = reinterpret_cast<const CGUnit_C*>(corpse);
 
-    if ((corpse->m_corpse->m_corpseFieldFlags & 0x20) && CGSpellBook::GetSkinningSpell(asUnit) && !player->CanAssist(corpse)) {
+    if ((corpse->m_corpse->m_corpseFieldFlags & CORPSE_FIELD_FLAGS::CORPSE_FIELD_FLAG_SKINNABLE) && CGSpellBook::GetSkinningSpell(asUnit) && !player->CanAssist(corpse)) {
         float minRange;
         float maxRange;
         Spell_C::GetSpellRange(player, CGSpellBook::GetSkinningSpell(asUnit), &minRange, &maxRange, nullptr);
@@ -919,7 +920,7 @@ void CGWorldFrame::SetPlayerFadeCameraValue(uint8_t value) {
         return;
     }
 
-    if ((unit->m_vehicle && unit->m_vehicle->m_vehicleRec) || (unit->m_vehiclePassenger && unit->m_vehiclePassenger->m_state == 3)) {
+    if ((unit->m_vehicle && unit->m_vehicle->m_vehicleRec) || (unit->m_vehiclePassenger && unit->m_vehiclePassenger->m_state == CVehiclePassenger_C::TRANSITION_STATE::STATE_RIDING)) {
         unit = unit->m_vehiclePassenger ? unit->m_vehiclePassenger->GetStoredRootVehicleUnit() : unit->FindRootVehicle(nullptr);
 
         if (!unit) {
@@ -939,7 +940,7 @@ void CGWorldFrame::UpdateScreenEffectParams() {
 
     float glow = DayNight::GetInfo()->m_bands.m_glow * 255.0f + 512.0f;
     uint8_t glowLevel = *reinterpret_cast<uint32_t*>(&glow) >> 14;
-    int32_t underwater = 0;
+    EffectGlow::PASS_SEQUENCE underwater = EffectGlow::PASS_SEQUENCE::STANDARD_PASSES;
     uint8_t minimum = 0;
     uint8_t level = minimum;
 
@@ -952,7 +953,7 @@ void CGWorldFrame::UpdateScreenEffectParams() {
 
             if (World::SceneCamLiquidStatus(nullptr)) {
                 minimum = 84;
-                underwater = 1;
+                underwater = EffectGlow::PASS_SEQUENCE::ALTERNATE_PASSES;
             }
 
             level = drunkLevel > minimum ? drunkLevel : minimum;
@@ -1176,7 +1177,7 @@ int32_t CGWorldFrame::HitTest(const C3Vector& start, const C3Vector& end, uint32
 // VERIFY: 53a93536 auto
 // OFFSET: 0x004F9DA0
 int32_t CGWorldFrame::HitTestPoint(float x, float y, int32_t a3, HITTESTRESULT* result) {
-    if (!(CGInputControl::GetActive()->m_mouseModeFlags & 0x1)) {
+    if (!(CGInputControl::GetActive()->m_mouseModeFlags & INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_CURSOR_ON)) {
         return HIT_NONE;
     }
 
@@ -1196,8 +1197,8 @@ int32_t CGWorldFrame::HitTestPoint(float x, float y, int32_t a3, HITTESTRESULT* 
         C3Vector end = { 0.0f, 0.0f, 0.0f };
 
         if (this->GetLineSegment(x, y, &start, &end)) {
-            result->m_segStart = start;
-            result->m_segEnd = end;
+            result->m_segment.start = start;
+            result->m_segment.end = end;
             kind = this->HitTest(start, end, flags, result);
 
             if (kind >= HIT_OBJECT) {
@@ -1231,13 +1232,13 @@ CGWorldFrame::CGWorldFrame(CSimpleFrame* parent) : CSimpleFrame(parent) {
     this->m_defaultActionHit.m_guid = WOWGUID();
     this->m_defaultActionHit.m_point = { 0.0f, 0.0f, 0.0f };
     this->m_defaultActionHit.m_distance = 0.0f;
-    this->m_defaultActionHit.m_segStart = { 0.0f, 0.0f, 0.0f };
-    this->m_defaultActionHit.m_segEnd = { 0.0f, 0.0f, 0.0f };
+    this->m_defaultActionHit.m_segment.start = { 0.0f, 0.0f, 0.0f };
+    this->m_defaultActionHit.m_segment.end = { 0.0f, 0.0f, 0.0f };
     this->m_defaultActionPointDDC = { 0.0f, 0.0f };
     this->m_worldFlags = (this->m_worldFlags & ~0x3) | 0x1;
     this->m_viewportDDC = { 0.0f, 0.0f, 0.0f, 0.0f };
     this->m_viewportNDC = { 0.0f, 0.0f, 0.0f, 0.0f };
-    this->m_namePlateFlags = 0;
+    this->m_namePlateFlags = CGWorldFrame::NAME_PLATE_FLAGS::NAME_PLATE_NONE;
 
     CGWorldFrame::s_currentWorldFrame = this;
 
@@ -1390,7 +1391,7 @@ void CGWorldFrame::UpdateScreenEffect() {
                 continue;
             }
 
-            for (uint32_t j = 0; j < 3; j++) {
+            for (uint32_t j = 0; j < NUM_SPELL_EFFECTS; j++) {
                 if (spell.m_effectAura[j] == SPELL_AURA_SCREEN_EFFECT) {
                     CGWorldFrame::SetScreenEffect(spell.m_effectMiscValue[j]);
                     return;
@@ -1398,12 +1399,12 @@ void CGWorldFrame::UpdateScreenEffect() {
             }
         }
 
-        if ((player->m_player->m_playerFlags & 0x10) && CGBattlefieldInfo::m_instanceType != 4) {
+        if ((player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_GHOST) && CGBattlefieldInfo::m_instanceType != MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_ARENA_BATTLEFIELD) {
             CGWorldFrame::SetScreenEffect(1);
             return;
         }
 
-        if (player->m_player->m_playerFieldBytes2 & 0x40000000) {
+        if (player->m_player->m_packedOverrideRegenVision & 0x40000000) {
             CGWorldFrame::SetScreenEffect(81);
             return;
         }
@@ -1585,7 +1586,7 @@ void CGWorldFrame::UpdateDayNight(float deltaSec) {
         info->m_playerPos = player->GetPosition();
     }
 
-    if (player && (player->m_unit->m_unitFieldFlags & 0x100000) && (player->m_player->m_playerFlags & 0x20000)) {
+    if (player && (player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_ON_TAXI) && (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_TAXI_BENCHMARK)) {
         info->m_timeOfDay = 0;
         info->m_dayProgression = 0.5f;
         info->m_day = 0.0f;
@@ -1631,11 +1632,11 @@ void CGWorldFrame::UpdateObject(CGObject_C* object, uint32_t flags) {
         return;
     }
 
-    if ((object->m_obj->m_type & (TYPE_UNIT | TYPE_GAMEOBJECT | TYPE_CORPSE)) && visible && !(object->m_modelFlags & 0x100000)) {
+    if ((object->m_obj->m_type & (TYPE_UNIT | TYPE_GAMEOBJECT | TYPE_CORPSE)) && visible && !(object->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLE_PENDING)) {
         CModelRecord* record;
 
         if (this->m_freeModelList.IsEmpty()) {
-            record = this->m_modelList.NewNode(2, 0, 0);
+            record = this->m_modelList.NewNode(TSLIST_LINK_BEFORE, 0, 0);
         } else {
             record = this->m_freeModelList.Head();
             this->m_freeModelList.UnlinkNode(record);
@@ -1651,15 +1652,15 @@ void CGWorldFrame::UpdateObject(CGObject_C* object, uint32_t flags) {
     uint32_t bit = visible & 1;
 
     if (model->m_attachParent) {
-        model->m_fFlags = (model->m_fFlags & ~0x80) | (bit << 7);
+        model->m_runtimeFlags = (model->m_runtimeFlags & ~0x80) | (bit << 7);
     } else {
-        model->m_fFlags = (model->m_fFlags & ~0x8) | (bit << 3);
+        model->m_runtimeFlags = (model->m_runtimeFlags & ~0x8) | (bit << 3);
     }
 
     if (model->m_attachParent) {
-        model->m_fFlags = (model->m_fFlags & ~0x20000) | (bit << 17);
+        model->m_runtimeFlags = (model->m_runtimeFlags & ~0x20000) | (bit << 17);
     } else {
-        model->m_fFlags = (model->m_fFlags & ~0x10000) | (bit << 16);
+        model->m_runtimeFlags = (model->m_runtimeFlags & ~0x10000) | (bit << 16);
     }
 }
 
@@ -1694,7 +1695,7 @@ void CGWorldFrame::OnWorldRender() {
     }
 
     if (CWorld::enables & 0x20000000) {
-        g_theGxDevicePtr->MasterEnableSet(GxMasterEnable_PolygonFill, 0);
+        g_theGxDevicePtr->MasterEnableSet(GxMasterEnable_PolygonFill, Gx_Disable);
     }
 
     float minX = 0.0f;
@@ -1725,9 +1726,9 @@ void CGWorldFrame::OnWorldRender() {
     TextureCacheResetLoadCount();
     PlayerNameUpdateEarly();
 
-    if (this->m_namePlateFlags & 0x2) {
+    if (this->m_namePlateFlags & CGWorldFrame::NAME_PLATE_FLAGS::NAME_PLATE_RESORT_PENDING) {
         CGUnit_C::NamePlateSetResortAll(true);
-        this->m_namePlateFlags &= ~0x2;
+        this->m_namePlateFlags &= ~CGWorldFrame::NAME_PLATE_FLAGS::NAME_PLATE_RESORT_PENDING;
     }
 
     CShaderEffect::UpdateProjMatrix();
@@ -1738,10 +1739,10 @@ void CGWorldFrame::OnWorldRender() {
     CGUnit_C::NamePlateUpdateLevels(false);
     CGUnit_C::NamePlateUpdateColor(false);
 
-    if (this->m_namePlateFlags & 0x1) {
+    if (this->m_namePlateFlags & CGWorldFrame::NAME_PLATE_FLAGS::NAME_PLATE_REPOSITION_PENDING) {
         SmartScreenRectClearGrid(SRECTGRID_NAMEPLATES);
         CGUnit_C::UnitNameplatesReposition(this);
-        this->m_namePlateFlags &= ~0x1;
+        this->m_namePlateFlags &= ~CGWorldFrame::NAME_PLATE_FLAGS::NAME_PLATE_REPOSITION_PENDING;
     }
 
     CM2Scene* scene = World::s_m2Scene;
@@ -1791,7 +1792,7 @@ void CGWorldFrame::OnWorldRender() {
     PlayerNameUpdateLate();
 
     if (CWorld::enables & 0x20000000) {
-        GxMasterEnableSet(GxMasterEnable_PolygonFill, 1);
+        GxMasterEnableSet(GxMasterEnable_PolygonFill, Gx_Enable);
     }
 
     g_theGxDevicePtr->RsPop();
@@ -1813,12 +1814,12 @@ int32_t CGWorldFrame::ObjectEnumProc(void* param, uint32_t flags, uint64_t guid,
     }
 
     if (flags & 4) {
-        object->m_modelFlags |= 0x800000;
+        object->m_modelFlags |= OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_COLLIDE_MOVEMENT;
     } else {
-        object->m_modelFlags &= ~0x800000;
+        object->m_modelFlags &= ~OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_COLLIDE_MOVEMENT;
     }
 
-    if (!(object->m_modelFlags & 0x10000) && object->IsReadyToDraw()) {
+    if (!(object->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLED) && object->IsReadyToDraw()) {
         frame->UpdateObject(object, flags);
         return 1;
     }
@@ -1827,15 +1828,15 @@ int32_t CGWorldFrame::ObjectEnumProc(void* param, uint32_t flags, uint64_t guid,
         CM2Model* model = object->GetObjectModel();
 
         if (model->m_attachParent) {
-            model->m_fFlags &= ~0x80;
+            model->m_runtimeFlags &= ~0x80;
         } else {
-            model->m_fFlags &= ~0x8;
+            model->m_runtimeFlags &= ~0x8;
         }
 
         if (model->m_attachParent) {
-            model->m_fFlags &= ~0x20000;
+            model->m_runtimeFlags &= ~0x20000;
         } else {
-            model->m_fFlags &= ~0x10000;
+            model->m_runtimeFlags &= ~0x10000;
         }
     }
 
@@ -1853,8 +1854,8 @@ void CGWorldFrame::OnLayerUpdate(float elapsedSec) {
     hit.m_point = C3Vector(0.0f, 0.0f, 0.0f);
     hit.m_guid = WOWGUID();
     hit.m_distance = 0.0f;
-    hit.m_segStart = C3Vector(0.0f, 0.0f, 0.0f);
-    hit.m_segEnd = C3Vector(0.0f, 0.0f, 0.0f);
+    hit.m_segment.start = C3Vector(0.0f, 0.0f, 0.0f);
+    hit.m_segment.end = C3Vector(0.0f, 0.0f, 0.0f);
     int32_t kind = -1;
     CSimpleFrame* focus = top->m_mouseFocus;
 
@@ -1874,7 +1875,7 @@ void CGWorldFrame::OnLayerUpdate(float elapsedSec) {
         } else {
             kind = this->HitTestPoint(ddc.x, ddc.y, 1, &hit);
         }
-    } else if (focus && (focus->m_layoutFlags & 0x10000)) {
+    } else if (focus && (focus->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_EXPLICITLY_PROTECTED)) {
         lua_State* L = FrameScript_GetContext();
         const char* savedTaint = lua_tainted;
 
@@ -1936,7 +1937,7 @@ void CGWorldFrame::OnLayerUpdate(float elapsedSec) {
         case HIT_WORLD_OBJECT: {
             CGGameObject_C* gameObject = static_cast<CGGameObject_C*>(ClntObjMgrObjectPtr(hit.m_guid, TYPE_GAMEOBJECT, __FILE__, __LINE__));
 
-            if (!gameObject || gameObject->m_gameObject->m_typeID != 33 || Spell_C_CanTargetTerrain()) {
+            if (!gameObject || gameObject->m_gameObject->m_typeID != TYPE_DESTRUCTIBLE_BUILDING || Spell_C_CanTargetTerrain()) {
                 this->OnLayerTrackTerrain(hit);
                 break;
             }
@@ -1990,7 +1991,7 @@ void CGWorldFrame::OnWorldUpdate() {
         CGPlayer_C* activePlayer = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
         if (activePlayer) {
-            if (activePlayer->m_combatModeFlags & 0x1) {
+            if (activePlayer->m_combatModeFlags & CGPlayer_C::COMBAT_MODE_FLAGS::COMBAT_MODE_FAR_SIGHT) {
                 activePlayer->ToggleFarSight(nullptr);
             }
 
@@ -2041,7 +2042,7 @@ void CGWorldFrame::OnWorldUpdate() {
             C3Vector offset = C3Vector(facing.x * backDist, facing.y * backDist, backDist * facing.z);
             C3Vector listener;
 
-            if (focus->m_worldModel && (focus->m_worldModel->m_fFlags & 0x8000)) {
+            if (focus->m_worldModel && (focus->m_worldModel->m_runtimeFlags & M2_MODEL_RUNTIME_FLAG_WORLD_TRANSFORM_VALID)) {
                 listener = focus->m_worldModel->GetWorldPosition() - offset;
                 listener.z = listener.z + upDist;
             } else {
@@ -2079,7 +2080,7 @@ void CGWorldFrame::OnWorldUpdate() {
     GxXformViewProj(viewProjection);
 
     if (viewProjection != this->m_viewProjection) {
-        this->m_namePlateFlags |= 0x2;
+        this->m_namePlateFlags |= CGWorldFrame::NAME_PLATE_FLAGS::NAME_PLATE_RESORT_PENDING;
         this->m_viewProjection = viewProjection;
     }
 
@@ -2148,9 +2149,9 @@ void CGWorldFrame::PerformDefaultAction(MOUSEBUTTON button) {
 
     if (!player || player->m_unit->m_unitFieldCharmedby) {
         CWorldClickEvent evt;
-        evt.m_segStart = C3Vector(0.0f, 0.0f, 0.0f);
+        evt.m_segment.start = C3Vector(0.0f, 0.0f, 0.0f);
         evt.m_button = button;
-        evt.m_segEnd = C3Vector(0.0f, 0.0f, 0.0f);
+        evt.m_segment.end = C3Vector(0.0f, 0.0f, 0.0f);
         CGGameUI::HandleWorldClick(evt);
         return;
     }
@@ -2170,8 +2171,8 @@ void CGWorldFrame::PerformDefaultAction(MOUSEBUTTON button) {
     switch (this->m_defaultActionHitKind) {
         case HIT_NONE: {
             CWorldClickEvent evt;
-            evt.m_segStart = this->m_defaultActionHit.m_segStart;
-            evt.m_segEnd = this->m_defaultActionHit.m_segEnd;
+            evt.m_segment.start = this->m_defaultActionHit.m_segment.start;
+            evt.m_segment.end = this->m_defaultActionHit.m_segment.end;
             evt.m_button = button;
             CGGameUI::HandleWorldClick(evt);
             break;

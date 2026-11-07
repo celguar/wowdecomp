@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "WoW/Source/Object/GameObjectDef.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
@@ -89,6 +90,14 @@ class CGGameObject_C_TypeBase {
     virtual float GetInteractDistance() const;
 
     CGGameObject_C_TypeBase(CGGameObject_C* owner);
+};
+
+// Display state passed to CGGameObject_C::SetDisplayState/UpdateState;
+// distinct from the model animation IDs (ANIMSTATE_*).
+enum GAMEOBJECT_DISPLAY_STATE : int32_t {
+    GAMEOBJECT_DISPLAY_STATE_OPEN = 0,
+    GAMEOBJECT_DISPLAY_STATE_CLOSED = 1,
+    GAMEOBJECT_DISPLAY_STATE_DESTROYED = 2,
 };
 
 enum : int32_t {
@@ -222,7 +231,7 @@ struct DestructibleBuildingState {
     /* 0008 */ CMapEntity* m_object;
     /* 000C */ uint8_t m_loading;
     /* 000D */ uint8_t m_animate;
-    /* 000E */ uint8_t unused_000E[2];
+    /* 000E */ uint8_t unknown_000E[2];
 };
 
 class CGGameObject_C_Type_DestructibleBuilding : public CGGameObject_C_Type_WorldObj {
@@ -313,10 +322,10 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     static void SequenceCallback(CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time, uint64_t param);
 
     /* 00D8 */ CPassenger m_passenger;
-    /* 0108 */ TSList<void> m_gameObjectMirrorLists [12];
+    /* 0108 */ TSList<void> m_gameObjectMirrorLists [CGGameObjectData::NUM_FIELDS];
     /* 0198 */ TSLink<CGGameObject_C> m_transportLink;
     /* 01A0 */ CGGameObject_C_TypeBase* m_typeData;
-    /* 01A4 */ GameObjectStats* m_stats;
+    /* 01A4 */ const GameObjectStats* m_stats;
     /* 01A8 */ C44Matrix m_matrix;
     /* 01E8 */ CAaBox m_worldBounds;
     /* 0200 */ uint32_t m_transportTimeOffset;
@@ -380,7 +389,7 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     float GetInteractDistanceSquared() const;
     const char* GetModelFileNameInternal() const;
     const char* GetOpenText() const;
-    uint32_t GetPropertyValue(uint32_t index) const;
+    uint32_t GetPropertyValue(uint32_t propertyIndex) const;
     int32_t GetPageTextMaterial() const;
     int32_t GetPageTextLanguage() const;
     bool IsValidOpenAction(int32_t action) const;
@@ -400,7 +409,7 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     void UpdateObjectEffectAnimationStates(uint32_t anim);
     CAaBox GetWorldBounds() const;
     void UpdateDisplay(uint32_t time);
-    uint32_t GetProperty(int32_t prop) const;
+    uint32_t GetProperty(int32_t propertyId) const;
     bool IsLocked(int32_t* spellId, int32_t* skillValue, int32_t* requiredSkill, CGItem_C** key, uint32_t* entry) const;
     bool IsUsableInCombat() const;
     bool IsUsableMounted() const;

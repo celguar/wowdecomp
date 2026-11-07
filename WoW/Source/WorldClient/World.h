@@ -110,6 +110,14 @@ struct OcclusionVolume {
 };
 
 struct SPortalExt {
+    enum FLAGS : uint16_t {
+        F_SCREEN_CULLED = 0x1,
+        F_INTERSECT_NEAR = 0x2,
+        F_EXTERIOR_VIEW_HANDLED = 0x4, // Guards repeated exterior portal-view processing.
+        F_INTERIOR_VIEW_HANDLED = 0x8, // Set after interior portal-view processing.
+        F_NO_OCCLUSION = 0x10, // Forwarded to TransformAndClipVerts.
+    };
+
     /* 0000 */ uint16_t m_flags;
     /* 0002 */ uint16_t unused_0002;
     /* 0004 */ CRect m_rect;
@@ -137,6 +145,12 @@ extern TSExplicitList<SWModelFadeout, offsetof(SWModelFadeout, m_link)> s_fadeou
 
 class CWorldScene {
     public:
+    enum CLIP_SIDE : int32_t {
+        SIDE_ON = 0,
+        SIDE_POS = 1,
+        SIDE_NEG = 2,
+    };
+
     static bool IsBeyondFadeDistance(const C3Vector& position, uint32_t fadeLevel);
     static Liquid::CRenderer* s_liquidRenderer;
     static TSExplicitList<CWFrustum, offsetof(CWFrustum, m_link)> frustumFreeList;

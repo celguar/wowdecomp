@@ -431,16 +431,16 @@ static bool CreateIntroScene(uint8_t classID, uint8_t raceID, C3Vector& position
             model->SetWorldTransform(transform);
 
             scene->SetTime(0);
-            model->SetBoneSequence(0xFFFFFFFF, 0, 0xFFFFFFFF, 0, 1.0f, 0, 1);
+            model->SetBoneSequence(0xFFFFFFFF, ANIM_STAND, 0xFFFFFFFF, 0, 1.0f, 0, 1);
             model->SetAnimating(1);
 
             C3Vector cameraPos;
             scene->Animate(cameraPos);
 
-            void* camera = model->GetCameraByIndex(0);
+            CCamera* camera = model->GetCameraByIndex(0);
 
             if (camera) {
-                DataMgrGetCoord(static_cast<CDataMgr*>(camera), 7, &position);
+                DataMgrGetCoord(reinterpret_cast<CDataMgr*>(camera), 7, &position);
                 model->Release();
                 scene->Release();
                 return true;
@@ -699,7 +699,7 @@ void CGlueMgr::Resume() {
     CGlueMgr::m_simpleTop->SetCursor(CGlueMgr::m_cursorMipBits);
 
     CGInputControl* control = CGInputControl::GetActive();
-    control->m_mouseModeFlags = 3;
+    control->m_mouseModeFlags = INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_INITIAL_FLAGS;
     control->m_forceCursorOn = 0;
     control->UpdateMouseMode(1);
 
@@ -1785,7 +1785,7 @@ void CGlueMgr::LogConnectionStatus(const char* format, ...) {
 
     s_connectionStatusLock.Enter();
 
-    ConsoleString* string = s_connectionStatus.NewNode(2, 0, 0);
+    ConsoleString* string = s_connectionStatus.NewNode(TSLIST_LINK_BEFORE, 0, 0);
 
     va_list args;
     va_start(args, format);
@@ -2509,49 +2509,49 @@ int32_t CGlueMgr::OnCharFactionChangeResult(void* param, NETMESSAGE msgId, uint3
     const char* text;
 
     switch (result) {
-        case 0:
+        case ResponseCodes::RESPONSE_SUCCESS:
             CCharacterSelection::UpdateCharacterInfo(guid, name, sexID, skinID, faceID, hairStyleID, hairColorID, facialHairStyleID, raceID);
             FrameScript_SignalEvent(GLUE_EVENT_CLOSE_STATUS_DIALOG, nullptr);
             CGlueMgr::SetScreen("charselect");
             return 1;
 
-        case 50:
-            text = FrameScript_GetText(ClientServices::GetErrorToken(50), -1, GENDER_NOT_APPLICABLE);
+        case ResponseCodes::CHAR_CREATE_NAME_IN_USE:
+            text = FrameScript_GetText(ClientServices::GetErrorToken(ResponseCodes::CHAR_CREATE_NAME_IN_USE), -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 61:
+        case ResponseCodes::CHAR_CREATE_CHARACTER_IN_GUILD:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_STILL_IN_GUILD", -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 62:
+        case ResponseCodes::CHAR_CREATE_RESTRICTED_RACECLASS:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_RACECLASS_RESTRICTED", -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 63:
+        case ResponseCodes::CHAR_CREATE_CHARACTER_CHOOSE_RACE:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_CHOOSE_RACE", -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 64:
+        case ResponseCodes::CHAR_CREATE_CHARACTER_ARENA_LEADER:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_ARENA_LEADER", -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 65:
+        case ResponseCodes::CHAR_CREATE_CHARACTER_DELETE_MAIL:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_DELETE_MAIL", -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 66:
+        case ResponseCodes::CHAR_CREATE_CHARACTER_SWAP_FACTION:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_SWAP_FACTION", -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 67:
+        case ResponseCodes::CHAR_CREATE_CHARACTER_RACE_ONLY:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_RACE_ONLY", -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 68:
+        case ResponseCodes::CHAR_CREATE_CHARACTER_GOLD_LIMIT:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_GOLD_LIMIT", -1, GENDER_NOT_APPLICABLE);
             break;
 
-        case 69:
+        case ResponseCodes::CHAR_CREATE_FORCE_LOGIN:
             text = FrameScript_GetText("CHAR_FACTION_CHANGE_FORCE_LOGIN", -1, GENDER_NOT_APPLICABLE);
             break;
 

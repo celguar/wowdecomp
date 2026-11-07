@@ -76,7 +76,7 @@ static bool ParseTrailingTokens(const char* token, WOWGUID& guid, CGPlayer_C* pl
                 CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
                 guid = unit ? unit->m_unit->m_unitFieldTarget : WOWGUID();
             }
-        } else if (!SStrCmpI(token, "pet", 3) && (guid == ClntObjMgrGetActivePlayer() || CGGameUI::IsPartyMember(guid) || (player && (player->m_player->m_playerFlags & 0x80000)))) {
+        } else if (!SStrCmpI(token, "pet", 3) && (guid == ClntObjMgrGetActivePlayer() || CGGameUI::IsPartyMember(guid) || (player && (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_COMMENTATOR)))) {
             token += 3;
             CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
@@ -170,12 +170,12 @@ bool Script_GetGUIDFromToken(const char* token, WOWGUID& guid, bool defaultToTar
         guid = *GetCurrentQuestGiverGUID();
     } else if (!SStrCmpI(token, "none", STORM_MAX_STR)) {
         token += 4;
-        guid.m_guid = 0xFFFFFFFFFFFFFFFFULL;
+        guid.m_guid = WOWGUID_NONE_TOKEN;
     }
 
     if ((guid != WOWGUID() || !*token) && ParseTrailingTokens(token, guid, player)) {
         if (guid == WOWGUID()) {
-            guid.m_guid = 0xFFFFFFFFFFFFFFFEULL;
+            guid.m_guid = WOWGUID_EMPTY_UNIT_TOKEN;
         }
 
         return true;
@@ -186,7 +186,7 @@ bool Script_GetGUIDFromToken(const char* token, WOWGUID& guid, bool defaultToTar
     }
 
     if (guid == WOWGUID()) {
-        guid.m_guid = 0xFFFFFFFFFFFFFFFEULL;
+        guid.m_guid = WOWGUID_EMPTY_UNIT_TOKEN;
     }
 
     return true;
@@ -957,7 +957,7 @@ void Script_SendUnitSignal(const WOWGUID& guid, int32_t signal) {
 
 // VERIFY: b717b06c manual
 // OFFSET: 0x0060BF60
-void Script_SendUnitSpellSignal(const WOWGUID& guid, uint8_t castCount, const SpellRec* spell, int32_t signal) {
+void Script_SendUnitSpellSignal(const WOWGUID& guid, uint8_t castCount, const SpellRec* spell, SCRIPT_EVENT signal) {
     if (!spell) {
         Script_SendUnitSignal(guid, signal);
         return;
@@ -1047,7 +1047,7 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
             return 0;
         }
 
-        if (!(unit->m_modelFlags & 0x10000)) {
+        if (!(unit->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLED)) {
             uint32_t slot = unit->GetSortedAuraSlot(info->m_index, info->m_name, info->m_rank, info->m_filter);
             SpellRec spell;
 
@@ -1089,7 +1089,7 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
                 lua_pushnil(L);
             }
 
-            if (spell.m_attributesExG & 0x10000000) {
+            if (spell.m_attributesExG & SPELL_ATTR7::SPELL_ATTR7_CONSOLIDATED_RAID_BUFF) {
                 lua_pushnumber(L, 1.0);
             } else {
                 lua_pushnil(L);
@@ -1168,7 +1168,7 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
             lua_pushnil(L);
             lua_pushnil(L);
 
-            if (spell.m_attributesExG & 0x10000000) {
+            if (spell.m_attributesExG & SPELL_ATTR7::SPELL_ATTR7_CONSOLIDATED_RAID_BUFF) {
                 lua_pushnumber(L, 1.0);
             } else {
                 lua_pushnil(L);

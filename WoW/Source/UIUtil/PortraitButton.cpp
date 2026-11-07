@@ -144,7 +144,7 @@ void PortraitInitialize() {
 // VERIFY: 59c574b9 auto
 // OFFSET: 0x00616B40
 static int32_t IsPortraitDrawable(CGUnit_C* unit) {
-    if (unit->m_clientFlags & 0x400000) {
+    if (unit->m_clientFlags & UNIT_CLIENT_FLAGS::UNIT_CLIENT_FLAG_COMPONENT_INITIALIZATION_PENDING) {
         return 0;
     }
 
@@ -178,7 +178,7 @@ void UpdatePendingPortraits() {
             continue;
         }
 
-        if ((unit->m_clientFlags & 0x400000) && !unit->InitializeComponent()) {
+        if ((unit->m_clientFlags & UNIT_CLIENT_FLAGS::UNIT_CLIENT_FLAG_COMPONENT_INITIALIZATION_PENDING) && !unit->InitializeComponent()) {
             continue;
         }
 
@@ -224,6 +224,20 @@ const char* s_sexNames[3] = { "Male", "Female", "NOSEX" };
 
 // INLINED
 PORTRAITCACHE::PORTRAITCACHE() : m_dirty(1), m_texture(nullptr), m_prev(nullptr), m_next(nullptr) {
+}
+
+// INLINED
+PORTRAITCACHE::~PORTRAITCACHE() {
+    if (this->m_texture) {
+        HandleClose(reinterpret_cast<HOBJECT>(this->m_texture));
+    }
+}
+
+// INLINED
+ITEMPORTRAIT::~ITEMPORTRAIT() {
+    if (this->m_texture) {
+        HandleClose(reinterpret_cast<HOBJECT>(this->m_texture));
+    }
 }
 
 // VERIFY: 3458775d auto
@@ -578,7 +592,7 @@ void RenderPortraitTexture(CSimpleTexture* texture, CGUnit_C* unit) {
         C3Vector target(0.0f, 0.0f, 0.0f);
         M2SequenceInfo info;
         info.Clear();
-        model->GetSequenceInfo(0, 0, info);
+        model->GetSequenceInfo(ANIM_STAND, 0, info);
         C3Vector position;
         position.x = info.m_radius * 1.7f + info.m_center.x;
         target = info.m_center;
@@ -591,7 +605,7 @@ void RenderPortraitTexture(CSimpleTexture* texture, CGUnit_C* unit) {
     }
 
     CCharacterComponent::RemoveVisuals(model);
-    model->SetBoneSequence(0xFFFFFFFF, 0, 0, 0, 0.0f, 0, 1);
+    model->SetBoneSequence(0xFFFFFFFF, ANIM_STAND, 0, 0, 0.0f, 0, 1);
 
     float viewportMinX;
     float viewportMaxX;
@@ -607,7 +621,7 @@ void RenderPortraitTexture(CSimpleTexture* texture, CGUnit_C* unit) {
     GxXformProjection(savedProjection);
     GxXformView(savedView);
     int32_t fogEnabled = GxMasterEnable(GxMasterEnable_Fog);
-    GxMasterEnableSet(GxMasterEnable_Fog, 0);
+    GxMasterEnableSet(GxMasterEnable_Fog, Gx_Disable);
 
     static C44Matrix s_identity;
 
@@ -663,7 +677,7 @@ void RenderPortraitTexture(CSimpleTexture* texture, CGUnit_C* unit) {
         UNITPORTRAIT* portrait = s_unitPortraits.Ptr(displayId, HASHKEY_DWORD{ displayId });
 
         if (!portrait) {
-            portrait = s_unitPortraits.InternalNewNode(displayId, 0, 0);
+            portrait = s_unitPortraits.New(displayId, HASHKEY_DWORD{ displayId }, 0, 0);
         }
 
         cache = &portrait->m_cache;
@@ -727,15 +741,15 @@ void RenderPortraitTexture(CSimpleTexture* texture, CGUnit_C* unit) {
     model->SetAnimating(1);
 
     if (model->m_attachParent) {
-        model->m_fFlags |= 0x80;
+        model->m_runtimeFlags |= 0x80;
     } else {
-        model->m_fFlags |= 0x8;
+        model->m_runtimeFlags |= 0x8;
     }
 
     if (model->m_attachParent) {
-        model->m_fFlags |= 0x20000;
+        model->m_runtimeFlags |= 0x20000;
     } else {
-        model->m_fFlags |= 0x10000;
+        model->m_runtimeFlags |= 0x10000;
     }
 
     model->m_lightingCallback = PortraitLightingCallback;

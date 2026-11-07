@@ -27,13 +27,13 @@ static int32_t s_menuHotkeysEnabled = 1;
 
 // INLINED
 int32_t COsDialog::OnEvent(int32_t itemId, int32_t notifyCode, int32_t code) {
-    if (this->m_callback) {
+    if (this->m_callbackInfo.function) {
         OsGuiCallbackParams params;
         params.type = itemId;
         params.subType = notifyCode;
         params.code = code;
-        params.user = this->m_callbackParam;
-        this->m_callback(params);
+        params.user = this->m_callbackInfo.userParam;
+        this->m_callbackInfo.function(params);
     }
 
     return 1;
@@ -60,7 +60,7 @@ static int32_t sIsCharacterAllowed(char c, uint32_t filters) {
         return 1;
     }
 
-    if (filters & 0x1) {
+    if (filters & OSGUI_FILTER_LETTERS) {
         if (ch >= 'a' && ch <= 'z') {
             return 1;
         }
@@ -70,27 +70,27 @@ static int32_t sIsCharacterAllowed(char c, uint32_t filters) {
         }
     }
 
-    if ((filters & 0x2) && ch >= '0' && ch <= '9') {
+    if ((filters & OSGUI_FILTER_DIGITS) && ch >= '0' && ch <= '9') {
         return 1;
     }
 
-    if ((filters & 0x4) && (ch == '+' || ch == '-')) {
+    if ((filters & OSGUI_FILTER_SIGN) && (ch == '+' || ch == '-')) {
         return 1;
     }
 
-    if ((filters & 0x8) && ch == '.') {
+    if ((filters & OSGUI_FILTER_DECIMAL_POINT) && ch == '.') {
         return 1;
     }
 
-    if ((filters & 0x10) && ch == ' ') {
+    if ((filters & OSGUI_FILTER_SPACE) && ch == ' ') {
         return 1;
     }
 
-    if ((filters & 0x20) && ch == '_') {
+    if ((filters & OSGUI_FILTER_UNDERSCORE) && ch == '_') {
         return 1;
     }
 
-    return (filters & 0x40) && ch <= 0x7E;
+    return (filters & OSGUI_FILTER_PRINTABLE_ASCII) && ch <= 0x7E;
 }
 
 // INLINED

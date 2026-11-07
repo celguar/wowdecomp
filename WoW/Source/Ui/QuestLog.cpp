@@ -331,7 +331,7 @@ int32_t CGQuestLog::IsQuestCompleteEx(uint32_t index, int32_t a2) {
         return 0;
     }
 
-    uint32_t special = quest->m_flags & 6;
+    uint32_t special = quest->m_flags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_COMPLETION_STATE_MASK;
 
     if (!special && !quest->m_friendlyFactionId && !quest->m_hostileFactionId && !quest->m_rewardMoney) {
         int32_t hasObjectives = 0;
@@ -420,7 +420,7 @@ bool CGQuestLog::HasNoObjectives(uint32_t index) {
         }
     }
 
-    return !quest->m_requiredPlayersKilled && !(quest->m_flags & 6) && !quest->m_friendlyFactionId && !quest->m_hostileFactionId && quest->m_rewardMoney >= 0;
+    return !quest->m_requiredPlayersKilled && !(quest->m_flags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_COMPLETION_STATE_MASK) && !quest->m_friendlyFactionId && !quest->m_hostileFactionId && quest->m_rewardMoney >= 0;
 }
 
 // VERIFY: e4a82c9a manual
@@ -653,7 +653,7 @@ uint32_t IsDailyQuest(int32_t index) {
         return 0;
     }
 
-    return quest->m_flags & 0x1000;
+    return quest->m_flags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_DAILY;
 }
 
 // VERIFY: d701767c manual
@@ -986,7 +986,7 @@ CGItem_C* CGQuestLog::GetQuestSpecialItem(uint32_t index) {
     WOWGUID none = { 0 };
     QuestCache* quest = g_questDBCache.GetRecord(CGQuestLog::m_quests[index].m_questId, none, QuestQueryCallback, nullptr, false);
 
-    if (!quest || (!quest->m_startingItemId && !(quest->m_flags & 0x20000))) {
+    if (!quest || (!quest->m_startingItemId && !(quest->m_flags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_DISPLAY_ITEM_IN_TRACKER))) {
         return nullptr;
     }
 
@@ -1003,7 +1003,7 @@ CGItem_C* CGQuestLog::GetQuestSpecialItem(uint32_t index) {
         return item;
     }
 
-    if (!(quest->m_flags & 0x20000)) {
+    if (!(quest->m_flags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_DISPLAY_ITEM_IN_TRACKER)) {
         return nullptr;
     }
 
@@ -1308,7 +1308,7 @@ int32_t CalculateExperience(int32_t questId, int32_t level) {
 int32_t CGQuestLog::IsOnQuest(int32_t questId) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (!player || (player->m_modelFlags & 0x10000)) {
+    if (!player || (player->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLED)) {
         return 0;
     }
 
@@ -1761,7 +1761,7 @@ void CGQuestLog::LoadTrackedQuests() {
     CVarIntListWrapper list;
     list.m_cvar = CVar::Lookup("trackedQuests");
     list.m_pos = 2;
-    list.m_state = 0;
+    list.m_state = CVarIntListWrapper::STATE::INITIAL;
 
     for (uint32_t questId = list.GetNextValue(); questId; questId = list.GetNextValue()) {
         CGQuestLog::AddQuestWatch(questId, 0);
@@ -1769,7 +1769,7 @@ void CGQuestLog::LoadTrackedQuests() {
 
     CGQuestLog::m_trackedQuestsLoaded = 1;
 
-    if (list.m_state != 1) {
+    if (list.m_state != CVarIntListWrapper::STATE::READ) {
         list.m_buffer[0] = 'v';
         list.m_buffer[1] = 1;
         list.m_buffer[list.m_pos] = 0;
@@ -1867,8 +1867,8 @@ void CGQuestLog::HandlePOIQueryResponse(CDataStore* msg) {
                 msg->Get(reinterpret_cast<uint32_t&>(y));
 
                 if (blob) {
-                    blob->m_points.m_data[k].m_x = x;
-                    blob->m_points.m_data[k].m_y = y;
+                    blob->m_points.m_data[k].m_position.x = x;
+                    blob->m_points.m_data[k].m_position.y = y;
                     blob->m_centerX += x;
                     blob->m_centerY += y;
                 }
@@ -2164,7 +2164,7 @@ uint32_t CGQuestLog::ComputeBlobQuestObjectives(int32_t questId) {
         }
     }
 
-    if ((quest->m_flags & 6) && !(entry->m_state & 1)) {
+    if ((quest->m_flags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_COMPLETION_STATE_MASK) && !(entry->m_state & 1)) {
         result |= 0x10000;
     }
 
@@ -2217,7 +2217,7 @@ void CGQuestLog::SaveTrackedQuests() {
     CVarIntListWrapper list;
     list.m_cvar = CVar::Lookup("trackedQuests");
     list.m_pos = 2;
-    list.m_state = 0;
+    list.m_state = CVarIntListWrapper::STATE::INITIAL;
 
     for (uint32_t i = 0; i < CGQuestLog::m_numQuestWatches; i++) {
         if (!CGQuestLog::m_questWatches[i].m_expireTime) {
@@ -2225,7 +2225,7 @@ void CGQuestLog::SaveTrackedQuests() {
         }
     }
 
-    if (list.m_state != 1) {
+    if (list.m_state != CVarIntListWrapper::STATE::READ) {
         list.m_buffer[0] = 'v';
         list.m_buffer[1] = 1;
         list.m_buffer[list.m_pos] = 0;
@@ -2781,13 +2781,13 @@ static int QSortQuestWatches(const void* a, const void* b) {
     const QuestWatch* watchB = static_cast<const QuestWatch*>(b);
     int32_t questA = watchA->m_questId;
     int32_t questB = watchB->m_questId;
-    int32_t sort = g_trackerSortingCVar->m_intValue;
+    CGQuestLog::TRACKER_SORT_MODE sort = static_cast<CGQuestLog::TRACKER_SORT_MODE>(g_trackerSortingCVar->m_intValue);
 
-    if (sort == 1) {
+    if (sort == CGQuestLog::TRACKER_SORT_MODE::DISTANCE) {
         return watchB->m_distance >= watchA->m_distance ? -1 : 1;
     }
 
-    if (sort <= 1 || sort > 3) {
+    if (sort <= CGQuestLog::TRACKER_SORT_MODE::DISTANCE || sort > CGQuestLog::TRACKER_SORT_MODE::LEVEL_ASCENDING) {
         return questA - questB;
     }
 
@@ -2798,7 +2798,7 @@ static int QSortQuestWatches(const void* a, const void* b) {
         return questA - questB;
     }
 
-    return sort == 3 ? levelA - levelB : levelB - levelA;
+    return sort == CGQuestLog::TRACKER_SORT_MODE::LEVEL_ASCENDING ? levelA - levelB : levelB - levelA;
 }
 
 // VERIFY: 3900de0c manual
@@ -2861,13 +2861,13 @@ static float GetQuestPOIDistance(int32_t questId) {
 // VERIFY: b3c23830 manual
 // OFFSET: 0x005E5C10
 bool CGQuestLog::SortQuestWatches() {
-    int32_t sort = g_trackerSortingCVar->m_intValue;
+    CGQuestLog::TRACKER_SORT_MODE sort = static_cast<CGQuestLog::TRACKER_SORT_MODE>(g_trackerSortingCVar->m_intValue);
 
     if (!sort || CGQuestLog::m_numQuestWatches <= 1) {
         return false;
     }
 
-    if (sort == 1) {
+    if (sort == CGQuestLog::TRACKER_SORT_MODE::DISTANCE) {
         float last = 0.0f;
         bool sorted = true;
 

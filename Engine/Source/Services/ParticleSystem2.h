@@ -81,6 +81,17 @@ class CParticleEmitter2 {
         PET_NUMS_PETS = 4,
     };
 
+    enum : uint32_t {
+        NUM_PARTICLE_KEYS = 2,
+        MAX_CHILD_EMITTERS = 4,
+    };
+
+    enum : uint32_t {
+        MAX_RECURSIVE_PARTICLES = 0x1000,
+        RND_TABLE_SIZE = 128,
+        RND_TABLE_MASK = 0x7F,
+    };
+
     enum PARTICLE_TYPE : uint32_t {
         PT_QUAD = 0,
         PT_MODEL = 1,
@@ -115,7 +126,7 @@ class CParticleEmitter2 {
     };
 
     struct Params {
-        /* 0000 */ uint32_t m_hasModel;
+        /* 0000 */ PARTICLE_TYPE m_particleType;
         /* 0004 */ float m_emissionRate;
         /* 0008 */ float m_emissionRateVariation;
         /* 000C */ float m_life;
@@ -129,8 +140,7 @@ class CParticleEmitter2 {
         /* 002C */ float m_initialSpinVariation;
         /* 0030 */ float m_spin;
         /* 0034 */ float m_spinVariation;
-        /* 0038 */ uint32_t m_materialBlend;
-        /* 003C */ uint32_t m_materialFlags;
+        /* 0038 */ CParticleMat m_material; // Same blend/flag pair accepted by SetMaterial.
         /* 0040 */ const M2PartTrack<C3Vector>* m_colorTrack;
         /* 0044 */ const M2PartTrack<fixed16>* m_alphaTrack;
         /* 0048 */ const M2PartTrack<C2Vector>* m_scaleTrack;
@@ -150,7 +160,7 @@ class CParticleEmitter2 {
     static uint32_t s_initCount;
     static uint8_t s_noIndexBuffer;
     static CSortableParticleQueue s_pq;
-    static float s_rndTable[128];
+    static float s_rndTable[CParticleEmitter2::RND_TABLE_SIZE];
     static float s_viewDist;
 
     static void Destroy();
@@ -172,7 +182,7 @@ class CParticleEmitter2 {
     /* 004C */ TSGrowableArray<uint32_t> m_liveList;
     /* 005C */ TSGrowableArray<uint32_t> m_freeList;
     /* 006C */ uint32_t m_childEmitterCount;
-    /* 0070 */ CParticleEmitter2* m_childEmitters [4];
+    /* 0070 */ CParticleEmitter2* m_childEmitters [CParticleEmitter2::MAX_CHILD_EMITTERS];
     /* 0080 */ CM2Model* m_model;
     /* 0084 */ CM2Scene* m_scene;
     /* 0088 */ CM2Model* m_childModel;
@@ -284,6 +294,40 @@ class CParticleEmitter2 {
     int32_t UpdateLiveParticle(float deltaTime, CParticle2* particle, uint32_t index);
     void UpdateXform(const C44Matrix& transform, const C3Vector& viewPos, const C44Matrix* frameOfReference);
     CAaBox& WorldBounds();
+
+    // Runtime m_flags only; distinct from material, batch and M2 file flags.
+    // UNKNOWN bits preserve verified update markers/render exclusion without
+    // assigning unsupported original identities.
+    enum RUNTIME_FLAGS : uint32_t {
+        DATA_EMITTING = 0x1,
+        USER_ENABLED = 0x2,
+        HEAD = 0x4,
+        TAIL = 0x8,
+        REPLACEMENT_COLORS = 0x10,
+        SORT_PARTICLES = 0x20,
+        BURST_PENDING = 0x40,
+        UNKNOWN_00000080 = 0x80,
+        UNKNOWN_00000100 = 0x100,
+        LOCAL_SPACE = 0x200,
+        TRANSFORM_SCALE = 0x400,
+        INHERIT_VELOCITY = 0x800,
+        KILL_OUTWARD_PARTICLES = 0x1000,
+        EMIT_ALONG_MOTION = 0x2000,
+        USE_BILLBOARD_AXIS = 0x4000,
+        SPHERE_Z_VELOCITY = 0x8000,
+        RANDOM_SPIN_DIRECTION = 0x10000,
+        CLAMP_TAIL = 0x20000,
+        PROJECT = 0x40000,
+        FOLLOW = 0x80000,
+        RANDOM_TEXTURE = 0x100000,
+        VELOCITY_ALIGNED_HEAD = 0x200000,
+        IGNORE_DISTANCE = 0x400000,
+        SCALE_VARIATION = 0x800000,
+        SIMPLE_TRACKS = 0x1000000,
+        UNKNOWN_02000000 = 0x2000000,
+        EMISSION_ENABLED_MASK = 0x3,
+        INITIAL_FLAGS = 0x6,
+    };
 };
 
 class CPlaneParticleEmitter : public CParticleEmitter2 {
@@ -325,12 +369,12 @@ class CSphereParticleEmitter : public CParticleEmitter2 {
 
 class CSplineParticleEmitter : public CParticleEmitter2 {
     public:
-    /* 0234 */ float m_ratePerUnit;
-    /* 0238 */ float m_start;
-    /* 023C */ float m_end;
-    /* 0240 */ float m_latitude;
-    /* 0244 */ float m_longitude;
-    /* 0248 */ int32_t m_emitAtEnd;
+    /* 0234 */ float m_requestedEmissionRate; // Requested rate before multiplication by m_end.
+    /* 0238 */ float m_start; // Normalized arc-length start parameter, set by SetWidth.
+    /* 023C */ float m_end; // Normalized arc-length end parameter, set by SetHeight; also scales the requested rate.
+    /* 0240 */ float m_latitude; // Random rotation about the spline tangent is scaled by this angle in radians.
+    /* 0244 */ float m_radius; // Local-space position offset scale along the rotated direction, set by SetLongitude.
+    /* 0248 */ int32_t m_emitAtEnd; // The next particle uses m_end after SetHeight changes it.
     /* 024C */ C3Spline_Bezier3 m_spline;
 
     CSplineParticleEmitter();
@@ -341,7 +385,7 @@ class CSplineParticleEmitter : public CParticleEmitter2 {
     void SetWidth(float width) override;
     void SetHeight(float height) override;
     void SetLatitude(float latitude) override;
-    void SetLongitude(float longitude) override;
+    void SetLongitude(float radius) override;
     void SetEmissionRate(float rate) override;
     void SetSpline(const C3Vector* points, uint32_t count);
 };

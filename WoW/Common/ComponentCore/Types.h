@@ -3,6 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "WoW/Common/ItemTypes.h"
+#include "Engine/Source/Model2/Attachment.h"
 
 struct CharColorList;
 class CharSectionsRec;
@@ -50,22 +52,10 @@ enum COMP_HAND_SLOT {
     COMP_HAND_LEFT = 1,
 };
 
-enum GEOCOMPONENTLINKS {
-    ATTACH_NONE = -1,
-    ATTACH_SHIELD = 0,
-    ATTACH_HANDRIGHT = 1,
-    ATTACH_HANDLEFT = 2,
-    ATTACH_HELM = 11,
-    ATTACH_TORSOBLOODFRONT = 15,
-    ATTACH_TORSOBLOODBACK = 16,
-    ATTACH_SHEATH_MAINHAND = 26,
-    ATTACH_SHEATH_OFFHAND = 27,
-    ATTACH_SHEATH_SHIELD = 28,
-    ATTACH_BACK = 30,
-    ATTACH_BACK_OFFHAND = 31,
-    ATTACH_HIP = 32,
-    ATTACH_HIP_OFFHAND = 33,
-    NUM_ATTACH_LINKS = 50,
+// The same encoded byte has distinct roles: failed slot lookup vs player bag.
+enum INVENTORY_SLOT_ENCODING : int32_t {
+    INVENTORY_SLOT_INVALID = 0xFF,
+    INVENTORY_BAG_PLAYER = 0xFF,
 };
 
 enum INVENTORY_SLOTS {
@@ -117,6 +107,14 @@ enum INVENTORY_SLOTS {
     TOTAL_BAG_SLOTS = 11,
 };
 
+// Slot-selection masks used by equipped-item requirement checks.
+enum INVENTORY_SLOT_MASK : uint32_t {
+    INVSLOT_MASK_MAINHAND = 1u << INVSLOT_MAINHAND,
+    INVSLOT_MASK_OFFHAND = 1u << INVSLOT_OFFHAND,
+    INVSLOT_MASK_RANGED = 1u << INVSLOT_RANGED,
+    INVSLOT_MASK_ALL = 0xFFFFFFFFu,
+};
+
 enum INVENTORY_TYPES {
     INVTYPE_NON_EQUIP = 0,
     INVTYPE_HEAD = 1,
@@ -147,6 +145,8 @@ enum INVENTORY_TYPES {
     INVTYPE_RANGEDRIGHT = 26,
     INVTYPE_QUIVER = 27,
     INVTYPE_RELIC = 28,
+    INVTYPE_COUNT = 29,
+    INVTYPE_INVALID = -1, // Inventory-token lookup / unfiltered query sentinel.
 };
 
 enum ITEM_SLOT {

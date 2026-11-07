@@ -30,7 +30,7 @@ static int32_t Script_SpellIsTargeting(lua_State* L) {
 // VERIFY: 2d5e9a32 auto
 // OFFSET: 0x007FDD10
 static int32_t Script_SpellCanTargetItem(lua_State* L) {
-    if (s_targetingSpell && (s_needTargets & 0x4010)) {
+    if (s_targetingSpell && (s_needTargets & SPELL_TARGET_TYPE::TARGET_FLAG_ITEM_SELECTION_MASK)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -42,7 +42,7 @@ static int32_t Script_SpellCanTargetItem(lua_State* L) {
 // VERIFY: caa8802f manual
 // OFFSET: 0x007FDD60
 static int32_t Script_SpellCanTargetGlyph(lua_State* L) {
-    if (s_targetingSpell && (s_needTargets & 0x20000)) {
+    if (s_targetingSpell && (s_needTargets & SPELL_TARGET_TYPE::TARGET_FLAG_GLYPH_SLOT)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -68,7 +68,7 @@ static int32_t Script_CannotBeResurrected(lua_State* L) {
 // VERIFY: 7914559b manual
 // OFFSET: 0x008007E0
 static int32_t Script_SpellTargetItem(lua_State* L) {
-    if (!CGGameUI::CanPerformAction(2) || !s_targetingSpell || !(s_needTargets & 0x4010)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_CAST_SPELL) || !s_targetingSpell || !(s_needTargets & SPELL_TARGET_TYPE::TARGET_FLAG_ITEM_SELECTION_MASK)) {
         return 0;
     }
 
@@ -103,7 +103,7 @@ static int32_t Script_SpellTargetUnit(lua_State* L) {
         return luaL_error(L, "Usage: SpellTargetUnit(\"unit\")");
     }
 
-    if (!CGGameUI::CanPerformAction(2) || !s_targetingSpell) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_CAST_SPELL) || !s_targetingSpell) {
         return 0;
     }
 
@@ -143,11 +143,11 @@ static int32_t Script_SpellCanTargetUnit(lua_State* L) {
 // VERIFY: a88df190 auto
 // OFFSET: 0x00809E30
 static int32_t Script_SpellStopTargeting(lua_State* L) {
-    if (CGGameUI::CanPerformAction(2)) {
+    if (CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_CAST_SPELL)) {
         bool targeting = s_targetingSpell != nullptr;
 
         if (s_targetingSpell) {
-            Spell_C_CancelSpell(s_targetingSpell, true, true, 27);
+            Spell_C_CancelSpell(s_targetingSpell, true, true, SpellCastResult::SPELL_FAILED_DONT_REPORT);
         }
 
         if (targeting) {
@@ -163,7 +163,7 @@ static int32_t Script_SpellStopTargeting(lua_State* L) {
 // VERIFY: 0e0daa18 manual
 // OFFSET: 0x00809EA0
 static int32_t Script_SpellStopCasting(lua_State* L) {
-    if (!CGGameUI::CanPerformAction(2)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_CAST_SPELL)) {
         lua_pushnil(L);
         return 1;
     }
@@ -244,7 +244,7 @@ static int32_t Script_CancelUnitBuff(lua_State* L) {
 
         SpellRec spell;
 
-        if (g_spellDB.GetRecord(player->GetAuraSpellId(slot), &spell) && ((player->GetAuraFlags(slot) & 0x10) || (spell.m_attributesEx & 0x4))) {
+        if (g_spellDB.GetRecord(player->GetAuraSpellId(slot), &spell) && ((player->GetAuraFlags(slot) & AURA_FLAG_CANCELABLE) || (spell.m_attributesEx & SPELL_ATTR1::SPELL_ATTR1_IS_CHANNELLED))) {
             Spell_C_CancelAura(&spell, player, slot);
         }
 
@@ -254,7 +254,7 @@ static int32_t Script_CancelUnitBuff(lua_State* L) {
     CGInputControl* input = CGInputControl::GetActive();
     CGUnit_C* mover = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGUnit_C::s_activeMover, TYPE_UNIT, __FILE__, __LINE__));
 
-    if (!input || !mover || !input->IsVehicleSeatFlagSet(0x2000000)) {
+    if (!input || !mover || !input->IsVehicleSeatFlagSet(VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_CAN_EXIT)) {
         return 0;
     }
 
@@ -267,7 +267,7 @@ static int32_t Script_CancelUnitBuff(lua_State* L) {
     SpellRec spell;
 
     if (g_spellDB.GetRecord(mover->GetAuraSpellId(slot), &spell)) {
-        for (uint32_t i = 0; i < 3; i++) {
+        for (uint32_t i = 0; i < NUM_SPELL_EFFECTS; i++) {
             if (spell.m_effectAura[i] == SPELL_AURA_CONTROL_VEHICLE) {
                 mover->VehicleExit();
                 break;

@@ -98,7 +98,7 @@ void LootRoll(int32_t id, int32_t rollType, bool confirmed) {
                         FrameScript_SignalEvent(SCRIPT_EVENT_CONFIRM_DISENCHANT_ROLL, "%d%d", roll->m_id, 3);
                         return;
                     }
-                } else if (stats->m_bonding == 1) {
+                } else if (stats->m_bonding == ITEM_BINDING::ITEM_BINDING_ON_PICKUP) {
                     FrameScript_SignalEvent(SCRIPT_EVENT_CONFIRM_LOOT_ROLL, "%d%d", roll->m_id, rollType);
                     return;
                 }
@@ -113,7 +113,7 @@ void LootRoll(int32_t id, int32_t rollType, bool confirmed) {
             msg.Put(static_cast<uint8_t>(rollType));
             msg.Finalize();
             ClientServices::Send2(&msg);
-            roll->unused_0030 = 1;
+            roll->unknown_0030 = 1;
             FrameScript_SignalEvent(SCRIPT_EVENT_CANCEL_LOOT_ROLL, "%d", roll->m_id);
             s_numShownLootRolls--;
             roll->m_finished = 1;
@@ -210,7 +210,7 @@ int32_t LootRollMasterList(CDataStore* msg) {
 // VERIFY: 62fad677 manual
 // OFFSET: 0x006FA7A0
 static void LootRollCalculateReasons(PendingLootRoll* roll, const ItemStats_C* stats) {
-    roll->unused_0051 = 0;
+    roll->unknown_0051 = 0;
     CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
     bool invalid = !player->m_bag.ItemCountValid(roll->m_itemId, stats, roll->m_count, false);
     uint8_t mask = roll->m_voteMask;
@@ -220,8 +220,7 @@ static void LootRollCalculateReasons(PendingLootRoll* roll, const ItemStats_C* s
     } else if (invalid) {
         roll->m_reasonNeed = 2;
     } else {
-        // roll->m_reasonNeed = static_cast<uint8_t>(((stats->m_flags[1] >> 6) & (ITEM_FLAG2_CAN_ONLY_ROLL_GREED >> 6)) | 0x1);
-        roll->m_reasonNeed = (stats->m_flags[1] & ITEM_FLAG2_CAN_ONLY_ROLL_GREED) ? 5 : 1; // same but more humanly readable, original line is probably a compiler optimization
+        roll->m_reasonNeed = (stats->m_flags[1] & ITEM_STATIC_FLAGS2::ITEM_FLAG2_CAN_ONLY_ROLL_GREED) ? 5 : 1;
     }
 
     roll->m_reasonGreed = ~(mask >> 1) & 0x2;
@@ -398,10 +397,10 @@ int32_t LootRollStart(CDataStore* msg) {
         return 1;
     }
 
-    PendingLootRoll* roll = s_pendingLootRolls.NewNode(2, 0, 0);
+    PendingLootRoll* roll = s_pendingLootRolls.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     roll->m_lootGuid = lootGuid;
     roll->m_id = s_nextLootRollId++;
-    roll->unused_0030 = 0;
+    roll->unknown_0030 = 0;
     roll->m_showPending = 0;
     roll->m_finished = 0;
     msg->Get(roll->m_slot);

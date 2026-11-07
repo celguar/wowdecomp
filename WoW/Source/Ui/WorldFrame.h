@@ -9,6 +9,7 @@
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C3Vector.h"
+#include "Engine/Source/Tempest/C3Segment.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Event/Types.h"
@@ -94,8 +95,7 @@ struct HITTESTRESULT {
     /* 0000 */ WOWGUID m_guid;
     /* 0008 */ C3Vector m_point;
     /* 0014 */ float m_distance;
-    /* 0018 */ C3Vector m_segStart;
-    /* 0024 */ C3Vector m_segEnd;
+    /* 0018 */ C3Segment m_segment; // Original picking segment; m_point stores the resulting hit location.
 };
 
 struct KEYDOWNSTATE {
@@ -105,6 +105,13 @@ struct KEYDOWNSTATE {
 
 class CGWorldFrame : public CSimpleFrame {
     public:
+    // Pending nameplate work;separate from world interaction and name-display flags.
+    enum NAME_PLATE_FLAGS : uint32_t {
+        NAME_PLATE_NONE = 0,
+        NAME_PLATE_REPOSITION_PENDING = 0x1,
+        NAME_PLATE_RESORT_PENDING = 0x2,
+    };
+
     enum HIT_TYPE : int32_t {
         HIT_NONE = 0,
         HIT_GROUND = 1,
@@ -207,8 +214,7 @@ class CGWorldFrame : public CSimpleFrame {
 
 class CWorldClickEvent {
     public:
-    /* 0000 */ C3Vector m_segStart;
-    /* 000C */ C3Vector m_segEnd;
+    /* 0000 */ C3Segment m_segment; // Picking segment carried into world-click handling.
     /* 0018 */ MOUSEBUTTON m_button;
 };
 

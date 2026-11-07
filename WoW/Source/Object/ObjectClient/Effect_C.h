@@ -38,6 +38,37 @@ enum UNITEFFECTSPECIALS : int32_t {
 
 class CEffect {
     public:
+    // Client effect lifecycle/creation state. Names describe current behavior.
+    enum EFFECT_FLAGS : uint32_t {
+        EFFECT_NONE                                  = 0x00000000u,
+        EFFECT_SOUND_LOOPING                         = 0x00000001u,
+        EFFECT_WORLD_SPACE                           = 0x00000002u,
+        EFFECT_FREEZE_ANIMATION                      = 0x00000004u,
+        EFFECT_LOOT_ART                              = 0x00000008u,
+        EFFECT_PLAY_CAMERA_SHAKE                     = 0x00000010u,
+        EFFECT_CALLBACK_LIFETIME                     = 0x00000020u,
+        EFFECT_PRECAST                               = 0x00000040u,
+        EFFECT_SET_SPECIAL_IDLE                      = 0x00000080u,
+        EFFECT_DESTROY_PENDING                       = 0x00000100u,
+        EFFECT_SCALE_TO_TARGET                       = 0x00000200u,
+        EFFECT_SUPPRESS_SOUND                        = 0x00000400u,
+        EFFECT_POST_INITIALIZED                      = 0x00000800u,
+        EFFECT_AURA_ANIMATION                        = 0x00001000u,
+        EFFECT_USE_SUPPLIED_POSITION                 = 0x00002000u,
+        EFFECT_FOLLOW_SOURCE_POSITION                = 0x00004000u,
+        EFFECT_FIXED_FACING                          = 0x00008000u,
+        EFFECT_ATTACHMENT_OFFSET                     = 0x00010000u,
+        EFFECT_PERSIST_ON_PARTIAL_CLEAR              = 0x00020000u,
+        EFFECT_LIGHTNING_CONNECTION                  = 0x00040000u,
+        EFFECT_ITEM_VISUAL                           = 0x00080000u,
+        EFFECT_SOUND_ONLY                            = 0x00100000u,
+        EFFECT_DETACHED_SOUND                        = 0x00200000u,
+        EFFECT_IGNORE_EMISSION_DISTANCE              = 0x00400000u,
+        EFFECT_MOUNT_AURA                            = 0x00800000u,
+        EFFECT_RAW_ANIMATION_ID                      = 0x01000000u,
+        EFFECT_IGNORE_PARENT_EFFECTIVE_ALPHA         = 0x02000000u,
+    };
+
     void ApplyItemVisual();
     static void ApplyItemVisualByItemId(int32_t id, const WOWGUID& guid, void* param, bool success);
     static void MountTransitionCacheCB(int32_t id, const WOWGUID& guid, void* param, bool success);
@@ -67,9 +98,9 @@ class CEffect {
     /* 0034 */ SE2SoundKitObject m_soundKitObject;
     /* 0048 */ uint32_t m_flags;
     /* 004C */ LightningObject* m_lightning [12];
-    /* 007C */ uint32_t unused_007C;
-    /* 0080 */ uint32_t unused_0080;
-    /* 0084 */ uint32_t unused_0084;
+    /* 007C */ uint32_t unknown_007C;
+    /* 0080 */ uint32_t unknown_0080;
+    /* 0084 */ uint32_t unknown_0084;
     /* 0088 */ float m_facing;
     /* 008C */ int32_t m_lightningAttachment;
     /* 0090 */ MountTransitionObject* m_mountTransition;
@@ -79,16 +110,16 @@ class CEffect {
     /* 00A0 */ uint32_t m_fadeTime;
     /* 00A4 */ C3Vector m_position;
     /* 00B0 */ C3Vector m_worldPosition;
-    /* 00BC */ uint32_t unused_00BC;
+    /* 00BC */ uint32_t unknown_00BC;
     /* 00C0 */ WOWGUID m_transportGuid;
     /* 00C8 */ uint32_t m_startTime;
     /* 00CC */ uint32_t m_expireTime;
     /* 00D0 */ uint32_t unk_00D0;
     /* 00D4 */ uint32_t m_attachToModel;
     /* 00D8 */ uint32_t m_attachToMount;
-    /* 00DC */ uint32_t unused_00DC;
-    /* 00E0 */ float unused_00E0;
-    /* 00E4 */ float unused_00E4;
+    /* 00DC */ uint32_t unknown_00DC;
+    /* 00E0 */ float unknown_00E0;
+    /* 00E4 */ float unknown_00E4;
     /* 00E8 */ float m_alpha;
     /* 00EC */ CImVector m_color;
     /* 00F0 */ CMapEntity* m_mapEntity;
@@ -98,7 +129,7 @@ class CEffect {
     /* 0100 */ const SpellVisualKitModelAttachRec* m_attachRec;
     /* 0104 */ CEffect** m_prevLink;
     /* 0108 */ CEffect* m_next;
-    /* 010C */ uint32_t unused_010C;
+    /* 010C */ uint32_t unknown_010C;
 
     CEffect();
     ~CEffect();

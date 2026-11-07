@@ -166,7 +166,7 @@ static int32_t Script_IsTrainerServiceSkillStep(lua_State* L) {
             SpellRec spell;
 
             if (g_spellDB.GetRecord(service->m_spellID, &spell)) {
-                for (uint32_t i = 0; i < 3; i++) {
+                for (uint32_t i = 0; i < NUM_SPELL_EFFECTS; i++) {
                     if (spell.m_effect[i] == SPELL_EFFECT_SKILL_STEP) {
                         lua_pushnumber(L, 1.0);
                         return 1;
@@ -247,7 +247,7 @@ static int32_t Script_GetTrainerServiceSkillLine(lua_State* L) {
         SpellRec spell;
 
         if (g_spellDB.GetRecord(service->m_spellID, &spell)) {
-            for (uint32_t i = 0; i < 3; i++) {
+            for (uint32_t i = 0; i < NUM_SPELL_EFFECTS; i++) {
                 int32_t effect = spell.m_effect[i];
 
                 if (!effect) {
@@ -259,8 +259,8 @@ static int32_t Script_GetTrainerServiceSkillLine(lua_State* L) {
                 if (effect == SPELL_EFFECT_SKILL_STEP) {
                     skill = g_skillLineDB.GetRecord(spell.m_effectMiscValue[i]);
                 } else {
-                    int32_t spellId = effect != SPELL_EFFECT_LEARN_SPELL || spell.m_implicitTargetA[i] == 5 ? spell.m_id : spell.m_effectTriggerSpell[i];
-                    SkillLineAbilityRec* ability = SpellTableLookupAbility(player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[1], spellId);
+                    int32_t spellId = effect != SPELL_EFFECT_LEARN_SPELL || spell.m_implicitTargetA[i] == SPELL_IMPLICIT_TARGET::TARGET_UNIT_PET ? spell.m_id : spell.m_effectTriggerSpell[i];
+                    SkillLineAbilityRec* ability = SpellTableLookupAbility(player->m_unit->m_raceID, player->m_unit->m_classID, spellId);
 
                     if (!ability) {
                         continue;
@@ -542,13 +542,13 @@ static int32_t Script_GetTrainerServiceStepReq(lua_State* L) {
             met = 0;
             int32_t effect;
 
-            for (effect = 0; effect < 3; effect++) {
+            for (effect = 0; effect < NUM_SPELL_EFFECTS; effect++) {
                 if (spell.m_effect[effect] == SPELL_EFFECT_SKILL_STEP) {
                     break;
                 }
             }
 
-            if (effect < 3) {
+            if (effect < NUM_SPELL_EFFECTS) {
                 for (int32_t i = 0; i < 128; i++) {
                     uint16_t skillId = player->m_obj->m_guid == ClntObjMgrGetActivePlayer() ? player->m_player->m_playerSkillInfo[i].m_skillId : 0;
 
@@ -607,9 +607,9 @@ static int32_t Script_GetTrainerServiceDescription(lua_State* L) {
                 return 1;
             }
 
-            if ((spell.m_attributes & 0x20) && (spell.m_effect[0] == SPELL_EFFECT_CREATE_ITEM || spell.m_effect[0] == SPELL_EFFECT_CREATE_ITEM_2 || spell.m_effect[0] == SPELL_EFFECT_CREATE_RANDOM_ITEM) && spell.m_effectItemType[0]) {
+            if ((spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL) && (spell.m_effect[0] == SPELL_EFFECT_CREATE_ITEM || spell.m_effect[0] == SPELL_EFFECT_CREATE_ITEM_2 || spell.m_effect[0] == SPELL_EFFECT_CREATE_RANDOM_ITEM) && spell.m_effectItemType[0]) {
                 WOWGUID guid;
-                guid.m_guid = static_cast<uint32_t>(spell.m_id) | 0x1FE0000000000000ull;
+                guid.m_guid = static_cast<uint32_t>(spell.m_id) | WOWGUID_SPELL_QUERY_TAG;
                 ItemStats_C* stats = g_itemDBCache.GetRecord(spell.m_effectItemType[0], guid, TrainerItemCallback, nullptr, false);
 
                 if (stats && stats->m_description && *stats->m_description) {
@@ -641,13 +641,13 @@ static int32_t Script_GetTrainerServiceStepIncrease(lua_State* L) {
         if (g_spellDB.GetRecord(service->m_spellID, &spell)) {
             int32_t effect;
 
-            for (effect = 0; effect < 3; effect++) {
+            for (effect = 0; effect < NUM_SPELL_EFFECTS; effect++) {
                 if (spell.m_effect[effect] == SPELL_EFFECT_SKILL_STEP) {
                     break;
                 }
             }
 
-            if (effect < 3 && service->m_state != TRAINER_SERVICE_USED) {
+            if (effect < NUM_SPELL_EFFECTS && service->m_state != TRAINER_SERVICE_USED) {
                 int32_t previous = 0;
                 SpellRec step;
                 int32_t minPoints;
@@ -656,13 +656,13 @@ static int32_t Script_GetTrainerServiceStepIncrease(lua_State* L) {
                 if (g_spellDB.GetRecord(service->m_stepSpellID, &step)) {
                     int32_t stepEffect;
 
-                    for (stepEffect = 0; stepEffect < 3; stepEffect++) {
+                    for (stepEffect = 0; stepEffect < NUM_SPELL_EFFECTS; stepEffect++) {
                         if (step.m_effect[stepEffect] == SPELL_EFFECT_SKILL_STEP) {
                             break;
                         }
                     }
 
-                    if (stepEffect < 3) {
+                    if (stepEffect < NUM_SPELL_EFFECTS) {
                         Spell_C_GetMinMaxPoints(&step, stepEffect, &minPoints, &maxPoints, 0, 0, 0, 0);
                         previous = maxPoints;
                     }

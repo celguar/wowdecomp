@@ -108,7 +108,7 @@ void CGMerchantInfo::SetMerchant(WOWGUID merchant, const MerchantItem* items, in
         }
     }
 
-    CGTutorial::TriggerTutorial(0x13);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_VENDORS);
     CGGameUI::SetInteractTarget(merchant);
     CGMerchantInfo::m_merchant = merchant;
     memset(CGMerchantInfo::m_items, 0, sizeof(CGMerchantInfo::m_items));
@@ -237,7 +237,7 @@ void CGMerchantInfo::RefreshList() {
 // OFFSET: 0x005845B0
 int32_t CGMerchantInfo::CanRepair() {
     CGUnit_C* merchant = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGMerchantInfo::m_merchant, TYPE_UNIT, __FILE__, __LINE__));
-    return merchant && (merchant->m_unit->m_unitNpcFlags & 0x1000);
+    return merchant && (merchant->m_unit->m_unitNpcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_REPAIR);
 }
 
 // VERIFY: f4c282b1 manual

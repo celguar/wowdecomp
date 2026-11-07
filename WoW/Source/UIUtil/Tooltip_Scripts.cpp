@@ -1,4 +1,5 @@
 #include "Tooltip.h"
+#include "Engine/Source/Tempest/Color.h"
 #include <cstdint>
 #include "Engine/Source/Base/Coordinate.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
@@ -563,7 +564,7 @@ static int32_t Script_SetHyperlink(lua_State* L) {
 
         SpellRec spell;
 
-        if (g_spellDB.GetRecord(spellId, &spell) && (spell.m_attributes & 0x20)) {
+        if (g_spellDB.GetRecord(spellId, &spell) && (spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL)) {
             tooltip->SetSpell(spellId, 0, 0, 0, 0, 0, 0, nullptr, nullptr, 0, 0, -1, -1, 0, 0);
         }
 
@@ -999,7 +1000,7 @@ static int32_t Script_SetAction(lua_State* L) {
     uint32_t action = CGActionBar::m_slotActions[slot];
     int32_t result;
 
-    if (action && (action & 0xF0000000) == 0x80000000) {
+    if (action && (action & CGActionBar::ACTION_MASK::ACTION_MASK_TAG) == CGActionBar::ACTION_TAG::ACTION_TAG_ITEM) {
         int32_t itemId = CGActionBar::GetItem(slot);
         CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
         WOWGUID none = { 0 };
@@ -1054,7 +1055,7 @@ static int32_t Script_SetAction(lua_State* L) {
             WOWGUID empty = { 0 };
             result = tooltip->SetItem(itemId, &empty, &empty, 0, 0, 0, 0, WOWGUID(), 0, nullptr, 0, nullptr, 0, 0, 0);
         }
-    } else if (action && !(action & 0xF0000000)) {
+    } else if (action && !(action & CGActionBar::ACTION_MASK::ACTION_MASK_TAG)) {
         int32_t brief = 1;
         CVar* uber = CVar::Lookup("UberTooltips");
 
@@ -1091,40 +1092,40 @@ static int32_t Script_SetAction(lua_State* L) {
         char token[64];
         const char* text;
 
-        switch ((value >> 24) & 0x3F) {
-            case 1:
-            case 8:
-            case 9:
-            case 10:
-            case 11:
-            case 12:
-            case 13:
-            case 14:
-            case 15:
-            case 16:
-            case 17: {
+        switch ((value >> 24) & PetAction::PackingMasks::KIND_VALUE_MASK) {
+            case PetAction::Kind::SPELL:
+            case PetAction::Kind::UNKNOWN_8:
+            case PetAction::Kind::UNKNOWN_9:
+            case PetAction::Kind::UNKNOWN_10:
+            case PetAction::Kind::UNKNOWN_11:
+            case PetAction::Kind::UNKNOWN_12:
+            case PetAction::Kind::UNKNOWN_13:
+            case PetAction::Kind::UNKNOWN_14:
+            case PetAction::Kind::UNKNOWN_15:
+            case PetAction::Kind::UNKNOWN_16:
+            case PetAction::Kind::UNKNOWN_17: {
                 uint32_t petStart = 0;
                 uint32_t petDuration = 0;
                 uint32_t petEnable = 0;
-                Spell_C_GetSpellCooldown(value & 0xFFFFFF, 1, &petDuration, &petStart, &petEnable);
+                Spell_C_GetSpellCooldown(value & PetAction::PackingMasks::ID_MASK, 1, &petDuration, &petStart, &petEnable);
 
                 if (petEnable && petStart && petDuration) {
-                    result = tooltip->SetSpell(petAction->m_data & 0xFFFFFF, 0, petStart + petDuration - OsGetAsyncTimeMs(), 1, 1, 0, 0, nullptr, nullptr, 0, 0, -1, -1, 0, 0);
+                    result = tooltip->SetSpell(petAction->m_data & PetAction::PackingMasks::ID_MASK, 0, petStart + petDuration - OsGetAsyncTimeMs(), 1, 1, 0, 0, nullptr, nullptr, 0, 0, -1, -1, 0, 0);
                 } else {
-                    result = tooltip->SetSpell(petAction->m_data & 0xFFFFFF, 0, 0, 1, 1, 0, 0, nullptr, nullptr, 0, 0, -1, -1, 0, 0);
+                    result = tooltip->SetSpell(petAction->m_data & PetAction::PackingMasks::ID_MASK, 0, 0, 1, 1, 0, 0, nullptr, nullptr, 0, 0, -1, -1, 0, 0);
                 }
 
                 goto done;
             }
 
-            case 6: {
-                SStrPrintf(token, sizeof(token), "PET_MODE_%s", CGPetInfo::GetModeToken(value & 0xFFFFFF));
+            case PetAction::Kind::MODE: {
+                SStrPrintf(token, sizeof(token), "PET_MODE_%s", CGPetInfo::GetModeToken(value & PetAction::PackingMasks::ID_MASK));
                 text = FrameScript_GetText(token, -1, GENDER_NOT_APPLICABLE);
                 break;
             }
 
-            case 7: {
-                SStrPrintf(token, sizeof(token), "PET_ACTION_%s", CGPetInfo::GetOrdersToken(value & 0xFFFFFF));
+            case PetAction::Kind::ORDER: {
+                SStrPrintf(token, sizeof(token), "PET_ACTION_%s", CGPetInfo::GetOrdersToken(value & PetAction::PackingMasks::ID_MASK));
                 text = FrameScript_GetText(token, -1, GENDER_NOT_APPLICABLE);
                 break;
             }
@@ -1234,8 +1235,8 @@ static int32_t Script_SetLootItem(lua_State* L) {
     ItemStats_C* stats = g_itemDBCache.GetRecord(itemId, none, nullptr, nullptr, false);
 
     if (stats) {
-        for (uint32_t i = 0; i < 5; i++) {
-            if (stats->m_spellId[i] && !stats->m_spellTrigger[i]) {
+        for (uint32_t i = 0; i < NUM_ITEM_SPELLS; i++) {
+            if (stats->m_spellId[i] && stats->m_spellTrigger[i] == ITEM_SPELL_TRIGGER::ITEM_SPELL_TRIGGER_ON_USE) {
                 tooltip->m_itemLinkInfo.m_spellCharges = stats->m_spellCharges[i];
                 break;
             }
@@ -1361,7 +1362,7 @@ static int32_t Script_AddTexture(lua_State* L) {
         coords.maxX = 0.0f;
         coords.maxY = 0.0f;
         ReadTexCoordArgs(L, 3, coords);
-        tooltip->AddTexture(texture, coords, CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+        tooltip->AddTexture(texture, coords, CImVector(COLOR_WHITE_BGRA));
         return 0;
     }
 
@@ -1370,7 +1371,7 @@ static int32_t Script_AddTexture(lua_State* L) {
     coords.minY = 0.0f;
     coords.maxX = 1.0f;
     coords.maxY = 1.0f;
-    tooltip->AddTexture(texture, coords, CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+    tooltip->AddTexture(texture, coords, CImVector(COLOR_WHITE_BGRA));
     return 0;
 }
 
@@ -1465,35 +1466,35 @@ static int32_t Script_SetAnchorType(lua_State* L) {
         luaL_error(L, "Usage: %s:SetAnchorType( anchorType [,Xoffset] [,Yoffset] )", name ? name : "<unnamed>");
     }
 
-    int32_t anchorType = 0;
+    TOOLTIP_ANCHORPOINT anchorType = ANCHOR_LEFT;
 
     if (lua_isstring(L, 2)) {
         const char* token = lua_tolstring(L, 2, nullptr);
 
         if (!SStrCmpI(token, "ANCHOR_LEFT", STORM_MAX_STR)) {
-            anchorType = 0;
+            anchorType = ANCHOR_LEFT;
         } else if (!SStrCmpI(token, "ANCHOR_RIGHT", STORM_MAX_STR)) {
-            anchorType = 1;
+            anchorType = ANCHOR_RIGHT;
         } else if (!SStrCmpI(token, "ANCHOR_BOTTOMLEFT", STORM_MAX_STR)) {
-            anchorType = 2;
+            anchorType = ANCHOR_BOTTOMLEFT;
         } else if (!SStrCmpI(token, "ANCHOR_BOTTOM", STORM_MAX_STR)) {
-            anchorType = 3;
+            anchorType = ANCHOR_BOTTOM;
         } else if (!SStrCmpI(token, "ANCHOR_BOTTOMRIGHT", STORM_MAX_STR)) {
-            anchorType = 4;
+            anchorType = ANCHOR_BOTTOMRIGHT;
         } else if (!SStrCmpI(token, "ANCHOR_TOPLEFT", STORM_MAX_STR)) {
-            anchorType = 5;
+            anchorType = ANCHOR_TOPLEFT;
         } else if (!SStrCmpI(token, "ANCHOR_TOP", STORM_MAX_STR)) {
-            anchorType = 6;
+            anchorType = ANCHOR_TOP;
         } else if (!SStrCmpI(token, "ANCHOR_TOPRIGHT", STORM_MAX_STR)) {
-            anchorType = 7;
+            anchorType = ANCHOR_TOPRIGHT;
         } else if (!SStrCmpI(token, "ANCHOR_CURSOR", STORM_MAX_STR)) {
-            anchorType = 8;
+            anchorType = ANCHOR_CURSOR;
         } else if (!SStrCmpI(token, "ANCHOR_NONE", STORM_MAX_STR)) {
-            anchorType = 9;
+            anchorType = ANCHOR_NONE;
         } else if (!SStrCmpI(token, "ANCHOR_PRESERVE", STORM_MAX_STR)) {
-            anchorType = 10;
+            anchorType = ANCHOR_PRESERVE;
         } else if (!SStrCmpI(token, "ANCHOR_CURSOR_RIGHT", STORM_MAX_STR)) {
-            anchorType = 11;
+            anchorType = ANCHOR_CURSOR_RIGHT;
         }
     }
 
@@ -1650,17 +1651,17 @@ static int32_t Script_SetPetAction(lua_State* L) {
         return 1;
     }
 
-    uint32_t type = (action->m_data >> 24) & 0x3F;
+    uint32_t kind = (action->m_data >> 24) & PetAction::PackingMasks::KIND_VALUE_MASK;
     uint32_t start = 0;
     uint32_t duration = 0;
     uint32_t enable = 0;
     int32_t result;
 
-    if ((type == 1 || type - 8 <= 9) && (Spell_C_GetSpellCooldown(action->m_data & 0xFFFFFF, 1, &duration, &start, &enable), enable) && start && duration) {
-        int32_t spellId = action->m_data & 0xFFFFFF;
+    if ((kind == PetAction::Kind::SPELL || kind - PetAction::Kind::UNKNOWN_8 <= (PetAction::Kind::UNKNOWN_17 - PetAction::Kind::UNKNOWN_8)) && (Spell_C_GetSpellCooldown(action->m_data & PetAction::PackingMasks::ID_MASK, 1, &duration, &start, &enable), enable) && start && duration) {
+        int32_t spellId = action->m_data & PetAction::PackingMasks::ID_MASK;
         result = tooltip->SetSpell(spellId, 0, start + duration - OsGetAsyncTimeMs(), 1, 1, 0, 0, nullptr, nullptr, 0, 0, -1, -1, 0, 0);
     } else {
-        result = tooltip->SetSpell(action->m_data & 0xFFFFFF, 0, 0, 1, 1, 0, 0, nullptr, nullptr, 0, 0, -1, -1, 0, 0);
+        result = tooltip->SetSpell(action->m_data & PetAction::PackingMasks::ID_MASK, 0, 0, 1, 1, 0, 0, nullptr, nullptr, 0, 0, -1, -1, 0, 0);
     }
 
     if (result) {
@@ -1727,7 +1728,7 @@ static int32_t Script_SetUnit(lua_State* L) {
     int32_t hideStatus = StringToBOOL(L, 3, 0);
     WOWGUID none;
 
-    if (guid && guid.m_guid != 0xFFFFFFFFFFFFFFFEULL && (none = WOWGUID(), tooltip->SetUnit(guid, 1, none, hideStatus))) {
+    if (guid && guid.m_guid != WOWGUID_EMPTY_UNIT_TOKEN && (none = WOWGUID(), tooltip->SetUnit(guid, 1, none, hideStatus))) {
         lua_pushnumber(L, 1.0);
         return 1;
     }
@@ -1865,7 +1866,7 @@ static int32_t Script_SetTrainerService(lua_State* L) {
         luaL_error(L, "Invalid trainer service in SetTrainerService(index)");
     }
 
-    for (uint32_t i = 0; i < 3; i++) {
+    for (uint32_t i = 0; i < NUM_SPELL_EFFECTS; i++) {
         if (spell.m_effect[i] != SPELL_EFFECT_LEARN_SPELL && spell.m_effect[i] != SPELL_EFFECT_LEARN_PET_SPELL) {
             continue;
         }
@@ -1876,9 +1877,9 @@ static int32_t Script_SetTrainerService(lua_State* L) {
             continue;
         }
 
-        if ((learned.m_attributes & 0x20) && (learned.m_effect[0] == SPELL_EFFECT_CREATE_ITEM || learned.m_effect[0] == SPELL_EFFECT_CREATE_ITEM_2 || learned.m_effect[0] == SPELL_EFFECT_CREATE_RANDOM_ITEM) && learned.m_effectItemType[0]) {
+        if ((learned.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL) && (learned.m_effect[0] == SPELL_EFFECT_CREATE_ITEM || learned.m_effect[0] == SPELL_EFFECT_CREATE_ITEM_2 || learned.m_effect[0] == SPELL_EFFECT_CREATE_RANDOM_ITEM) && learned.m_effectItemType[0]) {
             WOWGUID requester;
-            requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(learned.m_id)) | 0x1FE0000000000000ULL;
+            requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(learned.m_id)) | WOWGUID_SPELL_QUERY_TAG;
             WOWGUID itemGuid = WOWGUID();
             tooltip->SetItem(learned.m_effectItemType[0], &requester, &itemGuid, 0, 0, 0, 0, WOWGUID(), 0, nullptr, 0, nullptr, 0, 0, 1);
         } else {
@@ -1914,7 +1915,7 @@ static int32_t Script_SetTradeSkillItem(lua_State* L) {
         int32_t count = 0;
         uint32_t i;
 
-        for (i = 0; i < 8; i++) {
+        for (i = 0; i < NUM_SPELL_REAGENTS; i++) {
             if (spell.m_reagent[i] && ++count == reagent) {
                 break;
             }
@@ -1927,7 +1928,7 @@ static int32_t Script_SetTradeSkillItem(lua_State* L) {
         tooltip->m_itemLinkInfo.Clear();
         tooltip->m_itemLinkInfo.m_stackCount = spell.m_reagentCount[i];
         WOWGUID requester;
-        requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(skill->m_spellId)) | 0x1FE0000000000000ULL;
+        requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(skill->m_spellId)) | WOWGUID_SPELL_QUERY_TAG;
         WOWGUID itemGuid = WOWGUID();
         tooltip->SetItem(spell.m_reagent[i], &requester, &itemGuid, 0, 0, 1, 0, WOWGUID(), 0, nullptr, 0, nullptr, 0, 0, 0);
         return 0;
@@ -1946,7 +1947,7 @@ static int32_t Script_SetTradeSkillItem(lua_State* L) {
         }
 
         WOWGUID requester;
-        requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(skill->m_spellId)) | 0x1FE0000000000000ULL;
+        requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(skill->m_spellId)) | WOWGUID_SPELL_QUERY_TAG;
         WOWGUID itemGuid = WOWGUID();
         tooltip->SetItem(spell.m_effectItemType[0], &requester, &itemGuid, 0, 0, 1, 0, WOWGUID(), 0, nullptr, 0, nullptr, 0, 0, 0);
         return 0;
@@ -2030,7 +2031,7 @@ static int32_t Script_SetTradePlayerItem(lua_State* L) {
     }
 
     uint32_t slot = static_cast<int32_t>(lua_tonumber(L, 2) - 1.0);
-    WOWGUID guid = slot > 6 ? WOWGUID() : CGTradeInfo::m_playerItems[slot];
+    WOWGUID guid = slot > TRADE_SLOT_NONTRADED ? WOWGUID() : CGTradeInfo::m_playerItems[slot];
     CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
 
     if (!item) {
@@ -2060,7 +2061,7 @@ static int32_t Script_SetTradePlayerItem(lua_State* L) {
         link.m_spellCharges = mirror->m_itemFieldSpellCharges[onUseSlot];
     }
 
-    link.m_proposedEnchant = slot == 6 ? Trade_C_GetEnchantSpell(1) : 0;
+    link.m_proposedEnchant = slot == TRADE_SLOT_NONTRADED ? Trade_C_GetEnchantSpell(1) : 0;
     WOWGUID itemGuid = item->m_obj->m_guid;
     WOWGUID requester = item->m_obj->m_guid;
     tooltip->SetItem(item->m_obj->m_entryID, &requester, &itemGuid, 0, 0, 1, 0, WOWGUID(), 0, nullptr, onUseSlot < 0, nullptr, 0, 0, 0);
@@ -2079,7 +2080,7 @@ static int32_t Script_SetTradeTargetItem(lua_State* L) {
 
     uint32_t slot = static_cast<int32_t>(lua_tonumber(L, 2) - 1.0);
 
-    if (slot > 6) {
+    if (slot > TRADE_SLOT_NONTRADED) {
         return 0;
     }
 
@@ -2113,7 +2114,7 @@ static int32_t Script_SetTradeTargetItem(lua_State* L) {
     link.m_propertySeed = CGTradeInfo::m_targetSuffixFactor[slot];
     link.m_randomPropertiesId = CGTradeInfo::m_targetRandomPropertyID[slot];
     link.m_spellCharges = CGTradeInfo::m_targetSpellCharges[slot];
-    link.m_proposedEnchant = slot == 6 ? Trade_C_GetEnchantSpell(0) : 0;
+    link.m_proposedEnchant = slot == TRADE_SLOT_NONTRADED ? Trade_C_GetEnchantSpell(0) : 0;
     link.m_maxDurability = CGTradeInfo::m_targetMaxDurability[slot];
     link.m_durability = CGTradeInfo::m_targetDurability[slot];
     link.m_stackCount = CGTradeInfo::m_targetCount[slot];
@@ -2132,7 +2133,7 @@ static int32_t Script_SetSendMailItem(lua_State* L) {
     if (lua_isnumber(L, 2)) {
         index = static_cast<int32_t>(lua_tonumber(L, 2) - 1.0);
 
-        if (index >= 16) {
+        if (index >= CGMailInfo::NUM_SEND_ITEM_SLOTS) {
             lua_pushnil(L);
             return 1;
         }
@@ -2177,7 +2178,7 @@ static int32_t Script_SetInboxItem(lua_State* L) {
     int32_t attachmentIndex;
 
     if (lua_isnumber(L, 3) && (attachmentIndex = static_cast<int32_t>(lua_tonumber(L, 3))) != 0) {
-        if (static_cast<uint32_t>(attachmentIndex - 1) >= 16) {
+        if (static_cast<uint32_t>(attachmentIndex - 1) >= MailboxMessageInfo::MAX_ATTACHMENTS) {
             lua_pushnil(L);
             return 1;
         }
@@ -2192,7 +2193,7 @@ static int32_t Script_SetInboxItem(lua_State* L) {
         link.Clear();
 
         for (uint32_t i = 0; i < 12; i++) {
-            if (i >= 7) {
+            if (i >= MailAttachmentInfo::NUM_ENCHANTMENTS) {
                 link.m_enchants[i] = 0;
                 link.m_enchantDurations[i] = 0;
                 link.m_enchantCharges[i] = 0;

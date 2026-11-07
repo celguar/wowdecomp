@@ -259,10 +259,10 @@ CSimpleMessageScrollFrameDisplayNode::CSimpleMessageScrollFrameDisplayNode() {
 
     CSimpleFontStringRecord* string = this->m_string;
     uint32_t styleFlags = string->m_styleFlags;
-    string->m_settableStyleFlags &= ~0x4000u;
+    string->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES;
 
-    if ((styleFlags | 0x4000) != styleFlags) {
-        string->m_styleFlags = styleFlags | 0x4000;
+    if ((styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES) != styleFlags) {
+        string->m_styleFlags = styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES;
 
         if (string->m_string) {
             string->UpdateString();
@@ -499,7 +499,7 @@ void CSimpleMessageScrollFrame::ScrollMessages(int32_t scroll) {
 
                 if (created) {
                     string->SetFrame(this, 2, 1);
-                    string->m_fontableFlags &= ~0x4u;
+                    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_COLOR_UPDATE;
                     string->SetFontObject(this->m_font);
                     string->SetWidth((this->m_messageFrameArea.maxX - this->m_messageFrameArea.minX) / this->m_layoutScale);
 
@@ -685,7 +685,7 @@ void CSimpleMessageScrollFrame::OnScreenSizeChanged() {
 // VERIFY: 3f38cf68 manual
 // OFFSET: 0x0096A760
 void CSimpleMessageScrollFrame::UpdateRect() {
-    if (!(this->m_layoutFlags & 0x100)) {
+    if (!(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID)) {
         return;
     }
 

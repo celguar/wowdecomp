@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "WoW/Common/ComponentCore/ComponentUtils.h"
+#include "WoW/Common/Types.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "WoW/Source/DB/DBClient/DBClient.h"
 #include "WoW/Source/DB/Rec/CharSectionsRec.h"
@@ -41,16 +42,16 @@ bool ComponentFlagsMatch(uint32_t flags, COMPONENT_SELECTION selection) {
 COMPONENT_SELECTION GetSelectionFromContext(COMPONENT_CONTEXT context, int32_t classID) {
     switch (context) {
         case COMPONENT_CONTEXT_1:
-            return static_cast<COMPONENT_SELECTION>((classID == 6) + COMPONENT_SELECTION_2);
+            return static_cast<COMPONENT_SELECTION>((classID == CLASS_DEATH_KNIGHT) + COMPONENT_SELECTION_2);
 
         case COMPONENT_CONTEXT_2:
             return COMPONENT_SELECTION_4;
 
         case COMPONENT_CONTEXT_3:
-            return static_cast<COMPONENT_SELECTION>((classID == 6) + COMPONENT_SELECTION_5);
+            return static_cast<COMPONENT_SELECTION>((classID == CLASS_DEATH_KNIGHT) + COMPONENT_SELECTION_5);
 
         default:
-            return static_cast<COMPONENT_SELECTION>(classID == 6);
+            return static_cast<COMPONENT_SELECTION>(classID == CLASS_DEATH_KNIGHT);
     }
 }
 
@@ -286,7 +287,7 @@ int32_t BuildComponentArray(uint32_t count, st_race** lookupOut) {
     }
 
     sexID = 0;
-    raceID = 1;
+    raceID = RACE_HUMAN;
     baseSection = 0;
     variationIndex = 0;
     int32_t colorIndex = 0;

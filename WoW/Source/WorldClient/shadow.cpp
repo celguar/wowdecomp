@@ -242,7 +242,7 @@ CGxTex* ProjectTex2dGetAddFadeTex() {
 // VERIFY: ff93aa7d auto
 // OFFSET: 0x007E49E0
 void CWorldScene::RequestModelStreaming(CM2Model* model, const CAaBox* box) {
-    if (model && model->IsDrawable(0, 0) && !(model->m_fFlags & 0x4000) && !box->IsEmpty() && s_cvExtShadowQuality->m_intValue <= 0 && s_shadowLOD == 1) {
+    if (model && model->IsDrawable(0, 0) && !(model->m_runtimeFlags & 0x4000) && !box->IsEmpty() && s_cvExtShadowQuality->m_intValue <= 0 && s_shadowLOD == 1) {
         CWorldScene::RenderStreamingRequestDecal(model, box, 0.4f);
     }
 }
@@ -636,8 +636,8 @@ static void ProjectTexRender2d(const CAaBox& box, const CImVector& color, uint32
         GxRsSet(GxRs_PolygonOffset, (polygonOffset + polygonOffset) * 3.0518044e-05f);
     }
 
-    GxRsSet(GxRs_TexGen0, 2);
-    GxRsSet(GxRs_TexGen1, 2);
+    GxRsSet(GxRs_TexGen0, GxTexGen_World);
+    GxRsSet(GxRs_TexGen1, GxTexGen_World);
     GxRsSet(GxRs_TextureShader0, 1);
     GxRsSet(GxRs_TextureShader1, 1);
 

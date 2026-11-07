@@ -216,7 +216,7 @@ static int32_t Script_GetTradeSkillSubClasses(lua_State* L) {
     for (uint32_t i = 0; i < count; i++) {
         TradeSkillSubClassInfo* subClass = i < CGTradeSkillInfo::m_numSubClasses ? CGTradeSkillInfo::m_subClassList.m_data[i] : nullptr;
 
-        if (subClass->m_itemClass == -1 && subClass->m_itemSubClass == -1) {
+        if (subClass->m_itemClass == ITEM_CLASS::ITEM_CLASS_NONE && subClass->m_itemSubClass == -1) {
             SkillLineRec* skillLine = g_skillLineDB.GetRecord(CGTradeSkillInfo::m_skillLineID);
 
             if (skillLine) {
@@ -309,7 +309,7 @@ static int32_t Script_GetTradeSkillInfo(lua_State* L) {
 
     if (index < CGTradeSkillInfo::m_numDisplayEntries && (info = CGTradeSkillInfo::m_displayList.m_data[index])) {
         if (info->m_spellId == -1) {
-            bool skillHeader = info->m_itemClass == -1 && info->m_itemSubClass == -1;
+            bool skillHeader = info->m_itemClass == ITEM_CLASS::ITEM_CLASS_NONE && info->m_itemSubClass == -1;
             ItemSubClassRec* rec = nullptr;
 
             if (!skillHeader) {
@@ -506,7 +506,7 @@ static int32_t Script_GetTradeSkillRecipeLink(lua_State* L) {
 
     SpellRec spell;
 
-    if (!g_spellDB.GetRecord(info->m_spellId, &spell) || !(spell.m_attributes & 0x20)) {
+    if (!g_spellDB.GetRecord(info->m_spellId, &spell) || !(spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL)) {
         return 0;
     }
 
@@ -589,7 +589,7 @@ static int32_t Script_GetTradeSkillNumReagents(lua_State* L) {
             SpellRec spell;
 
             if (g_spellDB.GetRecord(info->m_spellId, &spell)) {
-                for (uint32_t i = 0; i < 8; i++) {
+                for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
                     if (spell.m_reagent[i]) {
                         count++;
                     }
@@ -620,7 +620,7 @@ static int32_t Script_GetTradeSkillReagentItemLink(lua_State* L) {
         if (g_spellDB.GetRecord(info->m_spellId, &spell)) {
             int32_t count = 0;
 
-            for (uint32_t i = 0; i < 8; i++) {
+            for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
                 int32_t itemId = spell.m_reagent[i];
 
                 if (!itemId || ++count != reagentIndex) {
@@ -998,14 +998,14 @@ static int32_t Script_GetTradeSkillReagentInfo(lua_State* L) {
         if (g_spellDB.GetRecord(info->m_spellId, &spell)) {
             int32_t count = 0;
 
-            for (uint32_t i = 0; i < 8; i++) {
+            for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
                 if (!spell.m_reagent[i] || ++count != reagentIndex) {
                     continue;
                 }
 
                 int32_t itemId = spell.m_reagent[i];
                 WOWGUID requester;
-                requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(info->m_spellId)) | 0x1FE0000000000000ULL;
+                requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(info->m_spellId)) | WOWGUID_SPELL_QUERY_TAG;
                 ItemStats_C* stats = g_itemDBCache.GetRecord(itemId, requester, TradeSkillItemCallback, nullptr, false);
 
                 if (stats) {
@@ -1087,7 +1087,7 @@ static int32_t Script_GetTradeSkillTools(lua_State* L) {
             }
 
             WOWGUID requester;
-            requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(info->m_spellId)) | 0x1FE0000000000000ULL;
+            requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(info->m_spellId)) | WOWGUID_SPELL_QUERY_TAG;
             ItemStats_C* stats = g_itemDBCache.GetRecord(spell.m_totem[i], requester, TradeSkillItemCallback, nullptr, false);
 
             if (stats) {

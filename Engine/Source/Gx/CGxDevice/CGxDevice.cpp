@@ -475,7 +475,7 @@ void CGxDevice::ICursorDraw() {
     GxRsSet(GxRs_Texture1, nullptr);
     GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
-    GxRsSet(GxRs_TexGen0, 0);
+    GxRsSet(GxRs_TexGen0, GxTexGen_Disabled);
     GxRsSet(GxRs_TextureShader0, 0);
 
     C44Matrix world;
@@ -1386,7 +1386,7 @@ void CGxDevice::IRsInit() {
         this->m_appRenderStates[GxRs_Texture0 + i].m_value.m_data.i[0] = 0;
         this->m_appRenderStates[GxRs_ColorOp0 + i].m_value.m_data.i[0] = GxTexOp_Mod;
         this->m_appRenderStates[GxRs_AlphaOp0 + i].m_value.m_data.i[0] = GxTexOp_Mod;
-        this->m_appRenderStates[GxRs_TexGen0 + i].m_value.m_data.i[0] = 0;
+        this->m_appRenderStates[GxRs_TexGen0 + i].m_value.m_data.i[0] = GxTexGen_Disabled;
         this->m_appRenderStates[GxRs_TextureShader0 + i].m_value.m_data.i[0] = 0;
         this->m_appRenderStates[GxRs_TextureCoord0 + i].m_value.m_data.i[0] = i;
     }
@@ -1559,8 +1559,8 @@ CGxDevice::CGxDevice() : m_defWindowRect(), m_curWindowRect(), m_viewport(), m_s
     this->m_viewport.m_z.m_h = 1.0f;
     this->m_viewportDirty = 1;
     this->InitLights();
-    this->m_appMasterEnables = 0x1FF;
-    this->m_hwMasterEnables = 0x1FF;
+    this->m_appMasterEnables = ((1 << EGxMasterEnables::GxMasterEnables_Last) - 1);
+    this->m_hwMasterEnables = ((1 << EGxMasterEnables::GxMasterEnables_Last) - 1);
     this->m_scrShotClick = 0;
     this->m_scrShotWidth = 0;
     this->m_scrShotHeight = 0;
@@ -1824,7 +1824,7 @@ void CGxDevice::ShaderDestroy(CGxShader*& shader) {
 void CGxDevice::DeviceOverride(EGxOverride override, uint32_t value) {
     CGxDevice::Log("CGxDevice::DeviceOverride(): %d set to %d", override, value);
 
-    if (override == GxOverride_Unk8) {
+    if (override == GxOverride_PointScaleMax) {
         int32_t enable = value > 1;
         this->m_caps.m_pointParameters = enable;
         this->m_caps.m_pointSprite = enable;
@@ -2087,7 +2087,7 @@ void CGxDevice::RsInit() {
         this->RsSet(static_cast<EGxRenderState>(GxRs_Texture0 + tmu), nullptr);
         this->RsSet(static_cast<EGxRenderState>(GxRs_ColorOp0 + tmu), GxTexOp_Mod);
         this->RsSet(static_cast<EGxRenderState>(GxRs_AlphaOp0 + tmu), GxTexOp_Mod);
-        this->RsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + tmu), 0);
+        this->RsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + tmu), GxTexGen_Disabled);
         this->RsSet(static_cast<EGxRenderState>(GxRs_TextureShader0 + tmu), 0);
         this->RsSet(static_cast<EGxRenderState>(GxRs_TextureCoord0 + tmu), static_cast<int32_t>(tmu));
     }

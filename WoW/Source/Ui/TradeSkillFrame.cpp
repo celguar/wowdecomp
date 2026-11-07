@@ -394,7 +394,7 @@ void CGTradeSkillInfo::RefreshList(int32_t full) {
             if ((1 << bit) & s_base64Decode[static_cast<const uint8_t*>(CGTradeSkillInfo::m_linkData)[offset]]) {
                 SpellRec spell;
 
-                if (g_spellDB.GetRecord(ability->m_spell, &spell) && (spell.m_attributes & 0x20)) {
+                if (g_spellDB.GetRecord(ability->m_spell, &spell) && (spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL)) {
                     if (count == abilities.Count()) {
                         abilities.SetCount(count + 32);
                     }
@@ -493,7 +493,7 @@ void CGTradeSkillInfo::RefreshList(int32_t full) {
 
             if ((spell.m_effect[0] == SPELL_EFFECT_CREATE_ITEM || spell.m_effect[0] == SPELL_EFFECT_CREATE_ITEM_2 || spell.m_effect[0] == SPELL_EFFECT_CREATE_RANDOM_ITEM) && spell.m_effectItemType[0]) {
                 WOWGUID requester;
-                requester.m_guid = static_cast<uint32_t>(spellId) | 0x1FE0000000000000ULL;
+                requester.m_guid = static_cast<uint32_t>(spellId) | WOWGUID_SPELL_QUERY_TAG;
                 ItemStats_C* stats = g_itemDBCache.GetRecord(spell.m_effectItemType[0], requester, TradeSkillListItemCallback, nullptr, false);
 
                 if (!stats) {
@@ -508,13 +508,17 @@ void CGTradeSkillInfo::RefreshList(int32_t full) {
                 info->m_itemClass = stats->m_class;
                 info->m_itemSubClass = stats->m_subClass;
                 info->m_itemLevel = stats->m_itemLevel;
+#if defined(WOWDECOMP_ARCH_64)
+                info->m_invTypeMask = stats->m_inventoryType < INVTYPE_COUNT ? s_inventoryTypeSlots[stats->m_inventoryType] : 0;
+#else
                 info->m_invTypeMask = s_inventoryTypeSlots[stats->m_inventoryType];
+#endif
 
-                if (stats->m_inventoryType == 18) {
+                if (stats->m_inventoryType == INVTYPE_BAG) {
                     info->m_invTypeMask = 0x80000;
-                } else if (stats->m_inventoryType == 11) {
+                } else if (stats->m_inventoryType == INVTYPE_FINGER) {
                     info->m_invTypeMask = 0x400;
-                } else if (stats->m_inventoryType == 12) {
+                } else if (stats->m_inventoryType == INVTYPE_TRINKET) {
                     info->m_invTypeMask = 0x1000;
                 }
 
@@ -522,18 +526,18 @@ void CGTradeSkillInfo::RefreshList(int32_t full) {
                     info->m_invTypeMask = 0x4000000;
                 }
             } else {
-                info->m_itemClass = -1;
+                info->m_itemClass = ITEM_CLASS::ITEM_CLASS_NONE;
                 info->m_itemSubClass = -1;
                 info->m_itemLevel = 0;
                 info->m_invTypeMask = 0x4000000;
 
-                if (spell.m_equippedItemClass == 2) {
+                if (spell.m_equippedItemClass == ITEM_CLASS::ITEM_CLASS_WEAPON) {
                     info->m_invTypeMask = (spell.m_equippedItemSubclass & 0x1) ? 0x800000 : 0x1000000;
-                } else if (spell.m_equippedItemClass == 4) {
+                } else if (spell.m_equippedItemClass == ITEM_CLASS::ITEM_CLASS_ARMOR) {
                     if (spell.m_equippedItemInvTypes) {
                         info->m_invTypeMask = 0;
 
-                        for (uint32_t j = 0; j < 29; j++) {
+                        for (uint32_t j = 0; j < INVTYPE_COUNT; j++) {
                             if ((1 << j) & spell.m_equippedItemInvTypes) {
                                 info->m_invTypeMask = s_inventoryTypeSlots[j];
 
@@ -983,8 +987,8 @@ bool CGTradeSkillInfo::GetTradeSkillListLink(int32_t spellId, char* buffer, uint
         return false;
     }
 
-    int32_t race = player->m_unit->m_unitFieldBytes0[0];
-    int32_t classId = player->m_unit->m_unitFieldBytes0[1];
+    int32_t race = player->m_unit->m_raceID;
+    int32_t classId = player->m_unit->m_classID;
     uint8_t bits = 0;
     uint8_t bit = 0;
     char* out = &buffer[SStrLen(buffer)];
@@ -1043,6 +1047,12 @@ bool Profession_FilterSpell(int32_t spellId, int32_t minLevel, int32_t maxLevel,
                 continue;
             }
 
+#if defined(WOWDECOMP_ARCH_64)
+            if (stats->m_statType[i] >= sizeof(s_itemModTokens) / sizeof(s_itemModTokens[0])) {
+                continue;
+            }
+#endif
+
             SStrCopy(format, FrameScript_GetText(s_itemModTokens[stats->m_statType[i]], -1, GENDER_NOT_APPLICABLE), sizeof(format));
             SStrPrintf(text, sizeof(text), format, value > 0 ? '+' : '-', abs(value));
             CaseAccentInsensitiveParse(text, sizeof(text), s_locale);
@@ -1093,7 +1103,7 @@ bool Profession_FilterSpell(int32_t spellId, int32_t minLevel, int32_t maxLevel,
 
         SpellRec itemSpell;
 
-        for (uint32_t i = 0; i < 5; i++) {
+        for (uint32_t i = 0; i < NUM_ITEM_SPELLS; i++) {
             if (!g_spellDB.GetRecord(stats->m_spellId[i], &itemSpell)) {
                 continue;
             }
@@ -1101,13 +1111,13 @@ bool Profession_FilterSpell(int32_t spellId, int32_t minLevel, int32_t maxLevel,
             SpellParserParseText(&itemSpell, format, sizeof(format), 0, 0, 0, 0, 1, 0);
 
             switch (stats->m_spellTrigger[i]) {
-                case 0:
+                case ITEM_SPELL_TRIGGER::ITEM_SPELL_TRIGGER_ON_USE:
                     SStrPrintf(text, sizeof(text), "%s %s", FrameScript_GetText("ITEM_SPELL_TRIGGER_ONUSE", -1, GENDER_NOT_APPLICABLE), format);
                     break;
-                case 1:
+                case ITEM_SPELL_TRIGGER::ITEM_SPELL_TRIGGER_ON_EQUIP:
                     SStrPrintf(text, sizeof(text), "%s %s", FrameScript_GetText("ITEM_SPELL_TRIGGER_ONEQUIP", -1, GENDER_NOT_APPLICABLE), format);
                     break;
-                case 2:
+                case ITEM_SPELL_TRIGGER::ITEM_SPELL_TRIGGER_ON_PROC:
                     SStrPrintf(text, sizeof(text), "%s %s", FrameScript_GetText("ITEM_SPELL_TRIGGER_ONPROC", -1, GENDER_NOT_APPLICABLE), format);
                     break;
                 default:
@@ -1176,7 +1186,7 @@ bool Profession_FilterSpell(int32_t spellId, int32_t minLevel, int32_t maxLevel,
         return true;
     }
 
-    for (uint32_t i = 0; i < 8; i++) {
+    for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
         if (!spell.m_reagent[i] || !spell.m_reagentCount[i]) {
             continue;
         }

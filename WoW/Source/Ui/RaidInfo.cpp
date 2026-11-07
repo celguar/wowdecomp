@@ -199,7 +199,7 @@ int32_t CGRaidInfo::IsPlayerRaidOfficer(const WOWGUID& guid) {
 
     for (uint32_t i = 0; i < CGRaidInfo::m_numMembers; i++) {
         if (CGRaidInfo::m_members[i]->m_guid == guid) {
-            return CGRaidInfo::m_members[i]->m_rank > 0 || CGPartyInfo::m_leader == guid;
+            return CGRaidInfo::m_members[i]->m_rank > CGRaidMember::RANK::MEMBER || CGPartyInfo::m_leader == guid;
         }
     }
 
@@ -228,11 +228,11 @@ void CGRaidInfo::SetRaidTarget(uint32_t index, const WOWGUID& guid) {
 int32_t CGRaidInfo::IsPVPRaid() {
     MapRec* map = g_mapDB.GetRecord(CGGameUI::m_iCurrentMapID);
 
-    if (map && map->m_instanceType == 3) {
+    if (map && map->m_instanceType == MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_PVP_BATTLEFIELD) {
         return 1;
     }
 
-    return map->m_instanceType == 4;
+    return map->m_instanceType == MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_ARENA_BATTLEFIELD;
 }
 
 // VERIFY: 0cb73745 auto
@@ -582,7 +582,7 @@ int32_t Packet_MSG_RAID_READY_CHECK(void* param, NETMESSAGE msgId, uint32_t time
     if (CGRaidInfo::m_numMembers) {
         CGRaidMember* self = CGRaidInfo::FindMemberByGuid(ClntObjMgrGetActivePlayer());
 
-        if (self && self->m_rank > 0) {
+        if (self && self->m_rank > CGRaidMember::RANK::MEMBER) {
             for (uint32_t i = 0; i < CGRaidInfo::m_numMembers; i++) {
                 CGRaidMember* member = CGRaidInfo::m_members[i];
 
@@ -687,7 +687,7 @@ void CGRaidInfo::UpdateRoster(const WOWGUID* guids, const uint32_t* subgroups, c
     }
 
     if (count) {
-        CGTutorial::TriggerTutorial(45);
+        CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_RAID_GROUPS);
     }
 
     uint32_t oldCount = CGRaidInfo::m_numMembers;
@@ -792,7 +792,7 @@ void CGRaidInfo::UpdateRoster(const WOWGUID* guids, const uint32_t* subgroups, c
         previous[i].m_pending = member->m_readyCheckPending;
         previous[i].m_ready = member->m_readyCheckReady;
 
-        if (member->m_rank == 2) {
+        if (member->m_rank == CGRaidMember::RANK::LEADER) {
             leader = member->m_guid;
         }
     }
@@ -806,7 +806,7 @@ void CGRaidInfo::UpdateRoster(const WOWGUID* guids, const uint32_t* subgroups, c
         member->m_subgroup = subgroups[i];
         member->m_assignments = flags[i];
         member->m_groupRole = roles[i];
-        member->m_rank = member->m_guid == CGPartyInfo::m_leader ? 2 : flags[i] & 0x1;
+        member->m_rank = member->m_guid == CGPartyInfo::m_leader ? CGRaidMember::RANK::LEADER : static_cast<CGRaidMember::RANK>(flags[i] & CGPartyInfo::ASSIGNMENT_FLAGS::ASSISTANT);
         memcpy(&member->m_stats, &stats[i], sizeof(CGPartyMemberState));
 
         if (online[i]) {
@@ -1051,10 +1051,10 @@ uint8_t CGRaidInfo::GetPartyAssignments(const WOWGUID& guid) {
 int32_t CGRaidInfo::GetPartyAssignments(lua_State* L, int32_t assignment) {
     uint8_t flag = 0;
 
-    if (assignment == 0) {
-        flag = 2;
-    } else if (assignment == 1) {
-        flag = 4;
+    if (assignment == CGPartyInfo::ASSIGNMENT::MAINTANK) {
+        flag = CGPartyInfo::ASSIGNMENT_FLAGS::MAIN_TANK;
+    } else if (assignment == CGPartyInfo::ASSIGNMENT::MAINASSIST) {
+        flag = CGPartyInfo::ASSIGNMENT_FLAGS::MAIN_ASSIST;
     }
 
     if (lua_isstring(L, 2)) {

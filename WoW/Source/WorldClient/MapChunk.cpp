@@ -1,4 +1,5 @@
 #include "MapChunk.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "WoW/Source/WorldClient/WorldConstants.h"
 #include "WoW/Source/WorldClient/DetailDoodad.h"
 #include "WoW/Source/WorldClient/CDetailDoodadData.h"
@@ -56,7 +57,7 @@ static const uint32_t s_bitShift[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 float CMapChunk::s_geoToTex;
 
 // STATIC: 0x00D25498
-C3Vector CMapChunk::vertexList[145];
+C3Vector CMapChunk::vertexList[TERRAIN_CHUNK_VERTEX_COUNT];
 
 // STATIC: 0x00AEEE3C
 const int32_t CMapChunk::cornerVertexIndex[4] = { 0, 8, 136, 144 };
@@ -246,17 +247,17 @@ void CMapChunk::ProcessIffChunks(bool a3) {
 void CMapChunk::InitializeVertexGrid() {
     C3Vector* vertex = CMapChunk::vertexList;
 
-    for (int32_t row = 0; row < 9; row++) {
+    for (int32_t row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
         float x = row * -SMOLTILE_SIZE;
 
-        for (int32_t col = 0; col < 9; col++) {
+        for (int32_t col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             vertex->x = x;
             vertex->y = 0.0f - col * SMOLTILE_SIZE;
             vertex++;
         }
 
-        if (row < 8) {
-            for (int32_t col = 0; col < 8; col++) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
+            for (int32_t col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 vertex->x = x - HALF_SMOLTILE_SIZE;
                 vertex->y = 0.0f - col * SMOLTILE_SIZE - HALF_SMOLTILE_SIZE;
                 vertex++;
@@ -284,7 +285,7 @@ void CMapChunk::Destroy() {
 // OFFSET: 0x007C3B40
 void CMapChunk::AllocRenderChunkAndBatch() {
     this->m_renderChunk = CMap::AllocRenderChunk();
-    this->m_renderChunk->AddBatch(this, nullptr, &this->m_topLeftCoords, 0);
+    this->m_renderChunk->AddBatch(this, nullptr, &this->m_topLeftCoords, CMapRenderChunk::BATCH_FLAGS::BATCH_NONE);
 }
 
 // VERIFY: b0c09ba2 manual
@@ -293,17 +294,17 @@ int16_t CMapChunk::CreateIndices(char* buf, int32_t baseVertex) {
     uint16_t* indexDst = reinterpret_cast<uint16_t*>(buf);
     int16_t totalIndices = 0;
 
-    for (int row = 0; row < 8; ++row) {
-        for (int col = 0; col < 8; ++col) {
+    for (int row = 0; row < TERRAIN_TILES_PER_CHUNK_AXIS; ++row) {
+        for (int col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; ++col) {
             int holeMaskIndex = (row / 2) * 4 + (col / 2);
             if (this->m_header->m_holes & CMap::s_holeMask[holeMaskIndex])
                 continue;
 
             uint16_t TL = baseVertex + col;
             uint16_t TR = baseVertex + col + 1;
-            uint16_t C = baseVertex + col + 9;
-            uint16_t BL = baseVertex + col + 17;
-            uint16_t BR = baseVertex + col + 18;
+            uint16_t C = baseVertex + col + TERRAIN_VERTICES_PER_CHUNK_AXIS;
+            uint16_t BL = baseVertex + col + TERRAIN_CHUNK_VERTEX_ROW_STRIDE;
+            uint16_t BR = baseVertex + col + TERRAIN_CHUNK_VERTEX_ROW_STRIDE + 1;
 
             indexDst[0] = C;
             indexDst[1] = TL;
@@ -321,7 +322,7 @@ int16_t CMapChunk::CreateIndices(char* buf, int32_t baseVertex) {
             totalIndices += 12;
         }
 
-        baseVertex += 17;
+        baseVertex += TERRAIN_CHUNK_VERTEX_ROW_STRIDE;
     }
 
     return totalIndices;
@@ -351,8 +352,8 @@ void __fastcall CWorldScene::AddMapChunk(CMapChunk* mapChunk) {
 // VERIFY: d44747a1 manual
 // OFFSET: 0x007C3F30
 void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
-    static float cols[9];
-    static float rows[9];
+    static float cols[TERRAIN_VERTICES_PER_CHUNK_AXIS];
+    static float rows[TERRAIN_VERTICES_PER_CHUNK_AXIS];
 
     float left = 17066.666f - this->m_cOffset.x * 33.333332f;
     float top = 17066.666f - this->m_cOffset.y * 33.333332f;
@@ -378,8 +379,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
     float* height = this->m_height;
     int8_t* normals = this->m_normals;
 
-    for (int32_t row = 0; row < 9; row++) {
-        for (int32_t col = 0; col < 9; col++) {
+    for (int32_t row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
+        for (int32_t col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             v->m_position.x = rows[row];
             v->m_position.y = cols[col];
             v->m_position.z = this->m_topLeftCoords.z + height[col];
@@ -389,11 +390,11 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
             v++;
         }
 
-        height += 9;
-        normals += 27;
+        height += TERRAIN_VERTICES_PER_CHUNK_AXIS;
+        normals += 3 * TERRAIN_VERTICES_PER_CHUNK_AXIS;
 
-        if (row < 8) {
-            for (int32_t col = 0; col < 8; col++) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
+            for (int32_t col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 v->m_position.x = rows[row] - HALF_SMOLTILE_SIZE;
                 v->m_position.y = cols[col] - HALF_SMOLTILE_SIZE;
                 v->m_position.z = this->m_topLeftCoords.z + height[col];
@@ -403,8 +404,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
                 v++;
             }
 
-            height += 8;
-            normals += 24;
+            height += TERRAIN_TILES_PER_CHUNK_AXIS;
+            normals += 3 * TERRAIN_TILES_PER_CHUNK_AXIS;
         }
     }
 }
@@ -412,8 +413,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
 // VERIFY: 6a9c0ba2 manual
 // OFFSET: 0x007C4620
 void CMapChunk::CreateVerticesWorld(CGxVertexPNC* v, const C3Vector& offset) {
-    static float cols[9];
-    static float rows[9];
+    static float cols[TERRAIN_VERTICES_PER_CHUNK_AXIS];
+    static float rows[TERRAIN_VERTICES_PER_CHUNK_AXIS];
 
     float left = 17066.666f - this->m_cOffset.x * 33.333332f;
     float top = 17066.666f - this->m_cOffset.y * 33.333332f;
@@ -440,8 +441,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPNC* v, const C3Vector& offset) {
     uint32_t* shading = this->m_vertexShading;
     float* height = this->m_height;
 
-    for (int32_t row = 0; row < 9; row++) {
-        for (int32_t col = 0; col < 9; col++) {
+    for (int32_t row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
+        for (int32_t col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             v->m_position.x = rows[row];
             v->m_position.y = cols[col];
             v->m_position.z = this->m_topLeftCoords.z + *height;
@@ -467,8 +468,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPNC* v, const C3Vector& offset) {
             shading++;
         }
 
-        if (row < 8) {
-            for (int32_t col = 0; col < 8; col++) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
+            for (int32_t col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 v->m_position.x = rows[row] - HALF_SMOLTILE_SIZE;
                 v->m_position.y = cols[col] - HALF_SMOLTILE_SIZE;
                 v->m_position.z = this->m_topLeftCoords.z + *height;
@@ -508,10 +509,10 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPN* v) {
     float* height = this->m_height;
     int8_t* normals = this->m_normals;
 
-    for (int row = 0; row < 9; row++) {
+    for (int row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
         const float outerX = (float)row * stepY;
 
-        for (int col = 0; col < 9; col++) {
+        for (int col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             v->m_position.x = outerX;
             v->m_position.y = (float)col * stepX;
             v->m_position.z = height[col];
@@ -521,13 +522,13 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPN* v) {
             v++;
         }
 
-        height += 9;
-        normals += 27;
+        height += TERRAIN_VERTICES_PER_CHUNK_AXIS;
+        normals += 3 * TERRAIN_VERTICES_PER_CHUNK_AXIS;
 
-        if (row < 8) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
             const float innerX = (float)row * stepX + 0.5f * stepY;
 
-            for (int col = 0; col < 8; col++) {
+            for (int col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 v->m_position.x = innerX;
                 v->m_position.y = (float)col * stepY + halfStepX;
                 v->m_position.z = height[col];
@@ -537,8 +538,8 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPN* v) {
                 v++;
             }
 
-            height += 8;
-            normals += 24;
+            height += TERRAIN_TILES_PER_CHUNK_AXIS;
+            normals += 3 * TERRAIN_TILES_PER_CHUNK_AXIS;
         }
     }
 }
@@ -556,8 +557,8 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPNC* v) {
     int8_t* normals = this->m_normals;
     uint32_t* shading = this->m_vertexShading;
 
-    for (int32_t row = 0; row < 9; row++) {
-        for (int32_t col = 0; col < 9; col++) {
+    for (int32_t row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
+        for (int32_t col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             v->m_position.x = stepY * row;
             v->m_position.y = col * stepX;
             v->m_position.z = *height;
@@ -579,7 +580,7 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPNC* v) {
                     v->m_color = color;
                 }
             } else {
-                *reinterpret_cast<uint32_t*>(&v->m_color) = 0xFF7F7F7F;
+                *reinterpret_cast<uint32_t*>(&v->m_color) = COLOR_GRAY_127_ARGB;
             }
 
             height++;
@@ -588,10 +589,10 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPNC* v) {
             shading++;
         }
 
-        if (row < 8) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
             float innerX = row * stepX + halfStepY;
 
-            for (int32_t col = 0; col < 8; col++) {
+            for (int32_t col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 v->m_position.x = innerX;
                 v->m_position.y = col * stepY + halfStepX;
                 v->m_position.z = *height;
@@ -613,7 +614,7 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPNC* v) {
                         v->m_color = color;
                     }
                 } else {
-                    *reinterpret_cast<uint32_t*>(&v->m_color) = 0xFF7F7F7F;
+                    *reinterpret_cast<uint32_t*>(&v->m_color) = COLOR_GRAY_127_ARGB;
                 }
 
                 height++;
@@ -706,7 +707,7 @@ void CMapChunk::Batch() {
         area->BatchChunks(pos);
     } else {
         this->m_renderChunk = CMap::AllocRenderChunk();
-        this->m_renderChunk->AddBatch(this, nullptr, &this->m_topLeftCoords, 0);
+        this->m_renderChunk->AddBatch(this, nullptr, &this->m_topLeftCoords, CMapRenderChunk::BATCH_FLAGS::BATCH_NONE);
         this->m_bLoaded = 1;
     }
 }
@@ -736,12 +737,12 @@ void CMapChunk::GetLiquidBounds(CAaBox& box) const {
     CChunkLiquid* liquid = const_cast<CMapChunk*>(this)->m_liquidChunkLinkList.Head();
 
     if (liquid) {
-        box.t.z = liquid->m_height.y;
-        box.b.z = liquid->m_height.x;
+        box.t.z = liquid->m_height.m_h;
+        box.b.z = liquid->m_height.m_l;
 
         do {
-            box.t.z = liquid->m_height.y >= box.t.z ? liquid->m_height.y : box.t.z;
-            box.b.z = liquid->m_height.x <= box.b.z ? liquid->m_height.x : box.b.z;
+            box.t.z = liquid->m_height.m_h >= box.t.z ? liquid->m_height.m_h : box.t.z;
+            box.b.z = liquid->m_height.m_l <= box.b.z ? liquid->m_height.m_l : box.b.z;
             liquid = const_cast<CMapChunk*>(this)->m_liquidChunkLinkList.Next(liquid);
         } while (liquid);
     }
@@ -802,17 +803,17 @@ void CMapChunk::CreateLiquids(bool a3) {
                 chunkLiquid->m_owner = this;
                 chunkLiquid->m_vertexFormat = materialRec->m_lvf;
                 chunkLiquid->m_topLeftCoords = this->m_topLeftCoords;
-                chunkLiquid->m_height = *reinterpret_cast<C2Vector*>(&mclq->m_minHeight);
+                chunkLiquid->m_height = mclq->m_height;
 
                 uint8_t* verts = reinterpret_cast<uint8_t*>(mclq->m_verts);
                 chunkLiquid->m_tileBegin.x = 0;
                 chunkLiquid->m_tileBegin.y = 0;
-                chunkLiquid->m_tileEnd.x = 8;
-                chunkLiquid->m_tileEnd.y = 8;
+                chunkLiquid->m_tileEnd.x = LIQUID_TILES_PER_CHUNK_AXIS;
+                chunkLiquid->m_tileEnd.y = LIQUID_TILES_PER_CHUNK_AXIS;
 
                 void* mem = SMemAlloc(sizeof(Liquid::CChunkVertexData), __FILE__, __LINE__, 0);
                 Liquid::CChunkVertexData* vertexData = mem ? new (mem) Liquid::CChunkVertexData(verts, chunkLiquid->m_vertexFormat) : nullptr;
-                chunkLiquid->m_tiles = reinterpret_cast<uint8_t*>(&mclq->m_tiles);
+                chunkLiquid->m_tiles = &mclq->m_tiles;
                 chunkLiquid->m_vertexData = vertexData;
                 mclq++;
 
@@ -839,7 +840,7 @@ void CMapChunk::CreateLiquids(bool a3) {
             chunkLiquid->m_type = instance->m_liquidType;
             chunkLiquid->m_vertexFormat = instance->m_vertexFormat;
             chunkLiquid->m_topLeftCoords = this->m_topLeftCoords;
-            chunkLiquid->m_height = *reinterpret_cast<const C2Vector*>(&instance->m_minHeight);
+            chunkLiquid->m_height = instance->m_heightRange;
 
             uint8_t yOffset = instance->m_yOffset;
             uint8_t xOffset = instance->m_xOffset;
@@ -881,7 +882,7 @@ void CMapChunk::CullAndBucketChunk() {
         liquid->GetAaBox(box);
 
         if (!CWorldScene::FrustumCull(&box)) {
-            corner.z = (camZ <= liquid->m_height.y ? camZ : liquid->m_height.y) < liquid->m_height.x ? liquid->m_height.x : (camZ > liquid->m_height.y ? liquid->m_height.y : camZ);
+            corner.z = (camZ <= liquid->m_height.m_h ? camZ : liquid->m_height.m_h) < liquid->m_height.m_l ? liquid->m_height.m_l : (camZ > liquid->m_height.m_h ? liquid->m_height.m_h : camZ);
             CWorldScene::AddToDistanceBucket(liquid, corner);
         }
     }
@@ -914,8 +915,8 @@ CMapChunk::CMapChunk() {
     this->m_renderChunk = nullptr;
     this->m_chunkInfoBeginPtr = nullptr;
     this->m_header = nullptr;
-    this->m_lowQualityTexMap = nullptr;
-    this->m_predTexture = nullptr;
+    this->m_predTex = nullptr;
+    this->m_noEffectDoodad = nullptr;
     this->m_height = nullptr;
     this->m_vertexShading = nullptr;
     this->m_normals = nullptr;
@@ -1025,8 +1026,8 @@ void CMapChunk::Create(SIffChunk* headerChunk, bool a3) {
     this->m_topLeftCoords.y = 17066.666f - this->m_cOffset.x * 33.333332f;
     this->m_topLeftCoords.z = 0.0f;
     this->m_topLeftCoords.z = this->m_header->m_position.z;
-    this->m_lowQualityTexMap = this->m_header->m_lowQualityTextureMap;
-    this->m_predTexture = reinterpret_cast<uint8_t*>(&this->m_header->m_predTex);
+    this->m_predTex = this->m_header->m_predTex;
+    this->m_noEffectDoodad = this->m_header->m_noEffectDoodad;
 
     this->CreateBounds();
     this->CreateLiquids(a3);
@@ -1040,7 +1041,7 @@ void CMapChunk::Create(SIffChunk* headerChunk, bool a3) {
 
     CMapArea* area = static_cast<CMapArea*>(this->m_parentLinkList.Head()->m_ref);
     this->CreateRefs(area, reinterpret_cast<uint32_t*>(this->m_mcrfPtr), this->m_header->m_nDoodadRefs, this->m_header->m_nMapObjRefs);
-    area->m_mapChunks[16 * this->m_aIndex.y + this->m_aIndex.x] = this;
+    area->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * this->m_aIndex.y + this->m_aIndex.x] = this;
     this->m_flags = static_cast<MapObjFlag>(this->m_flags | MAPOBJ_FLAG_PREPARED);
 }
 
@@ -1059,31 +1060,31 @@ void CMapChunk::UpdateLights() {
 // VERIFY: c9630247 manual
 // OFFSET: 0x007CFB10
 void CMapChunk::ClipBufferUpdate() {
-    uint32_t indices[9];
+    uint32_t indices[TERRAIN_VERTICES_PER_CHUNK_AXIS];
     uint32_t base = 0;
 
     if (CWorldScene::s_activeWorldView.x > CWorldScene::camTarget.x) {
-        base = 136;
+        base = (TERRAIN_VERTICES_PER_CHUNK_AXIS - 1) * TERRAIN_CHUNK_VERTEX_ROW_STRIDE;
     }
 
-    for (uint32_t i = 0; i < 9; i++) {
+    for (uint32_t i = 0; i < TERRAIN_VERTICES_PER_CHUNK_AXIS; i++) {
         indices[i] = i + base;
     }
 
-    CWorldOcclusion::UpdateBufferChunk(CMapChunk::vertexList, this->m_height, indices, 9, &this->m_topLeftCoords, this->m_header->m_holes);
+    CWorldOcclusion::UpdateBufferChunk(CMapChunk::vertexList, this->m_height, indices, TERRAIN_VERTICES_PER_CHUNK_AXIS, &this->m_topLeftCoords, this->m_header->m_holes);
 
     base = 0;
 
     if (CWorldScene::s_activeWorldView.y > CWorldScene::camTarget.y) {
-        base = 8;
+        base = TERRAIN_TILES_PER_CHUNK_AXIS;
     }
 
-    for (uint32_t i = 0; i < 9; i++) {
+    for (uint32_t i = 0; i < TERRAIN_VERTICES_PER_CHUNK_AXIS; i++) {
         indices[i] = base;
-        base += 17;
+        base += TERRAIN_CHUNK_VERTEX_ROW_STRIDE;
     }
 
-    CWorldOcclusion::UpdateBufferChunk(CMapChunk::vertexList, this->m_height, indices, 9, &this->m_topLeftCoords, this->m_header->m_holes);
+    CWorldOcclusion::UpdateBufferChunk(CMapChunk::vertexList, this->m_height, indices, TERRAIN_VERTICES_PER_CHUNK_AXIS, &this->m_topLeftCoords, this->m_header->m_holes);
 }
 
 // VERIFY: bd05b674 auto
@@ -1092,7 +1093,7 @@ int32_t CMapChunk::LoadDetailDoodadModels() {
     int32_t loaded = 1;
 
     for (uint32_t i = 0; i < this->m_header->m_nLayers; i++) {
-        int32_t effectId = this->m_layers[i].m_offectId;
+        int32_t effectId = this->m_layers[i].m_effectId;
 
         if (!effectId) {
             continue;
@@ -1206,7 +1207,7 @@ void CMapChunk::CreateDetailDoodads() {
         int32_t x = s_cells[i].x;
         int32_t y = s_cells[i].y;
 
-        if ((this->m_predTexture[y] & s_bitMask[x]) >> s_bitShift[x]) {
+        if ((this->m_noEffectDoodad[y] & s_bitMask[x]) >> s_bitShift[x]) {
             continue;
         }
 
@@ -1214,8 +1215,8 @@ void CMapChunk::CreateDetailDoodads() {
             continue;
         }
 
-        uint32_t layer = (reinterpret_cast<uint16_t*>(this->m_lowQualityTexMap)[y] & CMap::s_2bitSplatMask[x]) >> CMap::s_2bitSplatShft[x];
-        GroundEffectTextureRec* record = g_groundEffectTextureDB.GetRecord(this->m_layers[layer].m_offectId);
+        uint32_t layer = (this->m_predTex[y] & CMap::s_2bitSplatMask[x]) >> CMap::s_2bitSplatShft[x];
+        GroundEffectTextureRec* record = g_groundEffectTextureDB.GetRecord(this->m_layers[layer].m_effectId);
 
         if (!record) {
             continue;
@@ -1361,7 +1362,7 @@ void CMapChunk::RenderPrep() {
         float dx = CWorldScene::s_activeWorldView.x - this->m_sphere.c.x;
 
         if (CWorld::shadowMipLevel || dx * dx + dz * dz + dy * dy > 603729.0f) {
-            this->m_renderChunk->m_renderFlags |= 0x10;
+            this->m_renderChunk->m_renderFlags |= CMapRenderChunk::RENDER_FLAGS::FLAG_REQUEST_BLEND_MIP1;
         }
 
         this->m_renderChunk->RenderPrep();
@@ -1442,7 +1443,7 @@ int32_t CMapChunk::Intersect(int32_t subX, int32_t subY, const C3Ray& ray, float
         return 0;
     }
 
-    int32_t base = 16 * subY + subX + subY;
+    int32_t base = TERRAIN_CHUNK_VERTEX_ROW_STRIDE * subY + subX;
 
     for (uint32_t i = 0; i < 4; i++) {
         uint32_t tri[3] = { static_cast<uint32_t>(base + 9), static_cast<uint32_t>(base + CMap::s_fanIndices[2 * i + 1]), static_cast<uint32_t>(base + CMap::s_fanIndices[2 * i]) };
@@ -1466,10 +1467,10 @@ int32_t CMapChunk::Intersect(int32_t subX, int32_t subY, const C3Ray& ray, float
 // VERIFY: ba2b9143 manual
 // OFFSET: 0x007D8840
 void CMapChunk::Intersect(CiRect* rect, CAaBox* box, TSGrowableArray<CFacet>* facets) {
-    int32_t base = 16 * rect->minY + rect->minX + rect->minY;
+    int32_t base = TERRAIN_CHUNK_VERTEX_ROW_STRIDE * rect->minY + rect->minX;
     float* height = &this->m_height[base];
     C3Vector* vertices = &CMapChunk::vertexList[base];
-    int32_t rowSkip = 17 - (rect->maxX - rect->minX + 1);
+    int32_t rowSkip = TERRAIN_CHUNK_VERTEX_ROW_STRIDE - (rect->maxX - rect->minX + 1);
 
     for (int32_t y = rect->minY; y <= rect->maxY; y++) {
         for (int32_t x = rect->minX; x <= rect->maxX; x++, height++, vertices++) {
@@ -1540,10 +1541,10 @@ void CMapChunk::Intersect(CiRect* rect, CAaBox* box, TSGrowableArray<CFacet>* fa
 // VERIFY: 2452b304 manual
 // OFFSET: 0x007D8E00
 void CMapChunk::Intersect(CiRect* rect, const CFrustum* frustum, TSGrowableArray<CFacet>* facets) {
-    int32_t base = 16 * rect->minY + rect->minX + rect->minY;
+    int32_t base = TERRAIN_CHUNK_VERTEX_ROW_STRIDE * rect->minY + rect->minX;
     C3Vector* vertices = &CMapChunk::vertexList[base];
     float* height = &this->m_height[base];
-    int32_t rowSkip = 17 - (rect->maxX - rect->minX + 1);
+    int32_t rowSkip = TERRAIN_CHUNK_VERTEX_ROW_STRIDE - (rect->maxX - rect->minX + 1);
 
     for (int32_t y = rect->minY; y <= rect->maxY; y++) {
         for (int32_t x = rect->minX; x <= rect->maxX; x++, vertices++, height++) {

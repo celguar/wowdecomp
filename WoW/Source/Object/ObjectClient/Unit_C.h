@@ -77,10 +77,10 @@ struct AnimSlot {
     /* 0004 */ uint32_t m_variation;
     /* 0008 */ uint32_t m_time;
     /* 000C */ float m_speed;
-    /* 0010 */ uint32_t unused_0010;
-    /* 0014 */ uint32_t unused_0014;
-    /* 0018 */ uint32_t unused_0018;
-    /* 001C */ uint32_t unused_001C;
+    /* 0010 */ uint32_t unknown_0010;
+    /* 0014 */ uint32_t unknown_0014;
+    /* 0018 */ uint32_t unknown_0018;
+    /* 001C */ uint32_t unknown_001C;
 };
 
 class CSmoothAngle {
@@ -120,7 +120,7 @@ struct UnitThreatHandle {
 struct UnitThreat : public UnitThreatHandle, public TSHashObject<UnitThreat, CHashKeyGUID> {
     /* 0028 */ uint8_t m_status;
     /* 0029 */ uint8_t m_percent;
-    /* 002A */ uint8_t unused_002A[2];
+    /* 002A */ uint8_t unknown_002A[2];
     /* 002C */ int32_t m_threat;
 };
 
@@ -145,6 +145,8 @@ class CGUnitVirtualItem {
 class UnitBloodRec;
 class CGUnit_C : public CGObject_C, public CGUnit {
     public:
+    // UpdateAmmoModel request marker: infer AMMO/THROWN from the ranged item.
+    static constexpr uint32_t AUTO_AMMO_INVENTORY_TYPE = 30;
     int32_t InitializeExtendedDisplay(CGPlayer_C* player, int32_t hasDisplayInfo);
     void ApplyComponentItemsFromEffects();
     void AddHandItem(int32_t hand);
@@ -203,7 +205,7 @@ class CGUnit_C : public CGObject_C, public CGUnit {
     static WOWGUID s_deferredClientControlUpdateGUID;
     static uint8_t s_deferredClientControlUpdateState;
     static void SetDeferredClientControl(WOWGUID guid, uint8_t state);
-    static float s_unused_CA11D0;
+    static float s_unknown_CA11D0;
     static uint32_t s_trackingStuckCount;
     static WOWGUID s_trackingGUID;
     static uint32_t s_trackingFlags;
@@ -250,8 +252,8 @@ class CGUnit_C : public CGObject_C, public CGUnit {
     /* 08D4 */ float m_smoothSwimPitch;
     /* 08D8 */ float m_smoothSwimRoll;
     /* 08DC */ float m_smoothFacingTarget;
-    /* 08E0 */ int32_t unused_08E0;
-    /* 08E4 */ float unused_08E4 [3];
+    /* 08E0 */ int32_t unknown_08E0;
+    /* 08E4 */ float unknown_08E4 [3];
     /* 08F0 */ int32_t m_splashSoundKitId;
     /* 08F4 */ SE2SoundKitObject m_npcInteractSound;
     /* 0908 */ SE2SoundKitObject m_npcSound;
@@ -261,8 +263,8 @@ class CGUnit_C : public CGObject_C, public CGUnit {
     /* 0948 */ uint32_t m_floodsafeTurnPitch [4];
     /* 0958 */ uint32_t m_animEffectStates [3];
     /* 0964 */ CreatureStats_C* m_creatureCacheEntry;
-    /* 0968 */ CreatureDisplayInfoRec* m_displayInfo;
-    /* 096C */ CreatureDisplayInfoExtraRec* m_displayInfoExtra;
+    /* 0968 */ const CreatureDisplayInfoRec* m_displayInfo;
+    /* 096C */ const CreatureDisplayInfoExtraRec* m_displayInfoExtra;
     /* 0970 */ CreatureModelDataRec* m_modelData;
     /* 0974 */ CreatureSoundDataRec* m_soundData;
     /* 0978 */ CreatureSoundDataRec* m_soundDataOverride;
@@ -293,9 +295,9 @@ class CGUnit_C : public CGObject_C, public CGUnit {
     /* 0A1C */ uint32_t m_nextBloodPoolTime;
     /* 0A20 */ CCombatClient m_combat;
     /* 0A2C */ uint32_t m_stopAttackSent;
-    /* 0A30 */ uint32_t m_clientFlags;
-    /* 0A34 */ uint32_t m_animStateFlags;
-    /* 0A38 */ uint32_t m_animationState;
+    /* 0A30 */ uint32_t m_clientFlags; // UNIT_CLIENT_FLAGS
+    /* 0A34 */ uint32_t m_clientFlags2; // UNIT_CLIENT_FLAGS2
+    /* 0A38 */ uint32_t m_animFlags; // UNIT_ANIM_FLAGS
     /* 0A3C */ int32_t m_footprintTextureId;
     /* 0A40 */ int32_t m_terrainTypeId;
     /* 0A44 */ float m_footprintLength;
@@ -329,17 +331,17 @@ class CGUnit_C : public CGObject_C, public CGUnit {
     /* 0AD8 */ int32_t m_mountFootprintTextureId;
     /* 0ADC */ float m_mountFootprintLength;
     /* 0AE0 */ float m_mountFootprintWidth;
-    /* 0AE4 */ uint32_t unused_0AE4 [3];
+    /* 0AE4 */ uint32_t unknown_0AE4 [3];
     /* 0AF0 */ C3Vector m_animEventPosition;
     /* 0AFC */ CEffect* m_procEffects;
-    /* 0B00 */ uint32_t unused_0B00 [3];
+    /* 0B00 */ uint32_t unknown_0B00 [3];
     /* 0B0C */ float m_selectionRadius;
     /* 0B10 */ uint32_t m_flashStartTime;
     /* 0B14 */ CImVector m_flashColor;
     /* 0B18 */ uint32_t m_flashDelay;
     /* 0B1C */ uint32_t m_flashDuration;
     /* 0B20 */ uint8_t m_proceduralFadeAlpha;
-    /* 0B21 */ uint8_t unused_0B21 [3];
+    /* 0B21 */ uint8_t unknown_0B21 [3];
     /* 0B24 */ uint32_t m_proceduralFadeType;
     /* 0B28 */ uint32_t m_proceduralFadeStart;
     /* 0B2C */ uint32_t m_proceduralFadeDuration;
@@ -361,7 +363,7 @@ class CGUnit_C : public CGObject_C, public CGUnit {
     /* 0B88 */ int32_t m_meleeAttackAnimId;
     /* 0B8C */ int32_t m_pendingAnimId;
     /* 0B90 */ int32_t m_awaitingEndAnimId;
-    /* 0B94 */ int32_t unused_0B94;
+    /* 0B94 */ int32_t unknown_0B94;
     /* 0B98 */ ATTACKROUNDINFO m_lastAttackRound;
     /* 0C38 */ CGNamePlateFrame* m_namePlateFrame;
     /* 0C3C */ CGChatBubbleFrame* m_chatBubble;
@@ -1129,23 +1131,23 @@ namespace AnimationData {
 
 class CAnimKitManager {
     public:
-    /* 0000 */ uint32_t unused_0000;
-    /* 0004 */ uint8_t unused_0004[2944];
-    /* 0B84 */ uint32_t unused_0B84;
+    /* 0000 */ uint32_t unknown_0000;
+    /* 0004 */ uint8_t unknown_0004[2944];
+    /* 0B84 */ uint32_t unknown_0B84;
 };
 
 struct ClickToMoveActionInfo {
     /* 0000 */ uint8_t m_enabled;
-    /* 0001 */ uint8_t unused_0001[3];
+    /* 0001 */ uint8_t unknown_0001[3];
     /* 0004 */ float m_stopDistanceSq;
     /* 0008 */ uint8_t m_detectStuck;
     /* 0009 */ uint8_t m_ignoreInteractRange;
-    /* 000A */ uint8_t unused_000A[2];
+    /* 000A */ uint8_t unknown_000A[2];
 };
 
 class ClickToMove {
     public:
-    /* 0000 */ uint32_t unused_0000;
+    /* 0000 */ uint32_t unknown_0000;
 };
 
 void NameQueryCallback(int32_t id, const WOWGUID& guid, void* param, bool success);

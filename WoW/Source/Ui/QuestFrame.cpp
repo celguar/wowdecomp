@@ -1,4 +1,5 @@
 #include "QuestFrame.h"
+#include "WoW/Source/Object/QuestCache.h"
 #include "Engine/Source/Base/CDataStore.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "WoW/Source/ObjectMgrClient/ObjectMgrClient.h"
@@ -164,7 +165,7 @@ void CGQuestInfo::QuestGiverFinished(int32_t keepOpen, uint32_t questId, int32_t
         msg.Put(static_cast<uint32_t>(MSG_QUEST_PUSH_RESULT));
         msg.Put(CGQuestInfo::m_npcInform ? CGQuestInfo::m_npcInform.m_guid : CGQuestInfo::m_npc.m_guid);
         msg.Put(questId);
-        msg.Put(static_cast<uint8_t>(3));
+        msg.Put(static_cast<uint8_t>(CGPlayer_C::QUEST_PUSH_RESULT::QP_RESULT_UI_DECLINED));
         msg.Finalize();
         ClientServices::Send2(&msg);
     }
@@ -190,13 +191,13 @@ void CGQuestInfo::ClearState() {
     for (int32_t i = 0; i < 32; i++) {
         CGQuestInfo::m_availableQuests[i].m_questID = 0;
         CGQuestInfo::m_availableQuests[i].m_level = 0;
-        CGQuestInfo::m_availableQuests[i].m_flags = 0;
+        CGQuestInfo::m_availableQuests[i].m_flags = QUEST_TEMPLATE_FLAGS::QUEST_FLAG_NONE;
         CGQuestInfo::m_availableQuests[i].m_title[0] = 0;
         CGQuestInfo::m_availableQuests[i].m_turnIn = 0;
         CGQuestInfo::m_availableQuests[i].m_repeatable = 0;
         CGQuestInfo::m_inProgressQuests[i].m_questID = 0;
         CGQuestInfo::m_inProgressQuests[i].m_level = 0;
-        CGQuestInfo::m_inProgressQuests[i].m_flags = 0;
+        CGQuestInfo::m_inProgressQuests[i].m_flags = QUEST_TEMPLATE_FLAGS::QUEST_FLAG_NONE;
         CGQuestInfo::m_inProgressQuests[i].m_title[0] = 0;
         CGQuestInfo::m_inProgressQuests[i].m_turnIn = 0;
         CGQuestInfo::m_inProgressQuests[i].m_repeatable = 0;
@@ -212,7 +213,7 @@ void CGQuestInfo::ClearState() {
     CGQuestInfo::m_rewardText[0] = 0;
     CGQuestInfo::m_suggestedGroupNum = 0;
     CGQuestInfo::m_autoLaunched = 0;
-    CGQuestInfo::m_questFlags = 0;
+    CGQuestInfo::m_questFlags = QUEST_TEMPLATE_FLAGS::QUEST_FLAG_NONE;
 }
 
 // VERIFY: d07a48c9 auto
@@ -715,7 +716,7 @@ void CGQuestInfo::CompleteQuest(uint32_t index) {
         return;
     }
 
-    CGTutorial::TriggerTutorial(0x21);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_QUEST_COMPLETION);
     CGPlayer_C::CompleteQuest(CGQuestInfo::m_npc, CGQuestInfo::m_inProgressQuests[index].m_questID);
     CGQuestInfo::m_responseSent = 1;
 }
@@ -763,7 +764,7 @@ void CGQuestInfo::DeclineQuest() {
         return;
     }
 
-    if ((object->m_obj->m_type & TYPE_UNIT) && (static_cast<CGUnit_C*>(object)->m_unit->m_unitNpcFlags & 1) && ClntObjMgrGetActivePlayerObj()) {
+    if ((object->m_obj->m_type & TYPE_UNIT) && (static_cast<CGUnit_C*>(object)->m_unit->m_unitNpcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_GOSSIP) && ClntObjMgrGetActivePlayerObj()) {
         CGPlayer_C::TalkToGossip(CGQuestInfo::m_npc);
         CGQuestInfo::m_responseSent = 1;
         return;
@@ -800,7 +801,7 @@ void CGQuestInfo::GiveQuestItems() {
         return;
     }
 
-    CGTutorial::TriggerTutorial(0x21);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_QUEST_COMPLETION);
     CGPlayer_C::GiveQuestItems(CGQuestInfo::m_npc, CGQuestInfo::m_currentQuest);
     CGQuestInfo::m_responseSent = 1;
 }
@@ -826,7 +827,7 @@ int32_t CGQuestInfo::GetReward(int32_t choice) {
         CGQuestInfo::m_lastChosenItem = CGQuestInfo::m_questItems[choice].m_choice.m_itemID;
     }
 
-    CGTutorial::TriggerTutorial(0x21);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_QUEST_COMPLETION);
     CGPlayer_C::GetQuestReward(CGQuestInfo::m_npc, CGQuestInfo::m_currentQuest, choice <= 0 ? 0 : choice);
     CGQuestInfo::m_responseSent = 1;
     return 1;
@@ -896,7 +897,7 @@ void CGQuestInfo::EnterWorld() {
     CGQuestInfo::m_autoLaunched = 0;
     CGQuestInfo::m_requiredMoney = 0;
     CGQuestInfo::m_lastChosenItem = 0;
-    CGQuestInfo::m_questFlags = 0;
+    CGQuestInfo::m_questFlags = QUEST_TEMPLATE_FLAGS::QUEST_FLAG_NONE;
     CGQuestInfo::ClearState();
     CGQuestInfo::ClearQuestItems();
 }

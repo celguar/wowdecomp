@@ -336,12 +336,12 @@ void CSimpleModel::SetCameraByIndex(uint32_t index) {
 
     CM2Model* model = this->m_model;
 
-    if (!(model->m_fFlags & 0x1)) {
+    if (!(model->m_runtimeFlags & 0x1)) {
         model->WaitForLoad(nullptr);
     }
 
     if (index < model->m_shared->m_data->m_cameras.m_count) {
-        this->SetCamera(static_cast<CCamera*>(this->m_model->GetCameraByIndex(index)));
+        this->SetCamera(this->m_model->GetCameraByIndex(index));
         return;
     }
 
@@ -520,7 +520,7 @@ void CSimpleModel::SetModel(CM2Model* model) {
 
     if (model) {
         model->m_fadeAlpha = static_cast<uint8_t>(this->m_alpha * this->m_parentAlpha / 255) * 0.0039215689f;
-        this->m_model->SetSequenceCallback(reinterpret_cast<void*>(&AnimFinishedCallback), reinterpret_cast<uintptr_t>(this));
+        this->m_model->SetSequenceCallback(&AnimFinishedCallback, reinterpret_cast<uintptr_t>(this));
         this->m_model->m_lightingCallback = &CSimpleModel::LightingCallback;
         this->m_model->m_lightingArg = this;
         this->m_model->SetLoadedCallback(&CSimpleModel::ModelLoaded, this);
@@ -566,15 +566,15 @@ void CSimpleModel::OnLayerUpdate(float elapsedSec) {
         CM2Model* model = this->m_model;
 
         if (model->m_attachParent) {
-            model->m_fFlags |= 0x80;
+            model->m_runtimeFlags |= 0x80;
         } else {
-            model->m_fFlags |= 0x8;
+            model->m_runtimeFlags |= 0x8;
         }
 
         if (model->m_attachParent) {
-            model->m_fFlags |= 0x20000;
+            model->m_runtimeFlags |= 0x20000;
         } else {
-            model->m_fFlags |= 0x10000;
+            model->m_runtimeFlags |= 0x10000;
         }
     }
 

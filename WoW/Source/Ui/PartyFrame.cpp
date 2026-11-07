@@ -399,10 +399,10 @@ int32_t CGPartyInfo::GetPartyAssignments(lua_State* L, int32_t assignment) {
 
     uint8_t flag = 0;
 
-    if (assignment == 0) {
-        flag = 2;
-    } else if (assignment == 1) {
-        flag = 4;
+    if (assignment == CGPartyInfo::ASSIGNMENT::MAINTANK) {
+        flag = CGPartyInfo::ASSIGNMENT_FLAGS::MAIN_TANK;
+    } else if (assignment == CGPartyInfo::ASSIGNMENT::MAINASSIST) {
+        flag = CGPartyInfo::ASSIGNMENT_FLAGS::MAIN_ASSIST;
     }
 
     if (lua_isstring(L, 2)) {
@@ -451,7 +451,7 @@ void CGPartyInfo::SetOptOutOfLoot(int32_t optOut) {
 bool CGGameUI::CanChangePlayerDifficulty() {
     MapRec* map = g_mapDB.GetRecord(CGGameUI::m_iCurrentMapID);
 
-    if (!map || map->m_instanceType != 2 || !CGGameUI::IsDynamicDifficultyMap()) {
+    if (!map || map->m_instanceType != MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_RAID_DUNGEON || !CGGameUI::IsDynamicDifficultyMap()) {
         return false;
     }
 
@@ -556,8 +556,8 @@ void CGPartyInfo::InitializeGame() {
     CGPartyInfo::m_memberRoles[3] = 0;
     CGPartyInfo::m_leader.m_guid = 0;
     CGPartyInfo::m_leaderIndex = -1;
-    CGPartyInfo::m_dungeonDifficulty = 0;
-    CGPartyInfo::m_raidDifficulty = 0;
+    CGPartyInfo::m_dungeonDifficulty = DUNGEON_DIFFICULTY_NORMAL;
+    CGPartyInfo::m_raidDifficulty = RAID_DIFFICULTY_10MAN_NORMAL;
     CGPartyInfo::m_playerAssignments = 0;
     CGPartyInfo::m_playerLFGFlags = 0;
     CGPartyInfo::m_playerRole = 0;
@@ -964,44 +964,44 @@ int32_t Packet_SMSG_PLAYER_DIFFICULTY_CHANGE(void* param, NETMESSAGE msgId, uint
     msg->Get(result);
 
     switch (result) {
-        case 0:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_SET_DIFFICULTY:
             msg->Get(difficulty);
             CGPartyInfo::m_dynamicDifficulty = difficulty;
             break;
 
-        case 1:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_COOLDOWN:
             msg->Get(value);
             CGTooltip::GetDurationString(duration, sizeof(duration), 1000 * value, "INT_SPELL_DURATION", nullptr, 1, 0);
             CGGameUI::DisplayError(ERR_DIFFICULTY_CHANGE_COOLDOWN_S, duration);
             break;
 
-        case 2:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_WORLDSTATE:
             CGGameUI::DisplayError(ERR_DIFFICULTY_CHANGE_WORLDSTATE);
             break;
 
-        case 3:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_ENCOUNTER:
             CGGameUI::DisplayError(ERR_DIFFICULTY_CHANGE_ENCOUNTER);
             break;
 
-        case 4:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_COMBAT:
             CGGameUI::DisplayError(ERR_DIFFICULTY_CHANGE_COMBAT);
             break;
 
-        case 5:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_PLAYER_BUSY:
             CGGameUI::DisplayError(ERR_DIFFICULTY_CHANGE_PLAYER_BUSY);
             break;
 
-        case 6:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_START_LOADING:
             msg->Get(value);
             CGPartyInfo::m_nextDifficultyChange = value + static_cast<uint32_t>(::time(nullptr));
             LoadingScreenEnable(CGGameUI::m_iCurrentMapID, false);
             break;
 
-        case 7:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_ALREADY_STARTED:
             CGGameUI::DisplayError(ERR_DIFFICULTY_CHANGE_ALREADY_STARTED);
             break;
 
-        case 8: {
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_MAP_MESSAGE: {
             msg->Get(value);
             MapDifficultyRec* rec = g_mapDifficultyDB.GetRecord(value);
 
@@ -1012,7 +1012,7 @@ int32_t Packet_SMSG_PLAYER_DIFFICULTY_CHANGE(void* param, NETMESSAGE msgId, uint
             break;
         }
 
-        case 9:
+        case CGPartyInfo::DIFFICULTY_CHANGE_RESULT::DIFFICULTY_RESULT_COMPLETE:
             LoadingScreenDisable();
             ConsoleWrite("Changed difficulty successfully", DEFAULT_COLOR);
             FrameScript_SignalEvent(SCRIPT_EVENT_PLAYER_DIFFICULTY_CHANGED, nullptr);

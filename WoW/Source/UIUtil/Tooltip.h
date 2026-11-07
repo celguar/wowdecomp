@@ -1,6 +1,8 @@
 #ifndef WOW_SOURCE_UIUTIL_TOOLTIP_H
 #define WOW_SOURCE_UIUTIL_TOOLTIP_H
 
+#include "WoW/Common/ComponentCore/Types.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -47,7 +49,7 @@ class ItemLinkInfo {
     int32_t GetItemIdFromLink(const char* link);
 };
 
-extern const char* s_inventoryTypeTokens[29];
+extern const char* s_inventoryTypeTokens[INVTYPE_COUNT];
 
 class CGItemStatsSummary;
 class CGTalentGroup_C;
@@ -127,7 +129,7 @@ class CGTooltip : public CSimpleFrame {
     static void RegisterScriptMethods(lua_State* L);
 
     /* 029C */ CSimpleFrame* m_owner;
-    /* 02A0 */ int32_t m_anchorType;
+    /* 02A0 */ TOOLTIP_ANCHORPOINT m_anchorType;
     /* 02A4 */ uint32_t m_numLines;
     /* 02A8 */ uint32_t m_maxLines;
     /* 02AC */ TSFixedArray<CSimpleFontString*> m_leftStrings;
@@ -243,6 +245,18 @@ class CGTooltip : public CSimpleFrame {
 
 class CGItemStatsSummary {
     public:
+    enum SUMMARY_FLAGS : uint32_t {
+        SUMMARY_NONE = 0,
+        SUMMARY_ITEM_SPELLS = 0x1,
+        SUMMARY_RANDOM_PROPERTIES = 0x2,
+        SUMMARY_DPS = 0x4,
+        SUMMARY_RESISTANCES = 0x8,
+        SUMMARY_SOCKETS = 0x10,
+        SUMMARY_STAT_MODS = 0x20,
+        SUMMARY_BLOCK = 0x40,
+        SUMMARY_SCALING_ITEM = 0x80,
+    };
+
     static int32_t GetItemComparison(CGTooltip* first, CGTooltip* second, CGItemStatsSummary* result);
 
     /* 0000 */ float m_dps;

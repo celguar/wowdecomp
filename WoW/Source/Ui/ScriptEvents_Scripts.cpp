@@ -1,4 +1,7 @@
 #include <cstdint>
+#include "WoW/Common/ComponentCore/Types.h"
+#include "WoW/Source/Object/Types.h"
+#include "WoW/Common/Types.h"
 #include "Engine/Source/ConsoleBase/IConsole.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
@@ -18,6 +21,7 @@
 #include "WoW/Source/WowSvcs/WowSvcsClient/ClientServices.h"
 #include "WoW/Source/Ui/GameUI.h"
 #include "WoW/Source/Ui/PartyFrame.h"
+#include "WoW/Source/Ui/LFGRoles.h"
 #include "WoW/Source/Game/GameClient/PetNameCache.h"
 #include "WoW/Source/Magic/MagicClient/SpellEnums.h"
 #include "WoW/Source/Magic/MagicClient/Spell_C.h"
@@ -170,7 +174,7 @@ static int32_t Script_UnitRace(lua_State* L) {
         CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
         if (unit) {
-            rec = g_chrRacesDB.GetRecord(unit->m_unit->m_unitFieldBytes0[0]);
+            rec = g_chrRacesDB.GetRecord(unit->m_unit->m_raceID);
             name = CGUnit_C::GetDisplayRaceName(unit, nullptr);
         } else {
             NameCache* nameCache = g_nameDBCache.GetRecord(guid.m_guid, WOWGUID(), nullptr, nullptr, false);
@@ -218,7 +222,7 @@ static int32_t Script_UnitClass(lua_State* L) {
         CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
         if (unit) {
-            rec = g_chrClassesDB.GetRecord(unit->m_unit->m_unitFieldBytes0[1]);
+            rec = g_chrClassesDB.GetRecord(unit->m_unit->m_classID);
             name = CGUnit_C::GetDisplayClassName(unit, nullptr);
         } else {
             NameCache* nameCache = g_nameDBCache.GetRecord(guid.m_guid, WOWGUID(), nullptr, nullptr, false);
@@ -296,7 +300,7 @@ static int32_t Script_UnitPlayerControlled(lua_State* L) {
     WOWGUID guid;
     CGUnit_C* unit;
 
-    if (Script_GetGUIDFromToken(lua_tolstring(L, 1, nullptr), guid, false) && (unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__))) && (unit->m_unit->m_unitFieldFlags & 0x8)) {
+    if (Script_GetGUIDFromToken(lua_tolstring(L, 1, nullptr), guid, false) && (unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__))) && (unit->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_PLAYER_CONTROLLED)) {
         lua_pushnumber(L, 1.0);
         return 1;
     }
@@ -326,7 +330,7 @@ static int32_t Script_UnitIsPossessed(lua_State* L) {
     WOWGUID guid;
     CGUnit_C* unit;
 
-    if (Script_GetGUIDFromToken(lua_tolstring(L, 1, nullptr), guid, false) && (unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__))) && (unit->m_unit->m_unitFieldFlags & 0x1000000)) {
+    if (Script_GetGUIDFromToken(lua_tolstring(L, 1, nullptr), guid, false) && (unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__))) && (unit->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED)) {
         lua_pushnumber(L, 1.0);
         return 1;
     }
@@ -365,7 +369,7 @@ static int32_t Script_UnitHealth(lua_State* L) {
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
     if (unit) {
-        if (!(unit->m_unit->m_unitDynamicFlags & 0x20) || CGGameUI::IsRaidMemberOrPet(unitGuid)) {
+        if (!(unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_DEAD) || CGGameUI::IsRaidMemberOrPet(unitGuid)) {
             health = unit->GetPredictedHealth();
         } else {
             health = 0;
@@ -390,7 +394,7 @@ static int32_t Script_UnitOnTaxi(lua_State* L) {
 
     CGUnit_C* unit = GetUnitFromName(lua_tolstring(L, 1, nullptr));
 
-    if (unit && (unit->m_unit->m_unitFieldFlags & 0x100000)) {
+    if (unit && (unit->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_ON_TAXI)) {
         lua_pushnumber(L, 1.0);
         return 1;
     }
@@ -412,7 +416,7 @@ static int32_t Script_UnitIsFeignDeath(lua_State* L) {
     if (unit) {
         WOWGUID guid = unit->m_obj->m_guid;
 
-        if (CGGameUI::IsRaidMemberOrPet(guid) && (unit->m_unit->m_unitDynamicFlags & 0x20)) {
+        if (CGGameUI::IsRaidMemberOrPet(guid) && (unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_DEAD)) {
             lua_pushnumber(L, 1.0);
             return 1;
         }
@@ -441,7 +445,7 @@ static int32_t Script_UnitIsDead(lua_State* L) {
             return 1;
         }
 
-        if (unit->m_unit->m_unitDynamicFlags & 0x20) {
+        if (unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_DEAD) {
             guid = unit->m_obj->m_guid;
 
             if (!CGGameUI::IsRaidMemberOrPet(guid)) {
@@ -476,7 +480,7 @@ static int32_t Script_UnitIsGhost(lua_State* L) {
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
     if (unit) {
-        if ((unit->m_obj->m_type & TYPE_PLAYER) && (static_cast<CGPlayer_C*>(unit)->m_player->m_playerFlags & 0x10)) {
+        if ((unit->m_obj->m_type & TYPE_PLAYER) && (static_cast<CGPlayer_C*>(unit)->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_GHOST)) {
             lua_pushnumber(L, 1.0);
             return 1;
         }
@@ -512,7 +516,7 @@ static int32_t Script_UnitIsDeadOrGhost(lua_State* L) {
             return 1;
         }
 
-        if (unit->m_unit->m_unitDynamicFlags & 0x20) {
+        if (unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_DEAD) {
             guid = unit->m_obj->m_guid;
 
             if (!CGGameUI::IsRaidMemberOrPet(guid)) {
@@ -569,7 +573,7 @@ static int32_t Script_UnitAffectingCombat(lua_State* L) {
 
     CGUnit_C* unit = GetUnitFromName(lua_tolstring(L, 1, nullptr));
 
-    if (unit && (unit->m_unit->m_unitFieldFlags & 0x80000)) {
+    if (unit && (unit->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_IN_COMBAT)) {
         lua_pushnumber(L, 1.0);
         return 1;
     }
@@ -597,7 +601,7 @@ static int32_t Script_UnitSex(lua_State* L) {
         CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
         if (unit) {
-            sex = s_unitSexValues[unit->m_unit->m_unitFieldBytes0[2]];
+            sex = s_unitSexValues[unit->m_unit->m_sex];
         } else {
             NameCache* nameCache = g_nameDBCache.GetRecord(guid.m_guid, WOWGUID(), nullptr, nullptr, false);
             sex = nameCache ? s_unitSexValues[nameCache->m_sex] : GENDER_NONE;
@@ -817,7 +821,7 @@ static int32_t Script_UnitName(lua_State* L) {
     Script_GetGUIDFromToken(token, guid, false);
     WOWGUID unitGuid = guid;
 
-    if (!guid || guid.m_guid == 0xFFFFFFFFFFFFFFFEULL) {
+    if (!guid || guid.m_guid == WOWGUID_EMPTY_UNIT_TOKEN) {
         lua_pushnil(L);
         lua_pushnil(L);
         return 2;
@@ -855,7 +859,7 @@ static int32_t Script_UnitName(lua_State* L) {
     } else if (CGPartyPetState* petState = CGPartyMemberStateRepository::FindPetState(unitGuid)) {
         name = petState->m_name;
     } else if ((unitGuid.m_guid & 0xF0F0000000000000ULL) == 0xF040000000000000ULL) {
-        PetNameCache* record = g_petNameCache.GetRecord(static_cast<int32_t>((unitGuid.m_guid >> 24) & 0xFFFFFFF), unitGuid, UnitNameQueryCallback, nullptr, true);
+        PetNameCache* record = g_petNameCache.GetRecord(static_cast<int32_t>((unitGuid.m_guid >> WOWGUID_ENTRY_SHIFT) & WOWGUID_ENTRY_MASK), unitGuid, UnitNameQueryCallback, nullptr, true);
 
         if (record) {
             name = record->m_name;
@@ -905,10 +909,10 @@ static int32_t Script_UnitPower(lua_State* L) {
 
     if (unit) {
         if (powerType == 7) {
-            powerType = unit->m_unit->m_unitFieldBytes0[3];
+            powerType = unit->m_unit->m_displayPower;
         }
 
-        if ((!(unit->m_unit->m_unitDynamicFlags & 0x20) || CGGameUI::IsRaidMemberOrPet(unit->m_obj->m_guid)) && (powerType == unit->m_unit->m_unitFieldBytes0[3] || unit->IsActivePlayer())) {
+        if ((!(unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_DEAD) || CGGameUI::IsRaidMemberOrPet(unit->m_obj->m_guid)) && (powerType == unit->m_unit->m_displayPower || unit->IsActivePlayer())) {
             power = static_cast<uint32_t>(unit->GetPredictedPower(static_cast<POWER_TYPE>(powerType))) / Spell_C_GetPowerDisplayMod(static_cast<POWER_TYPE>(powerType));
         }
     } else if (CGPartyMemberState* state = CGPartyMemberStateRepository::GetState(unitGuid)) {
@@ -952,7 +956,7 @@ static int32_t Script_UnitPowerMax(lua_State* L) {
 
     if (unit) {
         if (powerType == 7) {
-            powerType = unit->m_unit->m_unitFieldBytes0[3];
+            powerType = unit->m_unit->m_displayPower;
         }
 
         power = unit->m_unit->m_unitFieldMaxpower[powerType] / Spell_C_GetPowerDisplayMod(static_cast<POWER_TYPE>(powerType));
@@ -992,7 +996,7 @@ static int32_t Script_UnitPowerType(lua_State* L) {
     if (unit && unit->m_vehicle && unit->m_vehicle->m_vehicleRec && (unit->m_vehicle->m_vehicleRec->m_flags & 0x100000) && index < 3) {
         PowerDisplayRec* display = g_powerDisplayDB.GetRecord(unit->m_vehicle->m_vehicleRec->m_powerDisplayID[index]);
 
-        if (display && display->m_actualType == unit->m_unit->m_unitFieldBytes0[3]) {
+        if (display && display->m_actualType == unit->m_unit->m_displayPower) {
             lua_pushnumber(L, display->m_actualType);
             lua_pushstring(L, display->m_globalStringBaseTag);
             lua_pushnumber(L, static_cast<uint8_t>(display->m_red) * 0.0039215689f);
@@ -1004,8 +1008,8 @@ static int32_t Script_UnitPowerType(lua_State* L) {
 
     if (!index) {
         if (unit) {
-            lua_pushnumber(L, unit->m_unit->m_unitFieldBytes0[3]);
-            lua_pushstring(L, GetPowerString(static_cast<POWER_TYPE>(unit->m_unit->m_unitFieldBytes0[3])));
+            lua_pushnumber(L, unit->m_unit->m_displayPower);
+            lua_pushstring(L, GetPowerString(static_cast<POWER_TYPE>(unit->m_unit->m_displayPower)));
             return 2;
         }
 
@@ -1115,7 +1119,7 @@ static int32_t Script_CanSwitchVehicleSeat(lua_State* L) {
     CGInputControl* inputControl = CGInputControl::GetActive();
 
     if (inputControl) {
-        lua_pushboolean(L, inputControl->IsVehicleSeatFlagSet(0x4000000));
+        lua_pushboolean(L, inputControl->IsVehicleSeatFlagSet(VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_CAN_SWITCH));
     } else {
         lua_pushboolean(L, 0);
     }
@@ -1132,7 +1136,7 @@ static int32_t Script_IsXPUserDisabled(lua_State* L) {
         return 0;
     }
 
-    lua_pushboolean(L, (player->m_player->m_playerFlags >> 25) & 1);
+    lua_pushboolean(L, (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_NO_XP_GAIN) != 0);
     return 1;
 }
 
@@ -1281,7 +1285,7 @@ static int32_t Script_IsOutdoors(lua_State* L) {
 static int32_t Script_IsSwimming(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (player && (player->m_clientFlags & 0x200000)) {
+    if (player && (player->m_clientFlags & UNIT_CLIENT_FLAGS::UNIT_CLIENT_FLAG_SWIMMING)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1295,7 +1299,7 @@ static int32_t Script_IsSwimming(lua_State* L) {
 static int32_t Script_IsStealthed(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (player && (player->m_unit->m_unitFieldBytes1[2] & 2)) {
+    if (player && (player->m_unit->m_visFlags & UNIT_VIS_FLAG_CREEP)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1323,7 +1327,7 @@ static int32_t Script_IsGuildLeader(lua_State* L) {
 static int32_t Script_IsResting(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (player && (player->m_player->m_playerFlags & 0x20)) {
+    if (player && (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_RESTING)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1351,7 +1355,7 @@ static int32_t Script_GetSpellPenetration(lua_State* L) {
 static int32_t Script_HasFullControl(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (player && !(player->m_combatModeFlags & 1) && player->m_unit->m_unitFieldHealth > 0 && CGGameUI::m_hasControl) {
+    if (player && !(player->m_combatModeFlags & CGPlayer_C::COMBAT_MODE_FLAGS::COMBAT_MODE_FAR_SIGHT) && player->m_unit->m_unitFieldHealth > 0 && CGGameUI::m_hasControl) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1378,7 +1382,7 @@ static int32_t Script_UnitPVPRank(lua_State* L) {
 static int32_t Script_IsOutOfBounds(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (player && (player->m_player->m_playerFlags & 0x4000)) {
+    if (player && (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_OUT_OF_BOUNDS)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1395,7 +1399,7 @@ static int32_t Script_IsFalling(lua_State* L) {
     if (player) {
         uint32_t flags = player->m_movement->m_flags;
 
-        if ((flags & 0x1000) && !(flags & 0x800)) {
+        if ((flags & MOVEMENTFLAG_FALLING) && !(flags & MOVEMENTFLAG_ROOT)) {
             lua_pushnumber(L, 1.0);
             return 1;
         }
@@ -1410,7 +1414,7 @@ static int32_t Script_IsFalling(lua_State* L) {
 static int32_t Script_IsMounted(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (!player || player->m_mountDisplayId <= 0 || (player->m_clientFlags & 0x10000000)) {
+    if (!player || player->m_mountDisplayId <= 0 || (player->m_clientFlags & UNIT_CLIENT_FLAGS::UNIT_CLIENT_FLAG_DISMOUNT_PENDING)) {
         lua_pushnil(L);
     } else {
         lua_pushnumber(L, 1.0);
@@ -1442,7 +1446,7 @@ static int32_t Script_PlayerCanTeleport(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
     uint32_t flags = player->m_unit->m_unitFieldFlags;
 
-    if ((flags & 0x40000) || (flags & 0x800000) || (flags & 0x400000)) {
+    if ((flags & UNIT_FLAGS::UNIT_FLAG_STUNNED) || (flags & UNIT_FLAGS::UNIT_FLAG_FLEEING) || (flags & UNIT_FLAGS::UNIT_FLAG_CONFUSED)) {
         lua_pushboolean(L, 0);
     } else {
         lua_pushboolean(L, 1);
@@ -1508,7 +1512,7 @@ static int32_t Script_UnitIsTapped(lua_State* L) {
 
     CGUnit_C* unit = GetUnitFromName(lua_tolstring(L, 1, nullptr));
 
-    if (unit && (unit->m_unit->m_unitDynamicFlags & 4)) {
+    if (unit && (unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_TAPPED)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1527,7 +1531,7 @@ static int32_t Script_UnitIsTappedByPlayer(lua_State* L) {
 
     CGUnit_C* unit = GetUnitFromName(lua_tolstring(L, 1, nullptr));
 
-    if (unit && (unit->m_unit->m_unitDynamicFlags & 8)) {
+    if (unit && (unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_TAPPED_BY_PLAYER)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1546,7 +1550,7 @@ static int32_t Script_UnitIsTappedByAllThreatList(lua_State* L) {
 
     CGUnit_C* unit = GetUnitFromName(lua_tolstring(L, 1, nullptr));
 
-    if (unit && (unit->m_unit->m_unitDynamicFlags & 0x80)) {
+    if (unit && (unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_TAPPED_BY_ALL_THREAT_LIST)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1582,7 +1586,7 @@ static int32_t Script_UnitIsPartyLeader(lua_State* L) {
     Script_GetGUIDFromToken(token, guid, false);
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(guid, TYPE_PLAYER, __FILE__, __LINE__));
 
-    if ((player && (player->m_player->m_playerFlags & 1)) || CGPartyInfo::m_leader == guid) {
+    if ((player && (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_GROUP_LEADER)) || CGPartyInfo::m_leader == guid) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1598,7 +1602,7 @@ static int32_t Script_UnitIsPVPSanctuary(lua_State* L) {
     WOWGUID guid;
     CGUnit_C* unit;
 
-    if (Script_GetGUIDFromToken(token, guid, false) && (unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__))) && (unit->m_unit->m_unitFieldBytes2[1] & 8)) {
+    if (Script_GetGUIDFromToken(token, guid, false) && (unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__))) && (unit->m_unit->m_pvpFlags & UNIT_PVP_FLAG_SANCTUARY)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1714,11 +1718,11 @@ static int32_t Script_UnitCreatureFamily(lua_State* L) {
 static int32_t Script_IsFlying(lua_State* L) {
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (unit && unit->m_vehiclePassenger && unit->m_vehiclePassenger->m_state == 3) {
+    if (unit && unit->m_vehiclePassenger && unit->m_vehiclePassenger->m_state == CVehiclePassenger_C::TRANSITION_STATE::STATE_RIDING) {
         unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(WOWGUID{ unit->GetTransportGUID() }, TYPE_UNIT, __FILE__, __LINE__));
     }
 
-    if (unit && (unit->m_movement->m_flags & 0x2000000)) {
+    if (unit && (unit->m_movement->m_flags & MOVEMENTFLAG_FLYING)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1804,7 +1808,7 @@ static int32_t Script_UnitControllingVehicle(lua_State* L) {
     if (Script_GetGUIDFromToken(token, guid, false)) {
         CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
-        if (unit && unit->m_vehiclePassenger && unit->m_vehiclePassenger->m_state == 3 && unit->GetTransportGUID() == unit->m_unit->m_unitFieldCharm.m_guid) {
+        if (unit && unit->m_vehiclePassenger && unit->m_vehiclePassenger->m_state == CVehiclePassenger_C::TRANSITION_STATE::STATE_RIDING && unit->GetTransportGUID() == unit->m_unit->m_unitFieldCharm.m_guid) {
             controlling = 1;
         }
     }
@@ -1897,7 +1901,7 @@ static int32_t Script_UnitReaction(lua_State* L) {
 static int32_t Script_GetManaRegen(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (!player || player->m_unit->m_unitFieldBytes0[3]) {
+    if (!player || player->m_unit->m_displayPower) {
         lua_pushnumber(L, 0.0);
         lua_pushnumber(L, 0.0);
         return 2;
@@ -1914,7 +1918,7 @@ static int32_t Script_GetPowerRegen(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
     if (player) {
-        uint8_t powerType = player->m_unit->m_unitFieldBytes0[3];
+        uint8_t powerType = player->m_unit->m_displayPower;
         lua_pushnumber(L, player->GetPowerRegen(static_cast<POWER_TYPE>(powerType), false) + 0.001f);
         lua_pushnumber(L, player->GetPowerRegen(static_cast<POWER_TYPE>(powerType), true) + 0.001f);
     } else {
@@ -2006,7 +2010,7 @@ static int32_t Script_GetPVPLifetimeStats(lua_State* L) {
 
     if (player) {
         lua_pushnumber(L, player->m_player->m_playerFieldLifetimeHonorbaleKills);
-        uint8_t rank = player->m_player->m_playerFieldBytes[3];
+        uint8_t rank = player->m_player->m_maxPvpRank;
         lua_pushnumber(L, rank < 5 ? 0.0 : rank);
         return 2;
     }
@@ -2053,7 +2057,7 @@ static int32_t Script_UnitIsDND(lua_State* L) {
     uint32_t dnd;
 
     if (player) {
-        dnd = player->m_player->m_playerFlags >> 2;
+        dnd = player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_DND;
     } else {
         CGPartyMemberState* state = CGPartyMemberStateRepository::GetState(stateGuid);
 
@@ -2065,7 +2069,7 @@ static int32_t Script_UnitIsDND(lua_State* L) {
         dnd = static_cast<uint8_t>(state->m_flags) >> 7;
     }
 
-    if (dnd & 1) {
+    if (dnd) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -2089,7 +2093,7 @@ static int32_t Script_UnitInVehicle(lua_State* L) {
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
     if (unit) {
-        if (!unit->m_vehiclePassenger || unit->m_vehiclePassenger->m_state != 3) {
+        if (!unit->m_vehiclePassenger || unit->m_vehiclePassenger->m_state != CVehiclePassenger_C::TRANSITION_STATE::STATE_RIDING) {
             lua_pushnil(L);
             return 1;
         }
@@ -2149,7 +2153,7 @@ static int32_t Script_UnitHasRelicSlot(lua_State* L) {
     CGUnit_C* unit = GetUnitFromName(lua_tolstring(L, 1, nullptr));
     ChrClassesRec* rec;
 
-    if (unit && (unit->m_obj->m_type & TYPE_PLAYER) && (rec = g_chrClassesDB.GetRecord(unit->m_unit->m_unitFieldBytes0[1])) && (rec->m_flags & 8)) {
+    if (unit && (unit->m_obj->m_type & TYPE_PLAYER) && (rec = g_chrClassesDB.GetRecord(unit->m_unit->m_classID)) && (rec->m_flags & 8)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -2198,7 +2202,7 @@ static int32_t Script_UnitIsPVPFreeForAll(lua_State* L) {
     uint32_t ffa;
 
     if (object && (object->m_obj->m_type & TYPE_UNIT)) {
-        ffa = static_cast<CGUnit_C*>(object)->m_unit->m_unitFieldBytes2[1] >> 2;
+        ffa = static_cast<CGUnit_C*>(object)->m_unit->m_pvpFlags >> 2;
     } else {
         CGPartyMemberState* state = CGPartyMemberStateRepository::GetState(stateGuid);
 
@@ -2264,7 +2268,15 @@ static int32_t Script_CanEjectPassengerFromSeat(lua_State* L) {
     CGUnit_C* passenger;
     VehicleSeatRec* seatRec;
 
-    if (mover && (root = mover->FindRootVehicle(nullptr)) && root->m_vehicle && root->m_vehicle->m_vehicleRec && root->m_vehicle->GetVehicleAndSeatFromVirtualSeat(seatIndex - 1, vehicle, seat) && (passenger = const_cast<CVehicle_C*>(vehicle)->FindPassengerUnit(seat)) && passenger->FindRootVehicle(mover) == mover && (seatRec = vehicle->GetVehicleSeatRec(seat)) && (seatRec->m_flagsB & 0x20)) {
+    if (mover
+        && (root = mover->FindRootVehicle(nullptr))
+        && root->m_vehicle
+        && root->m_vehicle->m_vehicleRec
+        && root->m_vehicle->GetVehicleAndSeatFromVirtualSeat(seatIndex - 1, vehicle, seat)
+        && (passenger = const_cast<CVehicle_C*>(vehicle)->FindPassengerUnit(seat))
+        && passenger->FindRootVehicle(mover) == mover
+        && (seatRec = vehicle->GetVehicleSeatRec(seat))
+        && (seatRec->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_EJECTABLE)) {
         canEject = 1;
     }
 
@@ -2426,7 +2438,7 @@ static int32_t Script_UnitCastingInfo(lua_State* L) {
 
     const char* name = spell.m_name;
     const char* rank = spell.m_nameSubtext;
-    const char* displayName = spell.m_attributesExC & 4 ? "" : spell.m_name;
+    const char* displayName = spell.m_attributesExC & SPELL_ATTR3::SPELL_ATTR3_NO_CASTING_BAR_TEXT ? "" : spell.m_name;
     CGGameObject_C* gameObject = static_cast<CGGameObject_C*>(ClntObjMgrObjectPtr(unit->m_castingObject, TYPE_OBJECT, __FILE__, __LINE__));
 
     if (gameObject && (gameObject->m_obj->m_type & TYPE_GAMEOBJECT)) {
@@ -2434,19 +2446,19 @@ static int32_t Script_UnitCastingInfo(lua_State* L) {
         LockRec* lock = gameObject->GetLockRec();
 
         if (lock) {
-            for (uint32_t i = 0; i < 3; i++) {
+            for (uint32_t i = 0; i < NUM_SPELL_EFFECTS; i++) {
                 if (spell.m_effect[i] != SPELL_EFFECT_OPEN_LOCK) {
                     continue;
                 }
 
-                for (uint32_t j = 0; j < 8; j++) {
-                    if (lock->m_type[j] == 2 && spell.m_effectMiscValue[i] == lock->m_index[j]) {
+                for (uint32_t j = 0; j < NUM_LOCK_KEYS; j++) {
+                    if (lock->m_type[j] == LOCK_KEY_SKILL && spell.m_effectMiscValue[i] == lock->m_index[j]) {
                         int32_t action = lock->m_action[j];
 
                         if (action >= 0) {
-                            if (action <= 1) {
+                            if (action <= LOCK_ACTION_UNLOCK) {
                                 text = gameObject->GetOpenText();
-                            } else if (action == 2) {
+                            } else if (action == LOCK_ACTION_CLOSE) {
                                 text = gameObject->GetCloseText();
                             }
                         }
@@ -2469,7 +2481,7 @@ static int32_t Script_UnitCastingInfo(lua_State* L) {
         icon = iconRec->m_textureFilename;
     }
 
-    bool isTradeSkill = (spell.m_attributes & 0x20) != 0;
+    bool isTradeSkill = (spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL) != 0;
     bool notInterruptible = unit->IsCastNotInterruptible();
     lua_pushstring(L, name);
     lua_pushstring(L, rank);
@@ -2570,7 +2582,7 @@ static int32_t Script_UnitLevel(lua_State* L) {
 
         if ((player && unit->UnitReaction(player) <= UNIT_REACTION_HOSTILE && static_cast<int32_t>(player->m_unit->m_unitFieldLevel) <= static_cast<int32_t>(unit->m_unit->m_unitFieldLevel) - 10) || unit->IsBossMob()) {
             level = -1;
-        } else if (level > 0 && player && (player->m_player->m_playerBytes3[1] || player->m_player->m_playerFakeInebriation) && player->CanAttack(unit)) {
+        } else if (level > 0 && player && (player->m_player->inebriation || player->m_player->m_playerFakeInebriation) && player->CanAttack(unit)) {
             level -= RoundToInt64(player->GetDrunknessTurnValue() * 5.0f);
 
             if (level < 1) {
@@ -2760,7 +2772,7 @@ static int32_t Script_UnitHasVehicleUI(lua_State* L) {
     VehicleSeatRec* seat = GetVehicleSeatRecAsPassengerFromLua(L);
 
     if (seat) {
-        lua_pushboolean(L, seat->m_flags & 0x20000000);
+        lua_pushboolean(L, seat->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_HAS_VEHICLE_UI);
     } else {
         lua_pushboolean(L, 0);
     }
@@ -2783,7 +2795,7 @@ static int32_t Script_UnitIsUnit(lua_State* L) {
         WOWGUID guid = GetGuidByKeyword(token);
         WOWGUID otherGuid = GetGuidByKeyword(otherToken);
 
-        if (!guid || guid.m_guid == 0xFFFFFFFFFFFFFFFEull || guid != otherGuid) {
+        if (!guid || guid.m_guid == WOWGUID_EMPTY_UNIT_TOKEN || guid != otherGuid) {
             lua_pushnil(L);
             return 1;
         }
@@ -2844,7 +2856,7 @@ static int32_t Script_UnitChannelInfo(lua_State* L) {
     const char* rank = spell.m_nameSubtext;
     const char* displayName;
 
-    if (SStrCmpI(lua_tolstring(L, 1, nullptr), "player", STORM_MAX_STR) || (spell.m_attributesEx & 0x20000000)) {
+    if (SStrCmpI(lua_tolstring(L, 1, nullptr), "player", STORM_MAX_STR) || (spell.m_attributesEx & SPELL_ATTR1::SPELL_ATTR1_NAME_IN_CHANNEL_BAR)) {
         displayName = name;
     } else {
         displayName = FrameScript_GetText("CHANNELING", -1, GENDER_NOT_APPLICABLE);
@@ -2857,7 +2869,7 @@ static int32_t Script_UnitChannelInfo(lua_State* L) {
         icon = iconRec->m_textureFilename;
     }
 
-    bool tradeSkill = (spell.m_attributes & 0x20) != 0;
+    bool tradeSkill = (spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL) != 0;
     bool notInterruptible = unit->IsCastNotInterruptible();
     lua_pushstring(L, name);
     lua_pushstring(L, rank);
@@ -2886,9 +2898,9 @@ static int32_t Script_GetComboPoints(lua_State* L) {
 
     if (unit == ClntObjMgrGetActivePlayer()) {
         CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
-        uint8_t classId = player ? player->m_unit->m_unitFieldBytes0[1] : 0;
+        uint8_t classId = player ? player->m_unit->m_classID : 0;
 
-        if (!player || classId == 4 || classId == 11) {
+        if (!player || classId == CLASS_ROGUE || classId == CLASS_DRUID) {
             points = CGGameUI::GetComboPoints(target);
         }
     } else if (unit == CGPetInfo::GetPet(0)) {
@@ -2956,9 +2968,9 @@ static int32_t Script_UnitGroupRolesAssigned(lua_State* L) {
     Script_GetGUIDFromToken(lua_tolstring(L, 1, nullptr), guid, false);
     CGRaidMember* member = CGRaidInfo::FindMemberByGuid(guid);
     uint32_t role = member ? member->m_groupRole : CGPartyInfo::GetGroupRole(guid);
-    lua_pushboolean(L, (role >> 1) & 1);
-    lua_pushboolean(L, (role >> 2) & 1);
-    lua_pushboolean(L, (role >> 3) & 1);
+    lua_pushboolean(L, (role & ROLE_FLAGS::TANK) != 0);
+    lua_pushboolean(L, (role & ROLE_FLAGS::HEALER) != 0);
+    lua_pushboolean(L, (role & ROLE_FLAGS::DAMAGER) != 0);
     return 3;
 }
 
@@ -3070,9 +3082,9 @@ static int32_t Script_UnitIsPVP(lua_State* L) {
     bool pvp;
 
     if (object && (object->m_obj->m_type & TYPE_UNIT)) {
-        pvp = static_cast<CGUnit_C*>(object)->m_unit->m_unitFieldBytes2[1] & 1;
+        pvp = static_cast<CGUnit_C*>(object)->m_unit->m_pvpFlags & UNIT_PVP_FLAG_PVP;
     } else if (object && (object->m_obj->m_type & TYPE_CORPSE)) {
-        pvp = static_cast<CGCorpse_C*>(object)->m_corpse->m_corpseFieldFlags & 4;
+        pvp = static_cast<CGCorpse_C*>(object)->m_corpse->m_corpseFieldFlags & CORPSE_FIELD_FLAGS::CORPSE_FIELD_FLAG_PVP;
     } else {
         CGPartyMemberState* state = CGPartyMemberStateRepository::GetState(stateGuid);
         pvp = state && (state->m_flags & 2);
@@ -3289,10 +3301,10 @@ static int32_t Script_UnitAttackSpeed(lua_State* L) {
 
     if (unit->m_obj->m_type & TYPE_PLAYER) {
         WOWGUID offHand;
-        offHand.m_guid = static_cast<CGPlayer_C*>(unit)->m_bag.GetItemGuid(16);
+        offHand.m_guid = static_cast<CGPlayer_C*>(unit)->m_bag.GetItemGuid(INVSLOT_OFFHAND);
         CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(offHand, TYPE_ITEM, __FILE__, __LINE__));
 
-        if (item && item->GetClassID() == 2 && (ClntObjMgrGetActivePlayerObj() != unit || CGPlayer_C::CanDualWield())) {
+        if (item && item->GetClassID() == ITEM_CLASS::ITEM_CLASS_WEAPON && (ClntObjMgrGetActivePlayerObj() != unit || CGPlayer_C::CanDualWield())) {
             lua_pushnumber(L, unit->m_unit->m_unitFieldBaseattacktime[1] * 0.001);
             return 2;
         }
@@ -3663,7 +3675,7 @@ static int32_t Script_UnitGUID(lua_State* L) {
     Script_GetGUIDFromToken(lua_tolstring(L, 1, nullptr), guid, false);
     WOWGUID display = guid;
 
-    if (!guid || guid.m_guid == 0xFFFFFFFFFFFFFFFEULL) {
+    if (!guid || guid.m_guid == WOWGUID_EMPTY_UNIT_TOKEN) {
         lua_pushnil(L);
         return 1;
     }
@@ -3671,9 +3683,9 @@ static int32_t Script_UnitGUID(lua_State* L) {
     uint32_t high = static_cast<uint32_t>(guid.m_guid >> 32);
 
     if ((high & 0xF0F00000) == 0xF0300000 || (high & 0xF0F00000) == 0xF0500000) {
-        CreatureStats_C* creature = g_creatureDBCache.GetRecord((guid.m_guid >> 24) & 0xFFFFFFF, display, nullptr, nullptr, false);
+        CreatureStats_C* creature = g_creatureDBCache.GetRecord((guid.m_guid >> WOWGUID_ENTRY_SHIFT) & WOWGUID_ENTRY_MASK, display, nullptr, nullptr, false);
 
-        if (creature && (creature->m_typeFlags & 0x4000)) {
+        if (creature && (creature->m_typeFlags & CREATURE_TYPE_FLAGS::CREATURE_TYPE_FLAG_MASK_UID)) {
             display.m_guid &= 0xFFFFFFFFFF000000ULL;
         }
     }
@@ -3702,7 +3714,7 @@ static int32_t Script_UnitClassBase(lua_State* L) {
         CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
         if (unit) {
-            rec = g_chrClassesDB.GetRecord(unit->m_unit->m_unitFieldBytes0[1]);
+            rec = g_chrClassesDB.GetRecord(unit->m_unit->m_classID);
         } else {
             WOWGUID none = WOWGUID();
             NameCache* record = g_nameDBCache.GetRecord(guid.m_guid, none, nullptr, nullptr, false);
@@ -3820,7 +3832,7 @@ static int32_t Script_GetResSicknessDuration(lua_State* L) {
     int32_t spellId = 15007;
 
     if (player) {
-        ChrRacesRec* race = g_chrRacesDB.GetRecord(player->m_unit->m_unitFieldBytes0[0]);
+        ChrRacesRec* race = g_chrRacesDB.GetRecord(player->m_unit->m_raceID);
         level = player->m_unit->m_unitFieldLevel;
 
         if (race) {
@@ -3838,7 +3850,7 @@ static int32_t Script_GetResSicknessDuration(lua_State* L) {
             value = duration->m_maxDuration;
         }
 
-        Spell_C_ModifySpellValue(&spell, value, 1);
+        Spell_C_ModifySpellValue(&spell, value, SPELLMOD_DURATION);
 
         if (value >= 1000) {
             char buffer[256];
@@ -4054,7 +4066,7 @@ static int32_t Script_UnitInVehicleControlSeat(lua_State* L) {
     VehicleSeatRec* seat = GetVehicleSeatRecAsPassengerFromLua(L);
 
     if (seat) {
-        lua_pushboolean(L, seat->m_flags & 0x800);
+        lua_pushboolean(L, seat->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_CAN_CONTROL);
     } else {
         lua_pushboolean(L, 0);
     }
@@ -4068,7 +4080,7 @@ static int32_t Script_UnitTargetsVehicleInRaidUI(lua_State* L) {
     VehicleSeatRec* seat = GetVehicleSeatRecAsPassengerFromLua(L);
 
     if (seat) {
-        lua_pushboolean(L, seat->m_flagsB & 0x8);
+        lua_pushboolean(L, seat->m_flagsB & VEHICLE_SEAT_FLAGS_B::VEHICLE_SEAT_FLAG_B_TARGETS_IN_RAID_UI);
     } else {
         lua_pushboolean(L, 0);
     }
@@ -4172,7 +4184,7 @@ static int32_t Script_GetPlayerInfoByGUID(lua_State* L) {
     CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
     NameCache* record;
 
-    if (player && (player->m_player->m_playerFlags & 0x80000)) {
+    if (player && (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_COMMENTATOR)) {
         record = g_nameDBCache.GetRecord(guid.m_guid, guid, &NameQueryCallback, nullptr, true);
     } else {
         WOWGUID none = WOWGUID();
@@ -4435,7 +4447,7 @@ static int32_t Script_UnitIsAFK(lua_State* L) {
             return 1;
         }
 
-        afk = (player->m_player->m_playerFlags & 0x2) != 0;
+        afk = (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_AFK) != 0;
     } else {
         CGPartyMemberState* state = CGPartyMemberStateRepository::GetState(unitGuid);
 

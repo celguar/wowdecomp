@@ -18,10 +18,17 @@ class SpellVisualEffectNameRec;
 
 class CGDynamicObject_C : public CGObject_C, public CGDynamicObject {
     public:
+    // Local animation/transit masks;raw word and the older stand/hold layout differ.
+    enum STATE_FLAGS : int32_t {
+        HAVE_HOLD_SEQUENCE = 0x1,
+        SPELL_IN_TRANSIT = 0x2,
+        STATE_BITS = 0x3,
+    };
+
     static void Initialize();
 
     /* 00D8 */ CPassenger m_passenger;
-    /* 0108 */ TSList<void> m_dynamicObjectMirrorLists [6];
+    /* 0108 */ TSList<void> m_dynamicObjectMirrorLists [CGDynamicObjectData::NUM_FIELDS];
     /* 0150 */ uint32_t m_stateFlags;
     /* 0154 */ float m_scale;
     /* 0158 */ BlizzardObject* m_blizzardVisual;

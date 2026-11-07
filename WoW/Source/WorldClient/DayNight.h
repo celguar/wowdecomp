@@ -285,18 +285,35 @@ namespace DayNight {
 }
 
 struct SMOFog {
+    // 0.5.3 symbol names; the two-entry layout and blend flag match 3.3.5.
+    enum EFogs : int32_t {
+        FOG = 0,
+        UWFOG = 1, // underwater fog
+        NUM_FOGS = 2,
+    };
+
+    enum EFlags : int32_t {
+        F_IEBLEND = 0x1,
+    };
+
     struct Fog {
         /* 0000 */ float m_end;
         /* 0004 */ float m_startScalar;
         /* 0008 */ CImVector m_color;
     };
 
+    class Fogs {
+        public:
+        /* 0000 */ Fog m_fog[NUM_FOGS];
+
+        void Blend(const Fogs& fogs, float t);
+    };
+
     /* 0000 */ uint32_t m_flags;
     /* 0004 */ C3Vector m_position;
     /* 0010 */ float m_smallerRadius;
     /* 0014 */ float m_largerRadius;
-    /* 0018 */ Fog m_fog;
-    /* 0024 */ Fog m_underwaterFog;
+    /* 0018 */ Fogs m_fogs;
 };
 
 namespace DayNight {
@@ -305,10 +322,15 @@ namespace DayNight {
 
 namespace DayNight {
 struct AreaLightOverride {
+    enum STATE : int32_t {
+        FADE_IN = 1,
+        FADE_OUT = 2,
+    };
+
     /* 0000 */ uint32_t m_id;
     /* 0004 */ LightRec* m_light;
     /* 0008 */ float m_fade;
-    /* 000C */ int32_t m_state;
+    /* 000C */ STATE m_state;
     /* 0010 */ uint32_t m_lastTime;
     /* 0014 */ uint32_t m_duration;
 };

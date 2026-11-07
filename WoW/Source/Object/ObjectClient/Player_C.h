@@ -31,7 +31,7 @@ struct InspectItem {
     /* 003C */ int16_t m_randomPropertiesId;
     /* 003E */ uint16_t m_flags;
     /* 0040 */ uint32_t m_propertySeed;
-    /* 0044 */ uint32_t unused_0044;
+    /* 0044 */ uint32_t unknown_0044;
 };
 
 struct InspectData {
@@ -89,6 +89,32 @@ class CEffect;
 
 class CGPlayer_C : public CGUnit_C, public CGPlayer {
     public:
+    // Build 12340 UI outcomes; 13 and 18 share ALREADY_ON without proved distinct meanings.
+    enum QUEST_INVALID_REASON : int32_t {
+        LOW_LEVEL = 1,
+        WRONG_RACE = 6,
+        ALREADY_DONE = 7,
+        ONLY_ONE_TIMED = 12,
+        UNKNOWN_13 = 13,
+        EXPANSION = 16,
+        UNKNOWN_18 = 18,
+        MISSING_ITEMS = 21,
+        NOT_ENOUGH_MONEY = 23,
+        TOO_MANY_DAILY_QUESTS = 26,
+        CAIS = 27,
+        ALREADY_DONE_DAILY = 29,
+    };
+
+    // Runtime farsight/automatic combat state, not replicated PLAYER_FLAGS.
+    enum COMBAT_MODE_FLAGS : uint32_t {
+        COMBAT_MODE_NONE                        = 0x00000000u,
+        COMBAT_MODE_FAR_SIGHT                   = 0x00000001u,
+        COMBAT_MODE_AUTO_COMBAT                 = 0x00000002u,
+        COMBAT_MODE_AUTO_RANGED                 = 0x00000004u,
+        COMBAT_MODE_EXIT_WHEN_NOT_REPEATING     = 0x00000008u,
+        COMBAT_MODE_AUTO_MASK                   = 0x0000000Eu,
+    };
+
     void DanceMoveAnimComplete();
     static int32_t IsXRayVisionActive();
     void AddKnownSpell(int32_t spellId, int32_t a2, int32_t a3, int32_t a4);
@@ -166,11 +192,65 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     static int32_t __stdcall OnLootMoneyNotify(CDataStore* msg);
     static void OnLootClearMoney();
     static void __stdcall ReadItemResult(NETMESSAGE msgId, CDataStore* msg);
+    // SMSG_RAID_GROUP_ONLY displays a reason only when its boot time is zero.
+    enum RAID_GROUP_ONLY_REASON : int32_t {
+        RG_REASON_UI_LOW_LEVEL = 1,
+        RG_REASON_UI_RAID_GROUP_ONLY = 2,
+        RG_REASON_UI_GROUP_FULL = 3,
+        RG_REASON_UI_REQUIREMENTS_UNMATCH = 4,
+    };
+
+    // Quest-failure display selector; original enum ownership is unproved.
+    // Sharing BAG_RESULT remains possible despite context-specific messages.
+    // Values4/16/50 share a bag-full display without proved distinct causes.
+    enum QUEST_FAILED_REASON : int32_t {
+        QF_REASON_UNKNOWN_4 = 4,
+        QF_REASON_UNKNOWN_16 = 16,
+        QF_REASON_UI_MAX_COUNT = 17,
+        QF_REASON_UNKNOWN_50 = 50,
+        QF_REASON_UI_TOO_MANY_DAILY_QUESTS = 74,
+    };
+
+    // Shared quest-push result byte; labels describe verified client UI outcomes.
+    enum QUEST_PUSH_RESULT : int32_t {
+        QP_RESULT_UI_SUCCESS = 0,
+        QP_RESULT_UI_INVALID = 1,
+        QP_RESULT_UI_ACCEPTED = 2,
+        QP_RESULT_UI_DECLINED = 3,
+        QP_RESULT_UI_BUSY = 4,
+        QP_RESULT_UI_LOG_FULL = 5,
+        QP_RESULT_UI_ON_QUEST = 6,
+        QP_RESULT_UI_ALREADY_DONE = 7,
+        QP_RESULT_UI_NOT_DAILY = 8,
+        QP_RESULT_UI_TIMER_EXPIRED = 9,
+        QP_RESULT_UI_NOT_IN_PARTY = 10,
+        QP_RESULT_UI_DIFFERENT_SERVER_DAILY = 11,
+    };
+
     static void __stdcall PushQuestToParty(int32_t questId);
     static void __stdcall QueryQuest(const WOWGUID& questGiver, int32_t questId);
     static void __stdcall QueryQuestGiverStatus(const WOWGUID& questGiver);
     static void QueryQuestGiverStatusMultiple();
     static bool __stdcall IsRAFPlayer(WOWGUID guid);
+    // Shared client/server result word; UI_* names describe display outcomes,
+    // without claiming original server enumerator spellings.
+    enum REFER_A_FRIEND_RESULT : int32_t {
+        RAF_RESULT_SUCCESS = 0,
+        RAF_RESULT_UI_NOT_REFERRED_BY = 1,
+        RAF_RESULT_UI_TARGET_TOO_HIGH = 2,
+        RAF_RESULT_UI_INSUFFICIENT_GRANTABLE_LEVELS = 3,
+        RAF_RESULT_UI_TOO_FAR = 4,
+        RAF_RESULT_UI_DIFFERENT_FACTION = 5,
+        RAF_RESULT_UI_NOT_NOW = 6,
+        RAF_RESULT_UI_GRANT_LEVEL_MAX = 7,
+        RAF_RESULT_UI_NO_TARGET = 8,
+        RAF_RESULT_UI_TARGET_NOT_IN_GROUP = 9,
+        RAF_RESULT_UI_SUMMON_LEVEL_MAX = 10,
+        RAF_RESULT_UI_SUMMON_COOLDOWN = 11,
+        RAF_RESULT_UI_INSUFFICIENT_EXPANSION_LEVEL = 12,
+        RAF_RESULT_UI_SUMMON_OFFLINE = 13,
+    };
+
     static int32_t __stdcall CanSummonFriend(WOWGUID guid);
     int32_t CanGrantLevel(WOWGUID guid);
     void TurnOnGuildTabardPurchase();
@@ -213,7 +293,7 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
 
     /* 1010 */ TSList<void> m_playerMirrorLists [176];
     /* 1850 */ TSList<void>* m_playerLocalMirrorLists;
-    /* 1854 */ int32_t unused_1854;
+    /* 1854 */ int32_t unknown_1854;
     /* 1858 */ uint32_t m_combatModeFlags;
     /* 185C */ TSHashTable<TRADESKILLLINE, HASHKEY_NONE> m_tradeSkillLines;
     /* 1884 */ TSHashTable<PROFICIENCYSPELL, HASHKEY_NONE> m_proficiencySpells;
@@ -221,11 +301,11 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     /* 18B8 */ uint32_t m_pendingItemCacheCount;
     /* 18BC */ TSGrowableArray<int32_t> m_equipBypassSkills;
     /* 18CC */ TSGrowableArray<int32_t> m_companionSpells;
-    /* 18DC */ uint32_t unused_18DC;
+    /* 18DC */ uint32_t unknown_18DC;
     /* 18E0 */ WOWGUID m_lootTarget;
     /* 18E8 */ uint8_t m_autoLoot;
-    /* 18E9 */ uint8_t unused_18E9 [3];
-    /* 18EC */ uint32_t unused_18EC;
+    /* 18E9 */ uint8_t unknown_18E9 [3];
+    /* 18EC */ uint32_t unknown_18EC;
     /* 18F0 */ CGBag_C m_bag;
     /* 1908 */ CGUnitVirtualItem m_virtualItems [NUM_VIRTUAL_MONSTER_SLOTS];
     /* 1920 */ UNITSTANDSTATE m_clientStandState;
@@ -434,8 +514,8 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     float GetCombatRatingPct(int32_t rating);
     bool LoadGuildTextures(int32_t displayId);
     static void TabardDrawCallback(int32_t guildID, const WOWGUID& guid, void* param, bool success);
-    void UpdateHandItemVisual(GEOCOMPONENTLINKS link, int32_t hand);
-    void UpdateObjComponentVisuals(const VisibleItem_C* item, GEOCOMPONENTLINKS link);
+    void UpdateHandItemVisual(MODEL_ATTACHMENT_ID link, int32_t hand);
+    void UpdateObjComponentVisuals(const VisibleItem_C* item, MODEL_ATTACHMENT_ID link);
     void UpdateObjComponentVisualsSlot(const VisibleItem_C* item, int32_t slot);
     void PostInitActivePlayer();
     void UpdatePartyMemberState();
@@ -453,8 +533,8 @@ class PlaySpellVisuaKitData {
     /* 0010 */ WOWGUID m_transportGUID;
     /* 0018 */ uint32_t m_playAnim;
     /* 001C */ uint32_t m_harmful;
-    /* 0020 */ uint32_t unused_0020;
-    /* 0024 */ uint32_t unused_0024;
+    /* 0020 */ uint32_t unknown_0020;
+    /* 0024 */ uint32_t unknown_0024;
     /* 0028 */ WOWGUID m_someGUID;
     /* 0030 */ uint32_t m_effectFadeTime;
 
