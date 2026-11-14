@@ -1694,8 +1694,8 @@ void CGWorldFrame::OnWorldRender() {
         GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, black);
     }
 
-    if (CWorld::enables & 0x20000000) {
-        g_theGxDevicePtr->MasterEnableSet(GxMasterEnable_PolygonFill, 0);
+    if (CWorld::enables & Enables::Enable_Wireframe) {
+        g_theGxDevicePtr->MasterEnableSet(GxMasterEnable_PolygonFill, Gx_Disable);
     }
 
     float minX = 0.0f;
@@ -1791,8 +1791,8 @@ void CGWorldFrame::OnWorldRender() {
     DayNight::RenderGlares();
     PlayerNameUpdateLate();
 
-    if (CWorld::enables & 0x20000000) {
-        GxMasterEnableSet(GxMasterEnable_PolygonFill, 1);
+    if (CWorld::enables & Enables::Enable_Wireframe) {
+        GxMasterEnableSet(GxMasterEnable_PolygonFill, Gx_Enable);
     }
 
     g_theGxDevicePtr->RsPop();
