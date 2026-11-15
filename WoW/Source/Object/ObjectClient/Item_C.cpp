@@ -1448,14 +1448,14 @@ void CGItem_C::SignalEvent(CGItem_C* item, uint32_t event) {
     if (container == player->m_bag.m_guid) {
         if (slot <= 22) {
             FrameScript_SignalEvent(event, "%d", slot + 1);
-        } else if (slot - 23 <= 15) {
-            FrameScript_SignalEvent(event, "%d%d", 0, slot - 22);
-        } else if ((slot >= 39 && slot <= 66) || slot - 67 <= 6) {
-            FrameScript_SignalEvent(event, "%d%d", -1, slot - 38);
-        } else if (slot - 86 <= 31) {
-            FrameScript_SignalEvent(event, "%d%d", -2, slot - 85);
-        } else if (slot - 118 <= 31) {
-            FrameScript_SignalEvent(event, "%d%d", -4, slot - 117);
+        } else if (slot >= BACKPACK_FIRST && slot <= BACKPACK_LAST) {
+            FrameScript_SignalEvent(event, "%d%d", BACKPACK_CONTAINER, slot - BACKPACK_FIRST + 1);
+        } else if ((slot >= BANKGENERIC_FIRST && slot <= BANKGENERIC_LAST) || (slot >= BANKBAG_FIRST && slot <= BANKBAG_LAST)) {
+            FrameScript_SignalEvent(event, "%d%d", BANK_CONTAINER, slot - BANKGENERIC_FIRST + 1);
+        } else if (slot >= KEYRING_FIRST && slot <= KEYRING_LAST) {
+            FrameScript_SignalEvent(event, "%d%d", KEYRING_CONTAINER, slot - KEYRING_FIRST + 1);
+        } else if (slot >= CURRENCYTOKEN_FIRST && slot <= CURRENCYTOKEN_LAST) {
+            FrameScript_SignalEvent(event, "%d%d", CONTAINER_CURRENCY_TOKEN, slot - CURRENCYTOKEN_FIRST + 1);
         }
 
         return;
