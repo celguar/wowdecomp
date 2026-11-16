@@ -76,6 +76,33 @@ enum ITEM_SUBCLASS_ARMOR : int32_t {
   NUM_ITEM_ARMOR_SUBCLASSES = 11,
 };
 
+// ItemSubClass.dbc IDs for ITEM_CLASS_CONSUMABLE, named after the DBC display names.
+enum ITEM_SUBCLASS_CONSUMABLE : int32_t {
+    ITEM_SUBCLASS_CONSUMABLE_CONSUMABLE       = 0,
+    ITEM_SUBCLASS_CONSUMABLE_POTION           = 1,
+    ITEM_SUBCLASS_CONSUMABLE_ELIXIR           = 2,
+    ITEM_SUBCLASS_CONSUMABLE_FLASK            = 3,
+    ITEM_SUBCLASS_CONSUMABLE_SCROLL           = 4,
+    ITEM_SUBCLASS_CONSUMABLE_FOOD_DRINK       = 5,
+    ITEM_SUBCLASS_CONSUMABLE_ITEM_ENHANCEMENT = 6,
+    ITEM_SUBCLASS_CONSUMABLE_BANDAGE          = 7,
+    ITEM_SUBCLASS_CONSUMABLE_OTHER            = 8,
+    NUM_ITEM_CONSUMABLE_SUBCLASSES            = 9,
+};
+
+// Item quality; names follow the ITEM_QUALITY<n>_DESC strings.
+enum ITEM_QUALITY : uint32_t {
+    ITEM_QUALITY_POOR = 0,
+    ITEM_QUALITY_COMMON = 1,
+    ITEM_QUALITY_UNCOMMON = 2,
+    ITEM_QUALITY_RARE = 3,
+    ITEM_QUALITY_EPIC = 4,
+    ITEM_QUALITY_LEGENDARY = 5,
+    ITEM_QUALITY_ARTIFACT = 6,
+    ITEM_QUALITY_HEIRLOOM = 7,
+    NUM_ITEM_QUALITIES = 8,
+};
+
 // Binding policies recognized by the 3.3.5 client. Packet/cache words remain
 // raw uint32_t; other values retain the existing fallback behavior.
 enum ITEM_BINDING : uint32_t {
