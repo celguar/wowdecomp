@@ -567,7 +567,7 @@ static int32_t OnUpdatePlayerHairStyle(WOWGUID guid, uint32_t fieldOffset, uint3
                 VisibleItem_C* head = &player->m_player->m_playerVisibleItems[0];
 
                 if (head && head->GetDisplayID() && player->CanEquipItemsInThisForm()) {
-                    component->AddItemBySlot(static_cast<INVENTORY_SLOTS>(0), head->GetDisplayID(), 0);
+                    component->AddItemBySlot(INVSLOT_HEAD, head->GetDisplayID(), 0);
                 }
             }
         }
@@ -599,7 +599,7 @@ static int32_t OnUpdatePlayerFacialStyle(WOWGUID guid, uint32_t fieldOffset, uin
                 VisibleItem_C* head = &player->m_player->m_playerVisibleItems[0];
 
                 if (head && head->GetDisplayID() && player->CanEquipItemsInThisForm()) {
-                    component->AddItemBySlot(static_cast<INVENTORY_SLOTS>(0), head->GetDisplayID(), 0);
+                    component->AddItemBySlot(INVSLOT_HEAD, head->GetDisplayID(), 0);
                 }
             }
         }
@@ -2298,7 +2298,7 @@ void __stdcall CGPlayer_C::OnTaxiNodeStatus(CDataStore* msg) {
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
     if (unit && (unit->m_unit->m_unitNpcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_FLIGHT_MASTER)) {
-        unit->m_interactIconType = status ? 0 : 7;
+        unit->m_interactIconType = status ? CGObject_C::INTERACT_ICON_NONE : CGObject_C::INTERACT_ICON_GREEN;
         unit->UpdateInteractIcon();
     }
 }
@@ -5184,12 +5184,12 @@ int32_t Packet_MSG_TABARDVENDOR_ACTIVATE(void* param, NETMESSAGE msgId, uint32_t
 // VERIFY: c2ac9c5f manual
 // OFFSET: 0x006CC590
 int32_t Packet_SMSG_GUILD_COMMAND_RESULT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
-    uint32_t command;
+    GUILD_COMMAND_TYPE command;
     char name[96];
-    uint32_t result;
-    msg->Get(command);
+    GUILD_COMMAND_RESULT result;
+    msg->Get(reinterpret_cast<uint32_t&>(command));
     msg->GetString(name, sizeof(name));
-    msg->Get(result);
+    msg->Get(reinterpret_cast<uint32_t&>(result));
 
     if (result == GUILD_COMMAND_RESULT::GUILD_RESULT_SUCCESS) {
         switch (command) {
@@ -5352,8 +5352,8 @@ int32_t Packet_SMSG_GUILD_COMMAND_RESULT(void* param, NETMESSAGE msgId, uint32_t
 // VERIFY: 9746b975 auto
 // OFFSET: 0x006CC980
 int32_t Packet_SMSG_ARENA_TEAM_EVENT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
-    uint8_t event = 0;
-    msg->Get(event);
+    ARENA_TEAM_EVENT event = static_cast<ARENA_TEAM_EVENT>(0);
+    msg->Get(reinterpret_cast<uint8_t&>(event));
     uint8_t count;
     msg->Get(count);
     char strings[3][256];
@@ -5567,14 +5567,14 @@ int32_t __stdcall CGPlayer_C::OnTurnInPetitionResults(CDataStore* msg) {
 // VERIFY: fc2ddd1d auto
 // OFFSET: 0x006CCB20
 int32_t Packet_SMSG_ARENA_TEAM_COMMAND_RESULT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
-    uint32_t command;
+    ARENA_TEAM_COMMAND_TYPE command;
     char team[96];
     char player[48];
-    uint32_t error;
-    msg->Get(command);
+    ARENA_TEAM_COMMAND_RESULT error;
+    msg->Get(reinterpret_cast<uint32_t&>(command));
     msg->GetString(team, sizeof(team));
     msg->GetString(player, sizeof(player));
-    msg->Get(error);
+    msg->Get(reinterpret_cast<uint32_t&>(error));
 
     if (error == ARENA_TEAM_COMMAND_RESULT::ARENA_RESULT_SUCCESS) {
         switch (command) {
@@ -6216,7 +6216,7 @@ void CGPlayer_C::TalkToSpiritGuide(const WOWGUID& guid) {
 // OFFSET: 0x006DD0F0
 void CGPlayer_C::HideHelm() {
     if (this->CanEquipItemsInThisForm() && this->m_characterComponent) {
-        this->m_characterComponent->RemoveItemBySlot(static_cast<INVENTORY_SLOTS>(0));
+        this->m_characterComponent->RemoveItemBySlot(INVSLOT_HEAD);
     }
 
     if (!(this->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_HIDE_HELM) && this->m_obj->m_guid == ClntObjMgrGetActivePlayer()) {
@@ -6234,7 +6234,7 @@ void CGPlayer_C::HideHelm() {
 // OFFSET: 0x006DD1B0
 void CGPlayer_C::HideCloak() {
     if (this->CanEquipItemsInThisForm() && this->m_characterComponent) {
-        this->m_characterComponent->RemoveItemBySlot(static_cast<INVENTORY_SLOTS>(14));
+        this->m_characterComponent->RemoveItemBySlot(INVSLOT_BACK);
     }
 
     if (!(this->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_HIDE_CLOAK) && this->m_obj->m_guid == ClntObjMgrGetActivePlayer()) {
@@ -6409,7 +6409,7 @@ int32_t CGPlayer_C::TurnInArenaCharter(int32_t turnIn) {
         int32_t id = (item->GetItemStaticFlags(0) & ITEM_STATIC_FLAGS::ITEM_FLAG_PETITION) ? item->m_item->m_itemFieldEnchantment[CGItemData::ENCHANTMENT_SLOT::PETITION].m_id : 0;
         CGPetition* petition = g_petitionCache.GetRecord(id, guid, ArenaCharterTurnInCallback, nullptr, false);
 
-        if (petition && petition->m_staticType == 1 && (!turnIn || petition->m_minSignatures == teamSize - 1)) {
+        if (petition && petition->m_staticType == CGPetition::STATIC_TYPE_ARENA && (!turnIn || petition->m_minSignatures == teamSize - 1)) {
             found = 1;
         }
     }
@@ -6445,7 +6445,7 @@ int32_t CGPlayer_C::TurnInArenaCharter(int32_t turnIn) {
             int32_t id = (item->GetItemStaticFlags(0) & ITEM_STATIC_FLAGS::ITEM_FLAG_PETITION) ? item->m_item->m_itemFieldEnchantment[CGItemData::ENCHANTMENT_SLOT::PETITION].m_id : 0;
             CGPetition* petition = g_petitionCache.GetRecord(id, guid, ArenaCharterTurnInCallback, nullptr, false);
 
-            if (petition && petition->m_staticType == 1 && (!turnIn || petition->m_minSignatures == teamSize - 1)) {
+            if (petition && petition->m_staticType == CGPetition::STATIC_TYPE_ARENA && (!turnIn || petition->m_minSignatures == teamSize - 1)) {
                 found = 1;
                 break;
             }
@@ -6529,7 +6529,7 @@ void CGPlayer_C::HandleOnRightClick(CGUnit_C* unit, bool autoInteract) {
 
     WOWGUID guid = unit->m_obj->m_guid;
 
-    if (unit->m_interactIconType == 7) {
+    if (unit->m_interactIconType == CGObject_C::INTERACT_ICON_GREEN) {
         CGPlayer_C::EnableTaxiNode(guid);
 
         if (!CGUnit_C::UnitCanGossip(unit)) {
@@ -8219,11 +8219,11 @@ void CGPlayer_C::ToggleSheathe() {
         int32_t hasSheathe = model->HasSequence(ANIM_HIP_SHEATH);
         int32_t hasUnsheathe = model->HasSequence(ANIM_SHEATH);
 
-        if (!hasSheathe || !hasUnsheathe || !model->HasBone(3) || !model->HasBone(2)) {
+        if (!hasSheathe || !hasUnsheathe || !model->HasBone(KEY_BONE_SHOULDER_R) || !model->HasBone(KEY_BONE_SHOULDER_L)) {
             return;
         }
 
-        if (model->GetBoneSequenceId(3) == 90 || model->GetBoneSequenceId(2) == 90 || model->GetBoneSequenceId(3) == 89 || model->GetBoneSequenceId(2) == 89) {
+        if (model->GetBoneSequenceId(KEY_BONE_SHOULDER_R) == ANIM_HIP_SHEATH || model->GetBoneSequenceId(KEY_BONE_SHOULDER_L) == ANIM_HIP_SHEATH || model->GetBoneSequenceId(KEY_BONE_SHOULDER_R) == ANIM_SHEATH || model->GetBoneSequenceId(KEY_BONE_SHOULDER_L) == ANIM_SHEATH) {
             return;
         }
     }
@@ -8506,7 +8506,7 @@ void CGPlayer_C::ClearLootItemSlotType(WOWGUID lootObject, uint32_t slot) {
     CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
 
     if (player && player->m_lootTarget == lootObject) {
-        s_lootItems[slot].m_slotType = 0;
+        s_lootItems[slot].m_slotType = LOOT_SLOT_TYPE_ALLOW_LOOT;
     }
 }
 
@@ -8838,7 +8838,7 @@ static int32_t InteractUpdateProc(WOWGUID guid, void* param) {
     }
 
     object->m_questStatus = QUEST_GIVER_STATUS::QUEST_GIVER_NONE;
-    object->m_interactIconType = 0;
+    object->m_interactIconType = CGObject_C::INTERACT_ICON_NONE;
     object->RemoveInteractIcon();
     return 1;
 }
@@ -8896,7 +8896,7 @@ int32_t SkillRankChangeHandler(WOWGUID guid, uint32_t offset, uint32_t count, co
                 }
             }
 
-            if (skillLine->m_categoryID == 9 || skillLine->m_categoryID == 11) {
+            if (skillLine->m_categoryID == SKILL_LINE_CATEGORY_SECONDARY_SKILLS || skillLine->m_categoryID == SKILL_LINE_CATEGORY_PROFESSIONS) {
                 CGPlayer_C::QueryQuestGiverStatusMultiple();
             }
         }
@@ -9642,8 +9642,8 @@ int32_t Packet_Group_9(void* param, NETMESSAGE msgId, uint32_t time, CDataStore*
         }
 
         case SMSG_CHAT_RESTRICTED: {
-            uint8_t type;
-            msg->Get(type);
+            CHAT_RESTRICTION_TYPE type;
+            msg->Get(reinterpret_cast<uint8_t&>(type));
 
             switch (type) {
                 case CHAT_RESTRICTION_RESTRICTED:
@@ -10031,8 +10031,8 @@ void CGPlayer_C::SwapItems(WOWGUID item, WOWGUID srcContainer, uint32_t srcSlot,
     }
 
     CDataStore msg;
-    bool srcEquipped = srcContainer == self && (srcSlot < 23 || srcSlot - 67 <= 6);
-    bool dstEquipped = dstContainer == self && (dstSlot < 23 || dstSlot - 67 <= 6);
+    bool srcEquipped = srcContainer == self && (srcSlot < BACKPACK_FIRST || (srcSlot >= BANKBAG_FIRST && srcSlot <= BANKBAG_LAST));
+    bool dstEquipped = dstContainer == self && (dstSlot < BACKPACK_FIRST || (dstSlot >= BANKBAG_FIRST && dstSlot <= BANKBAG_LAST));
 
     if (srcEquipped != dstEquipped) {
         WOWGUID container = srcEquipped ? dstContainer : srcContainer;
@@ -10391,27 +10391,27 @@ int32_t CGPlayer_C::RefreshVisibleItems() {
             switch (slot) {
                 case INVSLOT_MAINHAND:
                     if (this->m_sheatheState <= WEAPONMODE_NORMALMODE) {
-                        CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(15), static_cast<SHEATHE_TYPE>(0), false);
+                        CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_MAINHAND, SHEATHE_NONE, false);
                     }
 
                     break;
 
                 case INVSLOT_OFFHAND:
                     if (this->m_sheatheState <= WEAPONMODE_NORMALMODE) {
-                        CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(16), static_cast<SHEATHE_TYPE>(0), false);
-                        CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(16), static_cast<SHEATHE_TYPE>(0), true);
+                        CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_OFFHAND, SHEATHE_NONE, false);
+                        CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_OFFHAND, SHEATHE_NONE, true);
                     }
 
                     break;
 
                 case INVSLOT_RANGED:
                     if (this->m_sheatheState == WEAPONMODE_RANGEDMODE || !this->m_sheatheState) {
-                        CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(17), static_cast<SHEATHE_TYPE>(0), false);
+                        CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_RANGED, SHEATHE_NONE, false);
                     }
 
                     if (this->m_sheatheState == WEAPONMODE_RANGEDMODE) {
-                        CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(16), static_cast<SHEATHE_TYPE>(0), false);
-                        CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(15), static_cast<SHEATHE_TYPE>(0), false);
+                        CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_OFFHAND, SHEATHE_NONE, false);
+                        CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_MAINHAND, SHEATHE_NONE, false);
                     }
 
                     break;
@@ -10428,10 +10428,10 @@ int32_t CGPlayer_C::RefreshVisibleItems() {
         this->EquipVisibleItem(item, slot);
 
         if (!item->m_itemId && slot == INVSLOT_MAINHAND) {
-            CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(15), static_cast<SHEATHE_TYPE>(0), false);
-            CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(15), static_cast<SHEATHE_TYPE>(1), false);
-            CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(15), static_cast<SHEATHE_TYPE>(2), false);
-            CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(15), static_cast<SHEATHE_TYPE>(3), false);
+            CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_MAINHAND, SHEATHE_NONE, false);
+            CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_MAINHAND, SHEATHE_MAINHAND, false);
+            CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_MAINHAND, SHEATHE_BACK, false);
+            CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_MAINHAND, SHEATHE_HIP, false);
         }
     }
 
@@ -10470,7 +10470,7 @@ void CGPlayer_C::ShowHelm() {
     VisibleItem_C* head = &this->m_player->m_playerVisibleItems[0];
 
     if (head && head->GetDisplayID() && this->CanEquipItemsInThisForm() && this->m_characterComponent) {
-        this->m_characterComponent->AddItemBySlot(static_cast<INVENTORY_SLOTS>(0), head->GetDisplayID(), 0);
+        this->m_characterComponent->AddItemBySlot(INVSLOT_HEAD, head->GetDisplayID(), 0);
     }
 
     if ((this->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_HIDE_HELM) && this->m_obj->m_guid == ClntObjMgrGetActivePlayer()) {
@@ -10490,7 +10490,7 @@ void CGPlayer_C::ShowCloak() {
     VisibleItem_C* back = &this->m_player->m_playerVisibleItems[14];
 
     if (back && back->GetDisplayID() && this->CanEquipItemsInThisForm() && this->m_characterComponent) {
-        this->m_characterComponent->AddItemBySlot(static_cast<INVENTORY_SLOTS>(14), back->GetDisplayID(), 0);
+        this->m_characterComponent->AddItemBySlot(INVSLOT_BACK, back->GetDisplayID(), 0);
     }
 
     if ((this->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_HIDE_CLOAK) && this->m_obj->m_guid == ClntObjMgrGetActivePlayer()) {
@@ -10575,7 +10575,7 @@ void CGPlayer_C::UpdateInventoryComponent(INVENTORY_SLOTS slot, const VisibleIte
             this->ClearWeaponTrail(0);
 
             if (!thrown || this->m_sheatheState != WEAPONMODE_RANGEDMODE) {
-                CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(15), static_cast<SHEATHE_TYPE>(old->GetSheatheType()), false);
+                CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_MAINHAND, old->GetSheatheType(), false);
                 break;
             }
 
@@ -10588,7 +10588,7 @@ void CGPlayer_C::UpdateInventoryComponent(INVENTORY_SLOTS slot, const VisibleIte
                 }
             }
 
-            CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(15), static_cast<SHEATHE_TYPE>(old->GetSheatheType()), false);
+            CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_MAINHAND, old->GetSheatheType(), false);
 
             if (detached) {
                 detached->AttachToParent(this->m_worldModel, MODEL_ATTACHMENT_ID::ATTACH_HANDR, nullptr, 0);
@@ -10601,7 +10601,7 @@ void CGPlayer_C::UpdateInventoryComponent(INVENTORY_SLOTS slot, const VisibleIte
             this->ClearWeaponTrail(1);
 
             if (thrown || this->m_sheatheState != WEAPONMODE_RANGEDMODE) {
-                CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(16), static_cast<SHEATHE_TYPE>(old->GetSheatheType()), old->GetInventoryType() == 14);
+                CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_OFFHAND, old->GetSheatheType(), old->GetInventoryType() == INVTYPE_SHIELD);
                 break;
             }
 
@@ -10614,7 +10614,7 @@ void CGPlayer_C::UpdateInventoryComponent(INVENTORY_SLOTS slot, const VisibleIte
                 }
             }
 
-            CCharacterComponent::RemoveHandItem(this->m_worldModel, static_cast<INVENTORY_SLOTS>(16), static_cast<SHEATHE_TYPE>(old->GetSheatheType()), old->GetInventoryType() == 14);
+            CCharacterComponent::RemoveHandItem(this->m_worldModel, INVSLOT_OFFHAND, old->GetSheatheType(), old->GetInventoryType() == INVTYPE_SHIELD);
 
             if (detached) {
                 detached->AttachToParent(this->m_worldModel, MODEL_ATTACHMENT_ID::ATTACH_HANDL, nullptr, 0);
@@ -10765,8 +10765,8 @@ int32_t InventoryUpdate(WOWGUID guid, uint32_t offset, uint32_t count, const voi
         return 1;
     }
 
-    if ((slot >= 39 && slot <= 66) || slot - 67 <= 6) {
-        FrameScript_SignalEvent(SCRIPT_EVENT_PLAYERBANKSLOTS_CHANGED, "%d", slot - 38);
+    if ((slot >= BANKGENERIC_FIRST && slot <= BANKGENERIC_LAST) || (slot >= BANKBAG_FIRST && slot <= BANKBAG_LAST)) {
+        FrameScript_SignalEvent(SCRIPT_EVENT_PLAYERBANKSLOTS_CHANGED, "%d", slot - BANKGENERIC_FIRST + 1);
     }
 
     return 1;
@@ -11129,7 +11129,7 @@ bool CGPlayer_C::OnGuildChanged(int32_t a2) {
 
     VisibleItem_C* tabard = &this->m_player->m_playerVisibleItems[18];
 
-    if (!tabard || tabard->GetInventoryType() != 19) {
+    if (!tabard || tabard->GetInventoryType() != INVTYPE_TABARD) {
         return false;
     }
 
@@ -12164,7 +12164,7 @@ int32_t CritterUpdate(WOWGUID guid, uint32_t offset, uint32_t count, const void*
     if (player) {
         CGActionBar::UpdateCritter(static_cast<const WOWGUID*>(value)->GetEntry());
         CGActionBar::UpdateCritter(player->m_unit->m_unitFieldCritter.GetEntry());
-        CGSpellBook::SendCompanionUpdate(0);
+        CGSpellBook::SendCompanionUpdate(COMPANION_TYPE_CRITTER);
     }
 
     return 1;
@@ -14315,7 +14315,7 @@ void CGPlayer_C::TurnOffGuildTabardPurchase() {
     WOWGUID tabard = bag->m_numSlots > INVSLOT_TABARD ? bag->m_slots[INVSLOT_TABARD] : WOWGUID();
     CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(tabard, TYPE_ITEM, __FILE__, __LINE__));
 
-    if (item && item->GetInventoryType() == 19) {
+    if (item && item->GetInventoryType() == INVTYPE_TABARD) {
         int32_t displayId = item->GetDisplayID();
 
         if (displayId) {
