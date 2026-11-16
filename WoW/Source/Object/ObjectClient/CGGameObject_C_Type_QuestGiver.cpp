@@ -32,8 +32,8 @@ void CGGameObject_C_Type_QuestGiver::CloseInteraction() {
         return;
     }
 
-    if (this->m_animState == 2 || this->m_animState == 3) {
-        this->UpdateAnimState(4);
+    if (this->m_animState == ANIMSTATE_OPENING || this->m_animState == ANIMSTATE_OPEN) {
+        this->UpdateAnimState(ANIMSTATE_CLOSING);
     }
 }
 
@@ -65,7 +65,7 @@ void CGGameObject_C_Type_QuestGiver::StartInteraction() {
         anim = info.m_animId;
     }
 
-    if (model->GetBoneSequenceId(0xFFFFFFFF) != anim) {
-        this->UpdateAnimState(2);
+    if (model->GetBoneSequenceId(M2_KEY_BONE_NONE) != anim) {
+        this->UpdateAnimState(ANIMSTATE_OPENING);
     }
 }
