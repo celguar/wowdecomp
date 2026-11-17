@@ -426,7 +426,7 @@ void CM2Model::UnlinkFromCallbackList() {
 int32_t CM2Model::IsBatchDoodadCompatible(M2Batch* batch) {
     uint32_t cacheFlags = M2GetCacheFlags();
 
-    if ((cacheFlags & CM2Cache::CACHE_FLAGS::CACHE_BATCH_DOODADS) && (this->m_runtimeFlags & M2_FLAGS::M2_UNKNOWN_10) && (this->m_shared->m_data->m_bones.m_count > 1 || !(cacheFlags & CM2Cache::CACHE_FLAGS::CACHE_SINGLE_BONE_SHARED_VERTICES)) && (batch->m_flags & 0x10)) {
+    if ((cacheFlags & CM2Cache::CACHE_FLAGS::CACHE_BATCH_DOODADS) && (this->m_runtimeFlags & M2_FLAGS::M2_UNKNOWN_10) && (this->m_shared->m_data->m_bones.m_count > 1 || !(cacheFlags & CM2Cache::CACHE_FLAGS::CACHE_SINGLE_BONE_SHARED_VERTICES)) && (batch->m_flags & M2Batch::FLAGS::DOODAD_BATCHABLE)) {
         CM2Lighting* lighting = this->m_currentLighting;
 
         if (!lighting || !lighting->m_lightCount) {
@@ -2184,7 +2184,7 @@ uint32_t CM2Model::GetNumGeometryBatches() {
             }
         }
 
-        if (batch->m_shader == 0x8000) {
+        if (batch->m_shader == M2Batch::SHADER_ID::SPECIAL_COMBINED) {
             continue;
         }
 
@@ -2237,7 +2237,7 @@ uint32_t CM2Model::GetNumCombinableDoodadBatches() {
             }
         }
 
-        if (batch->m_shader == 0x8000) {
+        if (batch->m_shader == M2Batch::SHADER_ID::SPECIAL_COMBINED) {
             continue;
         }
 
@@ -2289,7 +2289,7 @@ uint32_t CM2Model::GetNumPrimitives() {
             }
         }
 
-        if (batch->m_shader == 0x8000) {
+        if (batch->m_shader == M2Batch::SHADER_ID::SPECIAL_COMBINED) {
             continue;
         }
 
@@ -2883,7 +2883,7 @@ void CM2Model::RenderModelBatchesForProjectedTexture() {
     for (uint32_t i = 0; i < count; i++) {
         M2Batch* batch = &skin->m_batches[i];
 
-        if (!batch->m_materialLayer && !(batch->m_flags & 0x20)) {
+        if (!batch->m_materialLayer && !(batch->m_flags & M2Batch::FLAGS::NO_PROJECTED_TEXTURE_RECEIVE)) {
             M2SkinSection* section = &this->m_shared->m_skinSections[batch->m_skinSectionIndex];
 
             CGxBatch gxBatch;
@@ -3709,7 +3709,7 @@ M2ModelBone::M2ModelBone() {
     this->m_invBlendDuration = 0.0f;
     this->m_blendFactor = 0.0f;
     this->m_proceduralTransform = nullptr;
-    this->m_flags = 0;
+    this->m_flags = M2CompBone::FLAGS::NONE;
     this->m_blendWeightMax = 1.0f;
     this->m_sequenceId = INVALID_ANIMATION;
     this->m_variationIndex = 0;
@@ -4542,7 +4542,7 @@ void CM2Model::RenderModelBatchesShadowMap(const CModelBatchList& untextured, co
 
 // VERIFY: d9ea968f manual
 // OFFSET: 0x0082DD80
-void CM2Model::SetWorldTransform(const C3Vector& position, float rotation, float scale, const C3Vector& up, uint32_t flags) {
+void CM2Model::SetWorldTransform(const C3Vector& position, float rotation, float scale, const C3Vector& up, uint32_t modelFlags) {
     C44Matrix& transform = this->m_worldTransform;
     transform.d3 = 1.0f;
     transform.c2 = 1.0f;
@@ -4567,16 +4567,16 @@ void CM2Model::SetWorldTransform(const C3Vector& position, float rotation, float
 
     C44Matrix original = transform;
 
-    if (flags == 0xFFFFFFFF) {
-        flags = this->m_shared->m_data->m_flags;
+    if (modelFlags == CM2Model::USE_MODEL_ALIGNMENT) {
+        modelFlags = this->m_shared->m_data->m_flags;
     }
 
     C3Vector& rowA = *reinterpret_cast<C3Vector*>(&transform.a0);
     C3Vector& rowB = *reinterpret_cast<C3Vector*>(&transform.b0);
     C3Vector& rowC = *reinterpret_cast<C3Vector*>(&transform.c0);
 
-    switch (flags & 3) {
-        case 1: {
+    switch (modelFlags & M2Data::FLAGS::UP_ALIGNMENT_MASK) {
+        case M2Data::FLAGS::ALIGN_UP_KEEP_Y_HORIZONTAL: {
             float x = rowA.x;
             rowB.x = -rowA.y;
             rowB.y = x;
@@ -4596,7 +4596,7 @@ void CM2Model::SetWorldTransform(const C3Vector& position, float rotation, float
             break;
         }
 
-        case 3: {
+        case M2Data::FLAGS::UP_ALIGNMENT_MASK: {
             ComputeWorldTransformBasis(&transform, up);
             break;
         }
@@ -4693,7 +4693,7 @@ void CM2Model::AnimateMTSimple(const C44Matrix* view, const C3Vector& diffuse, c
         this->m_frameOfReference = parent->m_frameOfReference;
     }
 
-    if (data->m_flags & 4) {
+    if (data->m_flags & M2Data::FLAGS::LOCAL_TINT_ONLY) {
         this->m_effectiveAlpha = this->m_fadeAlpha;
         this->m_diffuseColor.x = this->m_diffuseTintR;
         this->m_diffuseColor.y = this->m_diffuseTintG;
@@ -5048,7 +5048,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
         this->m_frameOfReference = parent->m_frameOfReference;
     }
 
-    if (data->m_flags & 4) {
+    if (data->m_flags & M2Data::FLAGS::LOCAL_TINT_ONLY) {
         this->m_effectiveAlpha = this->m_fadeAlpha;
         this->m_diffuseColor.x = this->m_diffuseTintR;
         this->m_diffuseColor.y = this->m_diffuseTintG;
@@ -5269,7 +5269,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
         } else {
             parentMatrix = &this->m_boneMatrices[parentIndex];
 
-            if (boneFlags & 7) {
+            if (boneFlags & M2CompBone::FLAGS::PARENT_OVERRIDE_MASK) {
                 parentTransform = this->m_boneMatrices[parentIndex];
                 parentMatrix = &parentTransform;
                 C3Vector pivot = boneData->m_pivot * parentTransform;
@@ -5278,8 +5278,8 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
                 C3Vector& rowC = *reinterpret_cast<C3Vector*>(&parentTransform.c0);
                 const C44Matrix& world = this->m_matrixF4;
 
-                switch (boneFlags & 6) {
-                    case 2: {
+                switch (boneFlags & M2CompBone::FLAGS::PARENT_ROTATION_SCALE_MASK) {
+                    case M2CompBone::FLAGS::IGNORE_PARENT_SCALE: {
                         rowA.NormalizeSafe();
                         rowB.NormalizeSafe();
                         rowC.NormalizeSafe();
@@ -5298,7 +5298,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
                         break;
                     }
 
-                    case 4: {
+                    case M2CompBone::FLAGS::IGNORE_PARENT_ROTATION: {
                         float lengthA = world.a2 * world.a2 + world.a1 * world.a1 + world.a0 * world.a0;
                         float scaleA = lengthA <= 0.0000099999997f ? 1.0f : sqrtf((parentTransform.a0 * parentTransform.a0 + parentTransform.a2 * parentTransform.a2 + parentTransform.a1 * parentTransform.a1) / lengthA);
                         parentTransform.a0 = world.a0 * scaleA;
@@ -5317,7 +5317,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
                         break;
                     }
 
-                    case 6: {
+                    case M2CompBone::FLAGS::PARENT_ROTATION_SCALE_MASK: {
                         parentTransform.a0 = world.a0;
                         parentTransform.a1 = world.a1;
                         parentTransform.a2 = world.a2;
@@ -5331,7 +5331,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
                     }
                 }
 
-                if (boneFlags & 1) {
+                if (boneFlags & M2CompBone::FLAGS::IGNORE_PARENT_TRANSLATION) {
                     parentTransform.d0 = world.d0;
                     parentTransform.d1 = world.d1;
                     parentTransform.d2 = world.d2;
@@ -5346,7 +5346,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
             }
         }
 
-        int32_t animated = boneFlags & 0x280;
+        int32_t animated = boneFlags & M2CompBone::FLAGS::LOCAL_TRANSFORM_MASK;
         C44Matrix& boneMatrix = this->m_boneMatrices[i];
 
         if (animated) {
@@ -5393,7 +5393,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
                 local.Scale(bone->m_scale.m_currentValue);
             }
 
-            if ((boneFlags & 0x80) && bone->m_proceduralTransform) {
+            if ((boneFlags & M2CompBone::FLAGS::PROCEDURAL_TRANSFORM) && bone->m_proceduralTransform) {
                 local *= *bone->m_proceduralTransform;
             }
 
@@ -5421,7 +5421,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
             boneMatrix = *parentMatrix;
         }
 
-        uint32_t billboard = boneFlags & 0x78;
+        uint32_t billboard = boneFlags & M2CompBone::FLAGS::BILLBOARD_MASK;
 
         if (billboard) {
             C3Vector& rowA = *reinterpret_cast<C3Vector*>(&boneMatrix.a0);
@@ -5434,7 +5434,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
             C3Vector pivot = p * boneMatrix;
 
             switch (billboard) {
-                case 8: {
+                case M2CompBone::FLAGS::BILLBOARD: {
                     if (animated) {
                         rowA.x = local.a1;
                         rowA.y = local.a2;
@@ -5463,7 +5463,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
                     break;
                 }
 
-                case 16: {
+                case M2CompBone::FLAGS::BILLBOARD_LOCK_X: {
                     rowA.NormalizeSafe();
                     float x = rowA.x;
                     rowB.x = rowA.y;
@@ -5478,7 +5478,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
                     break;
                 }
 
-                case 32: {
+                case M2CompBone::FLAGS::BILLBOARD_LOCK_Y: {
                     rowB.NormalizeSafe();
                     float x = rowB.x;
                     rowA.x = -rowB.y;
@@ -5493,7 +5493,7 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
                     break;
                 }
 
-                case 64: {
+                case M2CompBone::FLAGS::BILLBOARD_LOCK_Z: {
                     rowC.NormalizeSafe();
                     float x = rowC.x;
                     rowB.x = rowC.y;
@@ -5702,7 +5702,7 @@ void CM2Model::AnimateParticleST(float deltaTime, uint32_t index) {
     CParticleEmitter2* emitter = this->m_particleEmitters[index];
     M2ModelParticle* particle = &this->m_particles[index];
 
-    if (!(particleData->m_flags & 0x8000)) {
+    if (!(particleData->m_flags & M2Particle::FLAGS::BURST)) {
         if (particle->m_emitting) {
             emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::DATA_EMITTING;
         } else {
@@ -7010,15 +7010,15 @@ int32_t CM2Model::InitializeLoaded() {
 
     for (uint32_t i = 0; i < data->m_particles.m_count; i++) {
         switch (data->m_particles[i].m_emitterType) {
-            case 1:
+            case M2Particle::EMITTER_TYPE::PET_PLANE:
                 emitterBytes += sizeof(CPlaneParticleEmitter);
                 break;
 
-            case 2:
+            case M2Particle::EMITTER_TYPE::PET_SPHERE:
                 emitterBytes += sizeof(CSphereParticleEmitter);
                 break;
 
-            case 3:
+            case M2Particle::EMITTER_TYPE::PET_SPLINE:
                 emitterBytes += sizeof(CSplineParticleEmitter);
                 break;
         }
@@ -7273,13 +7273,13 @@ int32_t CM2Model::InitializeLoaded() {
             M2Particle* particleData = &data->m_particles[i];
             M2ModelParticle* particle = &this->m_particles[i];
 
-            if (particleData->m_emitterType == 1) {
+            if (particleData->m_emitterType == M2Particle::EMITTER_TYPE::PET_PLANE) {
                 this->m_particleEmitters[i] = new (emitterMemory) CPlaneParticleEmitter();
                 emitterMemory += sizeof(CPlaneParticleEmitter);
-            } else if (particleData->m_emitterType == 2) {
+            } else if (particleData->m_emitterType == M2Particle::EMITTER_TYPE::PET_SPHERE) {
                 this->m_particleEmitters[i] = new (emitterMemory) CSphereParticleEmitter();
                 emitterMemory += sizeof(CSphereParticleEmitter);
-            } else if (particleData->m_emitterType == 3) {
+            } else if (particleData->m_emitterType == M2Particle::EMITTER_TYPE::PET_SPLINE) {
                 this->m_particleEmitters[i] = new (emitterMemory) CSplineParticleEmitter();
                 emitterMemory += sizeof(CSplineParticleEmitter);
             }
@@ -7331,61 +7331,61 @@ int32_t CM2Model::InitializeLoaded() {
                 emitter->SetZsource(particleData->m_zsourceTrack.m_sequenceKeys[0][0]);
             }
 
-            uint32_t flags = particleData->m_flags;
+            M2Particle::FLAGS particleFlags = particleData->m_flags;
 
-            if (flags & 0x10) {
+            if (particleFlags & M2Particle::FLAGS::LOCAL_SPACE) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::LOCAL_SPACE;
             } else {
                 emitter->m_flags &= ~CParticleEmitter2::RUNTIME_FLAGS::LOCAL_SPACE;
             }
 
-            if (flags & 0x40) {
+            if (particleFlags & M2Particle::FLAGS::INHERIT_VELOCITY) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::INHERIT_VELOCITY;
             }
 
-            if (flags & 0x20) {
+            if (particleFlags & M2Particle::FLAGS::TRANSFORM_SCALE) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::TRANSFORM_SCALE;
             }
 
-            if (flags & 0x800) {
+            if (particleFlags & M2Particle::FLAGS::EMIT_ALONG_MOTION) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::EMIT_ALONG_MOTION;
             }
 
-            if (flags & 0x1000) {
+            if (particleFlags & M2Particle::FLAGS::USE_BILLBOARD_AXIS) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::USE_BILLBOARD_AXIS;
             }
 
-            if (particleData->m_emitterType == 2) {
-                if (flags & 0x80) {
+            if (particleData->m_emitterType == M2Particle::EMITTER_TYPE::PET_SPHERE) {
+                if (particleFlags & M2Particle::FLAGS::KILL_OUTWARD_PARTICLES) {
                     emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::KILL_OUTWARD_PARTICLES;
                 }
 
-                if (flags & 0x100) {
+                if (particleFlags & M2Particle::FLAGS::SPHERE_Z_VELOCITY) {
                     emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::SPHERE_Z_VELOCITY;
                 }
             }
 
-            if (flags & 0x200) {
+            if (particleFlags & M2Particle::FLAGS::RANDOM_SPIN_DIRECTION) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::RANDOM_SPIN_DIRECTION;
             }
 
-            if (flags & 0x2000) {
+            if (particleFlags & M2Particle::FLAGS::PROJECT) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::PROJECT;
             }
 
-            if (flags & 0x4000) {
+            if (particleFlags & M2Particle::FLAGS::FOLLOW) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::FOLLOW;
             }
 
-            if (flags & 0x8000) {
+            if (particleFlags & M2Particle::FLAGS::BURST) {
                 emitter->m_flags &= ~CParticleEmitter2::RUNTIME_FLAGS::DATA_EMITTING;
             }
 
-            if (flags & 0x80000) {
+            if (particleFlags & M2Particle::FLAGS::SCALE_VARIATION) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::SCALE_VARIATION;
             }
 
-            emitter->SetParticleStyle(flags & 0x20000, flags & 0x40000, particleData->m_tailLength, flags & 0x400);
+            emitter->SetParticleStyle(particleFlags & M2Particle::FLAGS::HEAD, particleFlags & M2Particle::FLAGS::TAIL, particleData->m_tailLength, particleFlags & M2Particle::FLAGS::CLAMP_TAIL);
 
             CParticleMat material;
             material.m_flags = CParticleMat::FLAGS::DEFAULT;
@@ -7428,21 +7428,21 @@ int32_t CM2Model::InitializeLoaded() {
                     break;
             }
 
-            material.m_flags = (material.m_flags & ~CParticleMat::FLAGS::LIT) | ((flags & 1) ? CParticleMat::FLAGS::NONE : CParticleMat::FLAGS::LIT);
-            material.m_flags = (material.m_flags & ~CParticleMat::FLAGS::FOGGED) | ((flags & 8) ? CParticleMat::FLAGS::NONE : CParticleMat::FLAGS::FOGGED);
+            material.m_flags = (material.m_flags & ~CParticleMat::FLAGS::LIT) | ((particleFlags & M2Particle::FLAGS::UNLIT) ? CParticleMat::FLAGS::NONE : CParticleMat::FLAGS::LIT);
+            material.m_flags = (material.m_flags & ~CParticleMat::FLAGS::FOGGED) | ((particleFlags & M2Particle::FLAGS::UNFOGGED) ? CParticleMat::FLAGS::NONE : CParticleMat::FLAGS::FOGGED);
 
-            if (flags & 2) {
+            if (particleFlags & M2Particle::FLAGS::SORT_PARTICLES) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::SORT_PARTICLES;
             }
 
-            if (flags & 4) {
+            if (particleFlags & M2Particle::FLAGS::VELOCITY_ALIGNED_HEAD) {
                 emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::VELOCITY_ALIGNED_HEAD;
             }
 
             emitter->SetTextureDimensions(particleData->m_rows, particleData->m_cols);
 
-            if (flags & 0x10000) {
-                emitter->SetChooseRandomTexture(1);
+            if (particleFlags & M2Particle::FLAGS::RANDOM_TEXTURE) {
+                emitter->SetChooseRandomTexture(TRUE);
             }
 
             emitter->SetMaterial(material, this->m_shared->m_textures[particleData->m_textureIndex]);
@@ -7486,7 +7486,7 @@ int32_t CM2Model::InitializeLoaded() {
             emitter->SetFollowParams(particleData->m_followSpeed1, particleData->m_followScale1, particleData->m_followSpeed2, particleData->m_followScale2);
             emitter->m_priorityPlane = particleData->m_priorityPlane;
 
-            if (particleData->m_emitterType == 3) {
+            if (particleData->m_emitterType == M2Particle::EMITTER_TYPE::PET_SPLINE) {
                 static_cast<CSplineParticleEmitter*>(emitter)->SetSpline(particleData->m_spline.Data(), particleData->m_spline.m_count);
             }
 
@@ -7540,9 +7540,9 @@ int32_t CM2Model::InitializeLoaded() {
     M2Data* currentData = currentShared->m_data;
 
     if (currentData->m_bones.m_count == 1 && currentData->m_sequences.m_count == 1) {
-        uint32_t boneFlags = currentData->m_bones[0].m_flags;
+        M2CompBone::FLAGS boneFlags = currentData->m_bones[0].m_flags;
 
-        if (!(boneFlags & 0x280) && !(boneFlags & 0x78) && !currentData->m_lights.m_count && !currentData->m_cameras.m_count && !currentData->m_ribbons.m_count && !currentData->m_particles.m_count && !currentData->m_colors.m_count) {
+        if (!(boneFlags & M2CompBone::FLAGS::LOCAL_TRANSFORM_MASK) && !(boneFlags & M2CompBone::FLAGS::BILLBOARD_MASK) && !currentData->m_lights.m_count && !currentData->m_cameras.m_count && !currentData->m_ribbons.m_count && !currentData->m_particles.m_count && !currentData->m_colors.m_count) {
             this->m_runtimeFlags |= M2_FLAGS::M2_STATIC_SINGLE_BONE_OPTIMIZED;
         }
     }
@@ -7723,7 +7723,7 @@ void CM2Model::GatherModelBatchesShadowMap(CModelBatchList& untextured, CModelBa
             }
         }
 
-        if (batch->m_shader == 0x8000 || (batch->m_flags & 4) || batch->m_materialLayer) {
+        if (batch->m_shader == M2Batch::SHADER_ID::SPECIAL_COMBINED || (batch->m_flags & M2Batch::FLAGS::PROJECTED_TEXTURE) || batch->m_materialLayer) {
             continue;
         }
 
