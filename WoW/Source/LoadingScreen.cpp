@@ -1,4 +1,5 @@
 #include <cstdint>
+#include "Engine/Source/Tempest/Color.h"
 #include <cstring>
 #include <malloc.h>
 #include "Engine/Source/Base/Handle.h"
@@ -84,7 +85,7 @@ static const char* s_fontNames[9] = {
 };
 
 // STATIC: 0x00AB63FC
-static CImVector s_pathColor = CImVector(0xFF, 0xFF, 0xFF, 0xFF);
+static CImVector s_pathColor = CImVector(COLOR_WHITE_BGRA);
 
 // STATIC: 0x00AB6400
 static C2Vector s_texCoord[4] = {
@@ -346,9 +347,9 @@ void LoadingScreenSetTransparent(bool transparent) {
     uint32_t flags = ScrnLayerGetFlags(s_loadingScreenLayer);
 
     if (transparent) {
-        ScrnLayerSetFlags(s_loadingScreenLayer, flags | 0x1);
+        ScrnLayerSetFlags(s_loadingScreenLayer, flags | SCRN_LAYER_TRANSPARENT);
     } else {
-        ScrnLayerSetFlags(s_loadingScreenLayer, flags & ~0x1u);
+        ScrnLayerSetFlags(s_loadingScreenLayer, flags & ~SCRN_LAYER_TRANSPARENT);
     }
 }
 
@@ -381,7 +382,7 @@ static bool PaintSimpleBackground() {
     };
 
     CImVector color;
-    *reinterpret_cast<uint32_t*>(&color) = 0xFFFFFFFF;
+    *reinterpret_cast<uint32_t*>(&color) = COLOR_WHITE_ARGB;
 
     GxPrimLockVertexPtrs(4, vertices, sizeof(C3Vector), nullptr, 0, &color, 0, nullptr, 0, s_texCoord, sizeof(C2Vector), nullptr, 0);
     g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(s_simpleBackgroundTexture, 1, nullptr));
@@ -400,7 +401,7 @@ static bool PaintBackgroundImage() {
     }
 
     CImVector color;
-    *reinterpret_cast<uint32_t*>(&color) = 0xFFFFFFFF;
+    *reinterpret_cast<uint32_t*>(&color) = COLOR_WHITE_ARGB;
 
     for (uint32_t i = 0; i < 12; i++) {
         GxPrimLockVertexPtrs(4, s_tileVertices[i], sizeof(C3Vector), nullptr, 0, &color, 0, nullptr, 0, s_tileTexCoords[i], sizeof(C2Vector), nullptr, 0);
@@ -421,7 +422,7 @@ static void PaintLoadingBar(const BackgroundImage* images, int32_t count, CTextu
             continue;
         }
 
-        GxRsSet(GxRs_BlendingMode, 2);
+        GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
         GxUpdateAlphaRef(GxRs_AlphaRef);
 
         const BackgroundImage& image = images[i];
@@ -643,7 +644,7 @@ static void UpdateProgressBar(int32_t force) {
 // OFFSET: 0x0040A990
 static void InitializeProgressBar(bool loadingWorld) {
     if (s_loadingScreenLayer) {
-        ScrnLayerSetFlags(s_loadingScreenLayer, ScrnLayerGetFlags(s_loadingScreenLayer) & ~0x1u);
+        ScrnLayerSetFlags(s_loadingScreenLayer, ScrnLayerGetFlags(s_loadingScreenLayer) & ~SCRN_LAYER_TRANSPARENT);
     }
 
     s_xmlProgress = 0.0f;
@@ -666,7 +667,7 @@ static void InitializeProgressBar(bool loadingWorld) {
         rect.left = 0.0f;
         rect.top = 1.0f;
         rect.right = 1.0f;
-        ScrnLayerCreate(&rect, 9.0f, 6, nullptr, LoadingScreenPaint, &s_loadingScreenLayer);
+        ScrnLayerCreate(&rect, 9.0f, SCRN_LAYER_ORTHO | SCRN_LAYER_FULLSCREEN_VIEWPORT, nullptr, LoadingScreenPaint, &s_loadingScreenLayer);
         InitializeProgressBarEvents();
     }
 
@@ -1019,7 +1020,7 @@ void LoadingScreenMiniEnable() {
     rect.left = 0.0f;
     rect.top = 1.0f;
     rect.right = 1.0f;
-    ScrnLayerCreate(&rect, 9.0f, 3, nullptr, LoadingScreenMiniPaint, &s_miniLoadingLayer);
+    ScrnLayerCreate(&rect, 9.0f, SCRN_LAYER_TRANSPARENT | SCRN_LAYER_ORTHO, nullptr, LoadingScreenMiniPaint, &s_miniLoadingLayer);
     s_progress = 0.5f;
 }
 
@@ -1158,7 +1159,7 @@ void PaintDynamicLoadingBar() {
     index[11] = 6;
 
     g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(s_dynamicElementsTexture, 1, nullptr));
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
     DYNAMICELEMENTVERT* vertices = s_dynamicElements.m_data;
@@ -1257,7 +1258,7 @@ void LoadingScreenEnableShip(uint32_t transportEntry, int32_t transportMap, int3
         CGGameObject_C* transport = static_cast<CGGameObject_C*>(ClntObjMgrObjectPtr(WOWGUID{ player->GetTransportGUID() }, TYPE_GAMEOBJECT, __FILE__, __LINE__));
 
         if (transport && transport->m_obj->m_entryID == transportEntry) {
-            uint32_t path = transport->GetPropertyValue(CGameObjectDef::GetPropNum(transport->m_gameObject->m_typeID, 35));
+            uint32_t path = transport->GetPropertyValue(CGameObjectDef::GetPropNum(transport->m_gameObject->m_typeID, CGameObjectDef::PROPERTY_ID::PROP_TAXIPATHID));
             uint32_t leg = s_shipInfo.FindLeg(&g_taxiPathNodeDB, path, transportMap);
 
             if (!InitializeSpline(path, leg) || !LoadDynamicBackground()) {
@@ -1282,7 +1283,7 @@ void LoadingScreenEnableShipLeg(int32_t entryId, uint32_t leg) {
         CGGameObject_C* transport = static_cast<CGGameObject_C*>(ClntObjMgrObjectPtr(WOWGUID{ player->GetTransportGUID() }, TYPE_GAMEOBJECT, __FILE__, __LINE__));
 
         if (transport && transport->m_obj->m_entryID == entryId) {
-            uint32_t path = transport->GetPropertyValue(CGameObjectDef::GetPropNum(transport->m_gameObject->m_typeID, 35));
+            uint32_t path = transport->GetPropertyValue(CGameObjectDef::GetPropNum(transport->m_gameObject->m_typeID, CGameObjectDef::PROPERTY_ID::PROP_TAXIPATHID));
 
             if (!InitializeSpline(path, leg) || !LoadDynamicBackground()) {
                 ClearDynamicData();

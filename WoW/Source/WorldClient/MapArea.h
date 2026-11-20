@@ -8,6 +8,7 @@
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/LiquidSystem/Liquid.h"
 #include "WoW/Source/WorldClient/MapBaseObj.h"
+#include "WoW/Source/WorldClient/WorldConstants.h"
 #include "Engine/Source/Tempest/C2iVector.h"
 #include "WoW/Source/WorldClient/World.h"
 
@@ -36,6 +37,12 @@ class CMapAreaChunkLink {
 
 class CMapArea : public CMapBaseObj {
     public:
+    // ADT MTXF texture flags.
+    enum TEXTURE_FLAGS : uint32_t {
+        // Skip the "_s" specular texture; without pixel shaders the layer is drawn solid black.
+        TEXTURE_FLAG_NO_SPECULAR = 0x1,
+    };
+
     void QueryLiquidSounds(C3Vector* pos, float radius, TSGrowableArray<World::LiquidQueryResult>& results);
     static void Destroy();
     static void Initialize();
@@ -66,12 +73,19 @@ class CMapArea : public CMapBaseObj {
     /* 00A8 */ uint32_t* m_modelFilenamesOffsets;
     /* 00AC */ uint32_t* m_wmoFilenamesOffsets;
     /* 00B0 */ int16_t* m_flyingBbox;
-    /* 00B4 */ int32_t* m_textureFlags;
+    /* 00B4 */ int32_t* m_textureFlags; // MTXF, TEXTURE_FLAGS per texture
     /* 00B8 */ Liquid::CAreaData* m_liquid;
-    /* 00BC */ CMapChunk* m_mapChunks [256];
+    /* 00BC */ CMapChunk* m_mapChunks [MAP_CHUNKS_PER_AREA];
 
     CMapArea();
     ~CMapArea() override;
+    // INLINED: chunk lookups by world chunk coordinates (16 per area) and cell coordinates (8 per chunk).
+    CMapChunk* GetChunk(int32_t chunkX, int32_t chunkY) const {
+        return this->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * (chunkY & MAP_CHUNK_INDEX_MASK) + (chunkX & MAP_CHUNK_INDEX_MASK)];
+    }
+    CMapChunk* GetChunkForCell(int32_t cellX, int32_t cellY) const {
+        return this->GetChunk(cellX >> MAP_CELL_TO_CHUNK_SHIFT, cellY >> MAP_CELL_TO_CHUNK_SHIFT);
+    }
     void Load(const char* fileName);
     void LoadTextures(char* fileNames, uint32_t fileNamesSize);
     void LoadTerrainTexture(CMapAreaTexture* areaTexture, int32_t textureId);
@@ -85,7 +99,14 @@ class CMapArea : public CMapBaseObj {
 };
 
 struct SMAreaHeader {
-    /* 0000 */ uint32_t m_flags;
+    // MHDR flags tested by the client.
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // The MFBO flying bounding box chunk is present.
+        HAS_FLYING_BBOX = 0x1,
+    };
+
+    /* 0000 */ uint32_t m_flags; // FLAGS
     /* 0004 */ uint32_t m_mcin;
     /* 0008 */ uint32_t m_mtex;
     /* 000C */ uint32_t m_mmdx;
@@ -102,10 +123,15 @@ struct SMAreaHeader {
     /* 0034 */ uint32_t m_unused [3];
 };
 
+// ADT MCIN entry.
 struct SMChunkInfo {
+    enum FLAGS : uint32_t {
+        F_PREPARED = 0x1, // Runtime: set by CMapArea::PrepareChunk, cleared when the area's chunks are purged.
+    };
+
     /* 0000 */ uint32_t m_offset;
     /* 0004 */ uint32_t m_size;
-    /* 0008 */ uint32_t m_flags;
+    /* 0008 */ uint32_t m_flags; // FLAGS
     /* 000C */ uint8_t unused_000C[4];
 };
 

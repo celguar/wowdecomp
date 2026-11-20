@@ -6,6 +6,14 @@
 
 class SFileImpl;
 
+// Material.dbc flags.
+enum MATERIAL_FLAGS : int32_t {
+    MATERIAL_FLAG_NONE  = 0x00000000,
+    MATERIAL_FLAG_METAL = 0x00000001,
+    MATERIAL_FLAG_PLATE = 0x00000002,
+    MATERIAL_FLAG_CHAIN = 0x00000004,
+};
+
 class MaterialRec {
     public:
     static const int32_t s_numColumns = 5;
@@ -13,7 +21,7 @@ class MaterialRec {
     static const bool s_generatedID = false;
 
     /* 0000 */ int32_t m_id;
-    /* 0004 */ int32_t m_flags;
+    /* 0004 */ MATERIAL_FLAGS m_flags;
     /* 0008 */ int32_t m_foleySoundID;
     /* 000C */ int32_t m_sheatheSoundID;
     /* 0010 */ int32_t m_unsheatheSoundID;

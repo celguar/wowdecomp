@@ -3,19 +3,36 @@
 
 #include <cstdint>
 
+// Active rune count on initialization; the backing arrays have eight entries.
+constexpr int32_t NUM_INITIAL_RUNES = 6;
+constexpr int32_t RUNE_BASE_COOLDOWN_MS = 10000;
+constexpr float RUNE_BASE_COOLDOWN_MS_FLOAT = 10000.0f;
+
 class CDataStore;
 class SpellRec;
 
 class CGRuneInfo {
     public:
+    // Rune types; FrameXML RUNETYPE_* are these plus one. SpellRuneCost lists blood, unholy, frost.
+    enum RUNE_TYPE : int32_t {
+        RUNE_TYPE_BLOOD = 0,
+        RUNE_TYPE_UNHOLY = 1,
+        RUNE_TYPE_FROST = 2,
+        RUNE_TYPE_DEATH = 3,
+        NUM_RUNE_TYPES = 4,
+    };
+
+    // Rune slot table size (inferred name); NUM_INITIAL_RUNES are in use.
+    static const uint32_t MAX_RUNE_SLOTS = 8;
+
     static void LeaveWorld();
-    static int32_t m_runes[8];
+    static int32_t m_runes[MAX_RUNE_SLOTS];
     static void ConvertRune(uint8_t rune, uint8_t type);
     static void ResyncRunes(CDataStore* msg);
     static void AddRunePower(CDataStore* msg);
-    static int32_t m_baseRunes[8];
-    static uint32_t m_runeCooldowns[8];
-    static uint32_t m_runeLastUsed[8];
+    static int32_t m_baseRunes[MAX_RUNE_SLOTS];
+    static uint32_t m_runeCooldowns[MAX_RUNE_SLOTS];
+    static uint32_t m_runeLastUsed[MAX_RUNE_SLOTS];
     static uint32_t m_numRunes;
     static uint32_t m_predictedRunes;
     static void SetPredictedRunes(uint8_t available, uint8_t used, const uint8_t* cooldowns);

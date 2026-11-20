@@ -1157,7 +1157,7 @@ FMOD::SoundGroup* SE2::CreateSoundGroup(const char* name, int32_t maxAudible) {
 
 // VERIFY: d9c047a9 manual
 // OFFSET: 0x00878B60
-void SE2::SetSoundGroupMaxAudibleBehavior(FMOD::SoundGroup* soundGroup, int32_t behavior, float muteFadeSpeed) {
+void SE2::SetSoundGroupMaxAudibleBehavior(FMOD::SoundGroup* soundGroup, SE2_MAX_AUDIBLE_BEHAVIOR behavior, float muteFadeSpeed) {
     if (!soundGroup) {
         return;
     }
@@ -1165,19 +1165,19 @@ void SE2::SetSoundGroupMaxAudibleBehavior(FMOD::SoundGroup* soundGroup, int32_t 
     FMOD_RESULT result;
 
     switch (behavior) {
-        case 0:
+        case SE2_MAX_AUDIBLE_MUTE:
             result = soundGroup->setMaxAudibleBehavior(FMOD_SOUNDGROUP_BEHAVIOR_MUTE);
             SE_ERRCHECK(result);
             result = soundGroup->setMuteFadeSpeed(muteFadeSpeed);
             SE_ERRCHECK(result);
             break;
 
-        case 1:
+        case SE2_MAX_AUDIBLE_STEAL_LOWEST:
             result = soundGroup->setMaxAudibleBehavior(FMOD_SOUNDGROUP_BEHAVIOR_STEALLOWEST);
             SE_ERRCHECK(result);
             break;
 
-        case 2:
+        case SE2_MAX_AUDIBLE_FAIL:
             result = soundGroup->setMaxAudibleBehavior(FMOD_SOUNDGROUP_BEHAVIOR_FAIL);
             SE_ERRCHECK(result);
             break;
@@ -1409,8 +1409,8 @@ SESoundInternal::SESoundInternal() {
     this->m_position.x = s_invalid;
     this->m_position.y = s_invalid;
     this->m_position.z = s_invalid;
-    this->m_minDistance = s_invalid;
-    this->m_maxDistance = s_invalid;
+    this->m_distanceRange.m_l = s_invalid;
+    this->m_distanceRange.m_h = s_invalid;
     this->m_channelGroup = 0;
     this->m_mode = 0;
     this->m_frequency = 0.0f;
@@ -1498,8 +1498,8 @@ int32_t SESoundInternal::IsReadyForRelease() {
 // VERIFY: 3135d777 auto
 // OFFSET: 0x008785A0
 int32_t SESoundInternal::Set3DMinMaxDistance(float minDistance, float maxDistance) {
-    this->m_minDistance = minDistance;
-    this->m_maxDistance = maxDistance;
+    this->m_distanceRange.m_l = minDistance;
+    this->m_distanceRange.m_h = maxDistance;
 
     FMOD_RESULT result = FMOD_ERR_INTERNAL;
 
@@ -1754,7 +1754,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
         }
     }
 
-    if (!IsNaN(this->m_minDistance) && !IsNaN(this->m_maxDistance) && !this->Set3DMinMaxDistance(this->m_minDistance, this->m_maxDistance)) {
+    if (!IsNaN(this->m_distanceRange.m_l) && !IsNaN(this->m_distanceRange.m_h) && !this->Set3DMinMaxDistance(this->m_distanceRange.m_l, this->m_distanceRange.m_h)) {
         SE2::Log_Write(__LINE__, __FILE__, FMOD_ERR_INTERNAL, "");
         this->AbortNonBlockingLoad(result);
         return;
@@ -2302,12 +2302,12 @@ int32_t SE2::GetChannelInfo(bool fadingOnly, SEChannelInfo* info, int32_t maxCou
                 float dx = listener.x - info->m_position.x;
                 info->m_distanceSquared = dx * dx + dy * dy + dz * dz;
 
-                result = sound->m_channel->get3DMinMaxDistance(&info->m_minDistance, &info->m_maxDistance);
+                result = sound->m_channel->get3DMinMaxDistance(&info->m_distanceRange.m_l, &info->m_distanceRange.m_h);
                 SE_ERRCHECK(result);
             } else {
                 info->m_distanceSquared = 0.0f;
-                info->m_minDistance = 0.0f;
-                info->m_maxDistance = 0.0f;
+                info->m_distanceRange.m_l = 0.0f;
+                info->m_distanceRange.m_h = 0.0f;
             }
 
             bool virt;

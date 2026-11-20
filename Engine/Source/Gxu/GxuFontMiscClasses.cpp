@@ -1,4 +1,5 @@
 #include <cmath>
+#include "Engine/Source/ShaderEffect/Types.h"
 #include <cstddef>
 #include <cstdint>
 #include "Engine/Source/Gxu/GxuFontMiscClasses.h"
@@ -447,7 +448,7 @@ CHARCODEDESC* TEXTURECACHEROW::CreateNewDesc(GLYPHBITMAPDATA* data, uint32_t row
 
     if (this->m_widestFreeSlot >= width) {
         CHARCODEDESC* desc = new (__FILE__, __LINE__) CHARCODEDESC;
-        this->m_glyphlist.LinkNode(desc, 2, head);
+        this->m_glyphlist.LinkNode(desc, TSLIST_LINK_BEFORE, head);
         desc->m_glyphEndPixel = head->m_glyphStartPixel - 1;
         desc->m_glyphStartPixel = desc->m_glyphEndPixel - width + 1;
         desc->m_rowNumber = rowNumber;
@@ -482,7 +483,7 @@ CHARCODEDESC* TEXTURECACHEROW::CreateNewDesc(GLYPHBITMAPDATA* data, uint32_t row
             }
         } else if (gap >= width) {
             desc = new (__FILE__, __LINE__) CHARCODEDESC;
-            this->m_glyphlist.LinkNode(desc, 1, glyph);
+            this->m_glyphlist.LinkNode(desc, TSLIST_LINK_AFTER, glyph);
             desc->m_glyphStartPixel = glyph->m_glyphEndPixel + 1;
             desc->m_glyphEndPixel = glyph->m_glyphEndPixel + width;
             desc->m_rowNumber = rowNumber;
@@ -516,12 +517,12 @@ void CGxStringBatch::RenderBatch() {
 
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_Culling, 0);
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
     CGxShader* vertexShader;
 
-    if (this->m_flags & 1) {
+    if (this->m_flags & CGxStringBatch::STRING_BATCH_FLAGS::BATCH_BILLBOARDED) {
         BATCHEDRENDERFONTDESC::s_billboarded = 1;
         GxRsSet(GxRs_DepthTest, 1);
         GxRsSet(GxRs_DepthWrite, 1);
@@ -555,8 +556,8 @@ void CGxStringBatch::RenderBatch() {
         GxShaderConstantsSet(GxSh_Vertex, 0, reinterpret_cast<const float*>(&viewProj), 4);
     } else {
         GxRsSet(GxRs_Lighting, 0);
-        GxRsSet(GxRs_ColorOp0, 0);
-        GxRsSet(GxRs_AlphaOp0, 0);
+        GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
+        GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
     }
 
     for (BATCHEDRENDERFONTDESC* desc = this->m_fontBatch.m_fulllist.Head(); desc; ) {
@@ -567,7 +568,7 @@ void CGxStringBatch::RenderBatch() {
 
         desc->RenderBatch();
 
-        if (this->m_flags & 2) {
+        if (this->m_flags & CGxStringBatch::STRING_BATCH_FLAGS::BATCH_CLEAR_STRINGS_AFTER_RENDER) {
             desc->m_strings.UnlinkAll();
         }
 
@@ -608,7 +609,7 @@ void TEXTLINETEXTURE::Shutdown() {
 }
 
 // INLINED
-CGxStringBatch::CGxStringBatch() : m_flags(0) {
+CGxStringBatch::CGxStringBatch() : m_flags(CGxStringBatch::STRING_BATCH_FLAGS::BATCH_NONE) {
 }
 
 // VERIFY: a85538e9 manual

@@ -16,15 +16,28 @@ struct REALM_INFO;
 
 class CHARACTER_INFO {
     public:
+    enum RecordLimits : int32_t {
+        NAME_BYTE_CAPACITY = 48,
+        INVENTORY_DISPLAY_SLOT_COUNT = 23,
+    };
+
+    enum CustomizationFlags : uint32_t {
+        CUSTOMIZE_FLAG_APPEARANCE = 0x1,
+        CUSTOMIZE_FLAG_FACTION_CHANGE = 0x10000,
+        CUSTOMIZE_FLAG_RACE_CHANGE = 0x100000,
+        CUSTOMIZE_RACE_OR_FACTION_MASK = 0x110000,
+        CUSTOMIZE_RETAIN_MASK = 0xFFEEFFFE,
+    };
+
     /* 0000 */ WOWGUID m_guid;
-    /* 0008 */ char m_name [48];
+    /* 0008 */ char m_name [CHARACTER_INFO::NAME_BYTE_CAPACITY];
     /* 0038 */ uint32_t m_mapID;
     /* 003C */ uint32_t m_zoneID;
     /* 0040 */ uint32_t m_guildID;
     /* 0044 */ C3Vector m_position;
-    /* 0050 */ uint32_t m_inventoryItemDisplayID [23];
-    /* 00AC */ uint32_t m_inventoryItemType [23];
-    /* 0108 */ uint32_t m_inventoryItemVisualID [23];
+    /* 0050 */ uint32_t m_inventoryItemDisplayID [CHARACTER_INFO::INVENTORY_DISPLAY_SLOT_COUNT];
+    /* 00AC */ uint32_t m_inventoryItemType [CHARACTER_INFO::INVENTORY_DISPLAY_SLOT_COUNT];
+    /* 0108 */ uint32_t m_inventoryItemVisualID [CHARACTER_INFO::INVENTORY_DISPLAY_SLOT_COUNT];
     /* 0164 */ uint32_t m_petDisplayInfoID;
     /* 0168 */ uint32_t m_petExperienceLevel;
     /* 016C */ uint32_t m_petCreatureFamilyID;
@@ -45,6 +58,31 @@ class CHARACTER_INFO {
 
 class RealmConnection : public NetClient {
     public:
+    enum CharacterListLimits : int32_t {
+        CHARACTER_ENUM_COUNT_LIMIT = 10,
+    };
+
+    // Raw billing byte: plan selector bits plus two Lua Boolean outputs.
+    // Current consumers establish values, not the broader plan/flag names.
+    enum : uint8_t {
+        BILLING_FLAGS_NONE = 0,
+        BILLING_FLAG_UNKNOWN_1 = 0x2,
+        BILLING_FLAG_UNKNOWN_2 = 0x4,
+        BILLING_FLAG_UNKNOWN_3 = 0x8,
+        BILLING_FLAG_UNKNOWN_4 = 0x10,
+        BILLING_FLAG_UNKNOWN_5 = 0x20,
+        BILLING_PLAN_MASK = 0x16,
+    };
+
+    // GetBillingPlan Lua result IDs; zero is the unmatched-plan fallback.
+    enum : int32_t {
+        BILLING_TYPE_UNKNOWN_0 = 0,
+        BILLING_TYPE_UNKNOWN_1 = 1,
+        BILLING_TYPE_UNKNOWN_2 = 2,
+        BILLING_TYPE_UNKNOWN_3 = 3,
+        BILLING_TYPE_UNKNOWN_4 = 4,
+    };
+
     struct REALMCONNECTIONNODE : public TSLinkedNode<RealmConnection::REALMCONNECTIONNODE> {
         /* 0008 */ RealmConnection* m_connection;
 
@@ -104,7 +142,7 @@ class RealmConnection : public NetClient {
     int32_t HandleClientCacheVersion(uint32_t msgId, uint32_t time, CDataStore* msg);
     int32_t HandleLogoutResponse(uint32_t msgId, uint32_t time, CDataStore* msg);
     void RequestCharacterEnum();
-    void RequestCharacterLogin(WOWGUID guid, int32_t a2);
+    void RequestCharacterLogin(WOWGUID guid, int32_t unknown2);
     void SetSelectedRealm(uint32_t regionId, uint32_t battlegroupId, uint32_t realmId);
 };
 
@@ -112,7 +150,7 @@ class RealmResponse {
     public:
     virtual void LoginServerResult(LOGIN_STATE state, LOGIN_RESULT result, const char* message1, const char* message2, const char* message3) = 0;
     virtual void RealmListReceived(TSFixedArray<REALM_INFO>& realms) = 0;
-    virtual void JoinRealmResult(uint32_t realmID, int32_t result, int32_t a3, int32_t a4, int32_t a5);
+    virtual void JoinRealmResult(uint32_t realmID, int32_t result, int32_t unknown3, int32_t unknown4, int32_t unknown5);
     virtual void HandleAuthResponse(RealmConnection* connection, uint8_t result) = 0;
     virtual void AddOnListReceived(RealmConnection* connection) = 0;
     virtual void CharacterListReceived(RealmConnection* connection, const TSFixedArray<CHARACTER_INFO>& characters, int32_t success) = 0;
@@ -121,10 +159,10 @@ class RealmResponse {
     virtual void OnChatReceived(RealmConnection* connection, WOWGUID guid, const char* text, uint8_t type) = 0;
     virtual void OnChatPlayerNotFound(RealmConnection* connection, const char* name);
     virtual void OnAccountOnline(RealmConnection* connection, int32_t a2, WOWGUID guid) = 0;
-    virtual void OnCharacterRestored(RealmConnection* connection, bool success, uint32_t a3, uint32_t a4, uint32_t a5, uint64_t a6, uint64_t a7, uint32_t a8, const char* a9, uint32_t a10, CDataStore* msg, uint64_t a12, uint64_t a13);
-    virtual void OnChangeArenaTeamRating(RealmConnection* connection, bool success, int32_t a3, int32_t a4);
+    virtual void OnCharacterRestored(RealmConnection* connection, bool success, uint32_t unknown3, uint32_t unknown4, uint32_t unknown5, uint64_t unknown6, uint64_t unknown7, uint32_t unknown8, const char* unknown9, uint32_t unknown10, CDataStore* msg, uint64_t unknown12, uint64_t unknown13);
+    virtual void OnChangeArenaTeamRating(RealmConnection* connection, bool success, int32_t unknown3, int32_t unknown4);
     virtual void OnAFKMonitorInfoResponse(RealmConnection* connection, WOWGUID guid, int32_t a3, int32_t a4, int32_t a5, int32_t a6) = 0;
-    virtual void OnServerInfo(RealmConnection* connection, int32_t a2, int32_t a3, char* a4);
+    virtual void OnServerInfo(RealmConnection* connection, int32_t unknown2, int32_t unknown3, char* unknown4);
     virtual void HandleConnect(RealmConnection* connection) = 0;
     virtual void HandleDisconnect(RealmConnection* connection) = 0;
     virtual void HandleCantConnect(RealmConnection* connection) = 0;

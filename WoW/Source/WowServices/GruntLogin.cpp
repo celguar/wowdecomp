@@ -276,8 +276,8 @@ void GruntLogin::Update() {
 void GruntLogin::JoinRealm(uint32_t a1, uint32_t a2, uint32_t a3) {
 }
 
-int32_t GruntLogin::GetLoginServerType() {
-    return 0;
+LOGIN_SERVER_TYPE GruntLogin::GetLoginServerType() {
+    return LOGIN_SERVER_GRUNT;
 }
 
 // VERIFY: d9686987 auto
@@ -422,19 +422,19 @@ const uint8_t* GruntLogin::GetVersionChallenge() {
 // VERIFY: e2adbcde auto
 // OFFSET: 0x008CAAF0
 bool GruntLogin::IsTrialAccount() {
-    return (this->m_clientLink->m_accountFlags >> 3) & 1;
+    return (this->m_clientLink->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_TRIAL) != 0;
 }
 
 // VERIFY: d289ac5b auto
 // OFFSET: 0x008CAB10
 bool GruntLogin::IsProPassAccount() {
-    return (this->m_clientLink->m_accountFlags >> 23) & 1;
+    return (this->m_clientLink->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_PRO_PASS) != 0;
 }
 
 // VERIFY: 431ffacd auto
 // OFFSET: 0x008CAB30
 bool GruntLogin::IsGMAccount() {
-    return this->m_clientLink->m_accountFlags & 1;
+    return (this->m_clientLink->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_GAME_MASTER) != 0;
 }
 
 // VERIFY: cc6621fa auto

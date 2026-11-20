@@ -4,6 +4,7 @@
 #include <malloc.h>
 #include <new>
 #include "ObjectMgrClient.h"
+#include "WoW/Source/DB/Rec/MapRec.h"
 #include "Engine/Source/Base/CDataStore.h"
 #include "Engine/Source/Base/ObjectAlloc.h"
 #include "Engine/Source/ConsoleBase/ConsoleCommand.h"
@@ -55,24 +56,24 @@ static const char* s_objNames[NUM_CLIENT_OBJECT_TYPES] = { "CGObject_C", "CGItem
 static const uint32_t s_objHeapSize[NUM_CLIENT_OBJECT_TYPES] = { 0, 512, 32, 64, 64, 64, 32, 32 };
 
 // STATIC: 0x00AC3D04
-static const uint32_t s_objDwordCount[NUM_CLIENT_OBJECT_TYPES] = { 0x6, 0x40, 0x8A, 0x94, 0x52E, 0x12, 0xC, 0x24 };
+static const uint32_t s_objDwordCount[NUM_CLIENT_OBJECT_TYPES] = { OBJECT_FIELDS::OBJECT_END, OBJECT_FIELDS::OBJECT_END + CGItemData::FIELD_ID::ITEM_END, OBJECT_FIELDS::OBJECT_END + CGItemData::FIELD_ID::ITEM_END + CGContainerData::FIELD_ID::CONTAINER_END, OBJECT_FIELDS::OBJECT_END + CGUnitData::FIELD_ID::UNIT_END, OBJECT_FIELDS::OBJECT_END + CGUnitData::FIELD_ID::UNIT_END + CGPlayerLocalData::FIELD_ID::PLAYER_END, OBJECT_FIELDS::OBJECT_END + CGGameObjectData::FIELD_ID::GAMEOBJECT_END, OBJECT_FIELDS::OBJECT_END + CGDynamicObjectData::FIELD_ID::DYNAMICOBJECT_END, OBJECT_FIELDS::OBJECT_END + CGCorpseData::FIELD_ID::CORPSE_END, };
 
 // STATIC: 0x00B6A160
 uint32_t s_objTotalSize[NUM_CLIENT_OBJECT_TYPES] = {
     sizeof(CGObject_C) + sizeof(CGObjectData) + CGObject::TotalFieldsSaved() * sizeof(uint32_t),
     sizeof(CGItem_C) + sizeof(CGObjectData) + sizeof(CGItemData) + CGItem::TotalFieldsSaved() * sizeof(uint32_t),
     sizeof(CGContainer_C) + sizeof(CGObjectData) + sizeof(CGItemData) + sizeof(CGContainerData) + CGContainer::TotalFieldsSaved() * sizeof(uint32_t),
-    sizeof(CGUnit_C) + sizeof(CGObjectData) + sizeof(CGUnitData) + CGUnit::TotalFields() * sizeof(uint32_t),
-    sizeof(CGPlayer_C) + sizeof(CGObjectData) + sizeof(CGUnitData) + sizeof(CGPlayerData) + CGPlayer::TotalRemoteFields() * sizeof(uint32_t),
+    sizeof(CGUnit_C) + sizeof(CGObjectData) + sizeof(CGUnitData) + CGUnit::TotalFieldsSaved() * sizeof(uint32_t),
+    sizeof(CGPlayer_C) + sizeof(CGObjectData) + sizeof(CGUnitData) + sizeof(CGPlayerData) + CGPlayer::TotalRemoteFieldsSaved() * sizeof(uint32_t),
     sizeof(CGGameObject_C) + sizeof(CGObjectData) + sizeof(CGGameObjectData) + CGGameObject::TotalFieldsSaved() * sizeof(uint32_t),
-    sizeof(CGDynamicObject_C) + sizeof(CGObjectData) + sizeof(CGDynamicObjectData) + CGDynamicObject::TotalFields() * sizeof(uint32_t),
+    sizeof(CGDynamicObject_C) + sizeof(CGObjectData) + sizeof(CGDynamicObjectData) + CGDynamicObject::TotalFieldsSaved() * sizeof(uint32_t),
     sizeof(CGCorpse_C) + sizeof(CGObjectData) + sizeof(CGCorpseData) + CGCorpse::TotalFieldsSaved() * sizeof(uint32_t),
 };
 
 // VERIFY: 9aded9c4 manual
 // OFFSET: 0x004D5850
 static CMirrorHandler* AssignMirrorHandler(TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* list, uint32_t fieldByteOffset, uint32_t mirrorByteOffset, uint32_t fieldByteSize, MIRRORHANDLERFUNC function, void* param, HANDLER_PRIORITY priority, int32_t alwaysFire) {
-    CMirrorHandler* handler = list->NewNode(2, 0, 0);
+    CMirrorHandler* handler = list->NewNode(TSLIST_LINK_BEFORE, 0, 0);
     handler->m_fieldByteOffset = fieldByteOffset;
     handler->m_mirrorByteOffset = mirrorByteOffset;
     handler->m_fieldByteSize = fieldByteSize;
@@ -144,7 +145,7 @@ static uint32_t TypeDescriptorToMirrorOffset(OBJECT_TYPE_ID typeId, uint32_t off
         }
 
         default: {
-            return (offset & 3) + 4 * CGObject::GetSavedIndexFromDataIndex(offset >> 2);
+            return (offset & 3) + 4 * CGObject::GetSavedIndexFromDataIndex(offset >> 2, (size + 3) >> 2, 0);
         }
     }
 }
@@ -682,7 +683,7 @@ static uint32_t ObjDescriptorToMirrorOffset(OBJECT_TYPE_ID typeId, int32_t local
         }
     }
 
-    return (offset & 3) + 4 * CGObject::GetSavedIndexFromDataIndex(offset >> 2);
+    return (offset & 3) + 4 * CGObject::GetSavedIndexFromDataIndex(offset >> 2, (size + 3) >> 2, local);
 }
 
 // VERIFY: 839b7b55 manual
@@ -729,7 +730,7 @@ static void SetupObjectStorage(CGObject_C* object, OBJECT_TYPE_ID typeId, WOWGUI
 
             if (guid == ClntObjMgrGetActivePlayer()) {
                 size = sizeof(CGObjectData) + sizeof(CGUnitData) + sizeof(CGPlayerLocalData);
-                player->m_playerLocalMirrorLists = reinterpret_cast<TSList<void>*>(base + sizeof(CGPlayer_C) + size + CGPlayer::TotalFields() * sizeof(uint32_t));
+                player->m_playerLocalMirrorLists = reinterpret_cast<TSList<void>*>(base + sizeof(CGPlayer_C) + size + CGPlayer::TotalFieldsSaved() * sizeof(uint32_t));
             } else {
                 size = sizeof(CGObjectData) + sizeof(CGUnitData) + sizeof(CGPlayerData);
                 player->m_playerLocalMirrorLists = nullptr;
@@ -799,7 +800,7 @@ static void ExpireOldObjects(uint32_t expireTime, OBJECT_TYPE_ID typeId) {
 // OFFSET: 0x004D4930
 CGObject_C* ClntObjMgrAllocObject(OBJECT_TYPE_ID typeId, WOWGUID guid) {
     if (guid == ClntObjMgrGetActivePlayer()) {
-        return static_cast<CGObject_C*>(SMemAlloc(sizeof(CGPlayer_C) + s_objDwordCount[ID_PLAYER] * sizeof(uint32_t) + CGPlayer::TotalFields() * sizeof(uint32_t) + 1002 * sizeof(TSList<void>), __FILE__, __LINE__, 0));
+        return static_cast<CGObject_C*>(SMemAlloc(sizeof(CGPlayer_C) + s_objDwordCount[ID_PLAYER] * sizeof(uint32_t) + CGPlayer::TotalFieldsSaved() * sizeof(uint32_t) + 1002 * sizeof(TSList<void>), __FILE__, __LINE__, 0));
     }
 
     ExpireOldObjects(10000, typeId);
@@ -1187,11 +1188,11 @@ static int32_t PostInitObject(uint32_t time, CDataStore* msg, bool reenable) {
         return 0;
     }
 
-    if ((object->m_modelFlags & 0x20000) && (object->m_obj->m_type & TYPE_UNIT)) {
+    if ((object->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_POST_REENABLE_PENDING) && (object->m_obj->m_type & TYPE_UNIT)) {
       static_cast<CGUnit_C*>(object)->SetClientInitData(create, object->m_obj->m_guid == ClntObjMgrGetActivePlayer());
     }
 
-    if (object->m_modelFlags & 0x40000) {
+    if (object->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_POST_INITED) {
         return CallMirrorHandlers(msg, true, guid);
     }
 
@@ -1335,7 +1336,7 @@ static int32_t CreateObject(CDataStore* msg, uint32_t time) {
         return 0;
     }
 
-    if (create.m_updateFlags & 0x1) {
+    if (create.m_updateFlags & OBJECT_UPDATE_FLAGS::UPDATEFLAG_SELF) {
         s_curMgr->m_playerGuid = guid;
     }
 
@@ -1447,15 +1448,27 @@ static void ObjDelete(CGObject_C* object) {
     s_curMgr->m_lazyCleanupFifo[object->m_typeId - 1].LinkToTail(object);
 }
 
+// SMSG_UPDATE_OBJECT block type. Names follow the 0.5.3 symbols; 3.3.5 adds
+// a second full-update type at 3 (passed to PostInitObject as reenable),
+// moving OUT_OF_RANGE and IN_RANGE up by one.
+enum OBJECT_UPDATE_TYPE : uint8_t {
+    UPDATE_PARTIAL = 0,
+    UPDATE_MOVEMENT = 1,
+    UPDATE_FULL = 2,
+    UPDATE_FULL_UNKNOWN_3 = 3,
+    UPDATE_OUT_OF_RANGE = 4,
+    UPDATE_IN_RANGE = 5,
+};
+
 // VERIFY: 1ddf9f77 auto
 // OFFSET: 0x004D7050
 static int32_t ObjectUpdateFirstPass(uint32_t index, CDataStore* msg, uint32_t time, uint32_t count) {
     for (; index < count; index++) {
-        uint8_t type;
-        msg->Get(type);
+        OBJECT_UPDATE_TYPE type;
+        msg->Get(reinterpret_cast<uint8_t&>(type));
 
         switch (type) {
-            case 0: {
+            case UPDATE_PARTIAL: {
                 if (!PartialUpdateFromFullUpdate(msg)) {
                     return 0;
                 }
@@ -1463,15 +1476,15 @@ static int32_t ObjectUpdateFirstPass(uint32_t index, CDataStore* msg, uint32_t t
                 break;
             }
 
-            case 1: {
+            case UPDATE_MOVEMENT: {
                 SmartGUID guid;
                 *msg >> guid;
                 CClientMoveUpdate::Skip(msg);
                 break;
             }
 
-            case 2:
-            case 3: {
+            case UPDATE_FULL:
+            case UPDATE_FULL_UNKNOWN_3: {
                 if (!CreateObject(msg, time)) {
                     return 0;
                 }
@@ -1479,7 +1492,7 @@ static int32_t ObjectUpdateFirstPass(uint32_t index, CDataStore* msg, uint32_t t
                 break;
             }
 
-            case 5: {
+            case UPDATE_IN_RANGE: {
                 UpdateInRangeObjects(msg);
                 break;
             }
@@ -1498,11 +1511,11 @@ static int32_t ObjectUpdateFirstPass(uint32_t index, CDataStore* msg, uint32_t t
 // OFFSET: 0x004D7100
 static int32_t ObjectUpdateSecondPass(CDataStore* msg, uint32_t time, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
-        uint8_t type;
-        msg->Get(type);
+        OBJECT_UPDATE_TYPE type;
+        msg->Get(reinterpret_cast<uint8_t&>(type));
 
         switch (type) {
-            case 0: {
+            case UPDATE_PARTIAL: {
                 if (!CallMirrorHandlers(msg, false, WOWGUID())) {
                     return 0;
                 }
@@ -1510,22 +1523,22 @@ static int32_t ObjectUpdateSecondPass(CDataStore* msg, uint32_t time, uint32_t c
                 break;
             }
 
-            case 1: {
+            case UPDATE_MOVEMENT: {
                 PostMovementUpdate(msg);
                 break;
             }
 
-            case 2:
-            case 3: {
-                if (!PostInitObject(time, msg, type == 3)) {
+            case UPDATE_FULL:
+            case UPDATE_FULL_UNKNOWN_3: {
+                if (!PostInitObject(time, msg, type == UPDATE_FULL_UNKNOWN_3)) {
                     return 0;
                 }
 
                 break;
             }
 
-            case 4:
-            case 5: {
+            case UPDATE_OUT_OF_RANGE:
+            case UPDATE_IN_RANGE: {
                 SkipSetOfObjects(msg);
                 break;
             }
@@ -1566,12 +1579,12 @@ static void UpdateOutOfRangeObjects(CDataStore* msg) {
             continue;
         }
 
-        if (CGBattlefieldInfo::m_instanceType == 4) {
+        if (CGBattlefieldInfo::m_instanceType == MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_ARENA_BATTLEFIELD) {
             WOWGUID objectGuid = object->m_obj->m_guid;
             CGBattlefieldInfo::OnArenaUnitOutOfRange(objectGuid);
         }
 
-        object->HandleOutOfRange(static_cast<OUT_OF_RANGE_TYPE>(0));
+        object->HandleOutOfRange(OUT_OF_RANGE_UPDATE);
 
         if (object->IsObjectLocked()) {
             object->SetDisablePending(1);
@@ -1610,10 +1623,10 @@ int32_t Packet_SMSG_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, 
     uint32_t read = msg->m_read;
     uint32_t index = 0;
 
-    uint8_t type = 0;
-    msg->Get(type);
+    OBJECT_UPDATE_TYPE type = UPDATE_PARTIAL;
+    msg->Get(reinterpret_cast<uint8_t&>(type));
 
-    if (type == 4) {
+    if (type == UPDATE_OUT_OF_RANGE) {
         UpdateOutOfRangeObjects(msg);
         index = 1;
     } else {
@@ -1693,7 +1706,7 @@ int32_t Packet_SMSG_DESTROY_OBJECT(void* param, NETMESSAGE msgId, uint32_t time,
         static_cast<CGUnit_C*>(object)->OnDeath();
     }
 
-    object->HandleOutOfRange(static_cast<OUT_OF_RANGE_TYPE>(1));
+    object->HandleOutOfRange(OUT_OF_RANGE_DESTROYED);
 
     if (object->IsObjectLocked()) {
         object->SetDisablePending(1);
@@ -1719,7 +1732,7 @@ void ClntObjMgrInitialize() {
 void ClntObjMgrInitializeStd(uint32_t mapId) {
     CGGameUI::SetLastInstanceTime(static_cast<int32_t>(time(nullptr)), CGGameUI::m_iCurrentMapID, mapId);
 
-    ObjectMgr* mgr = new (__FILE__, __LINE__) ObjectMgr(0);
+    ObjectMgr* mgr = new (__FILE__, __LINE__) ObjectMgr(PLAYER_NORMAL);
     g_clientConnection->m_objMgr = reinterpret_cast<ClntObjMgr*>(mgr);
     s_curMgr = mgr;
     mgr->m_realmConnection = g_clientConnection;
@@ -1738,11 +1751,11 @@ void ClntObjMgrUnlockObject(WOWGUID guid, const char* fileName, int32_t lineNumb
 
     object->SetObjectLocked(0);
 
-    if (object->IsObjectLocked() || !(object->m_modelFlags & 0x100000)) {
+    if (object->IsObjectLocked() || !(object->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLE_PENDING)) {
         return;
     }
 
-    object->HandleOutOfRange(static_cast<OUT_OF_RANGE_TYPE>(2));
+    object->HandleOutOfRange(OUT_OF_RANGE_UNLOCKED);
 
     if (object->IsObjectLocked()) {
         object->SetDisablePending(1);

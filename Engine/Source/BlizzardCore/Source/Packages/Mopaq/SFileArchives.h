@@ -20,6 +20,44 @@ struct ArchiveOptions;
 
 namespace System_SFile {
 
+// One archive/open word is copied into BlockEntryTable;table users consume a subset.
+//0x10 is retained without guessing its original mode name. File-entry flags differ.
+enum ARCHIVE_FLAGS : uint32_t {
+    ARCHIVE_FLAG_NO_HEADER_SCAN = 8,
+    ARCHIVE_FLAG_UNKNOWN_10 = 0x10,
+    ARCHIVE_FLAG_RETRY_HEADER_CANDIDATE = 0x20,
+    ARCHIVE_FLAG_BLOCK_MD5 = 0x40,
+    ARCHIVE_FLAG_BLOCK_CRC = 0x80,
+    ARCHIVE_FLAG_BLOCK_FILETIME = 0x100,
+    ARCHIVE_FLAG_PACKED_MD5_CHECK = 0x200,
+    ARCHIVE_FLAG_CONVERT_LEGACY_TABLES = 0x400,
+    ARCHIVE_FLAG_INITIALIZE_TABLES_ON_OPEN = 0x800,
+};
+
+// Attribute groups in the (attributes) file; also selects file checksum callbacks.
+enum ATTRIBUTE_FLAGS : uint32_t {
+    ATTRIBUTE_FLAG_CRC32 = 1,
+    ATTRIBUTE_FLAG_FILETIME = 2,
+    ATTRIBUTE_FLAG_MD5 = 4,
+    ATTRIBUTE_FLAG_ALL = 7,
+};
+
+// BLOCKENTRY::m_flags. Spelling follows the common MPQ_FILE_* names (inferred); each meaning comes
+// from the client code that tests it.
+enum MPQ_FILE_FLAGS : uint32_t {
+    MPQ_FILE_IMPLODE = 0x100, // Sectors decompressed with PKWARE blast.
+    MPQ_FILE_COMPRESS = 0x200, // Sectors decompressed with SComp.
+    MPQ_FILE_COMPRESS_MASK = 0xFF00,
+    MPQ_FILE_ENCRYPTED = 0x10000, // inferred: only tested through MPQ_FILE_ENCRYPTION_MASK.
+    MPQ_FILE_FIX_KEY = 0x20000, // The decryption key is adjusted by the block offset and file size.
+    MPQ_FILE_ENCRYPTION_MASK = 0xF0000,
+    MPQ_FILE_TRANSFORM_MASK = MPQ_FILE_COMPRESS_MASK | MPQ_FILE_ENCRYPTION_MASK,
+    MPQ_FILE_SINGLE_UNIT = 0x1000000, // Stored as one unit instead of sectors.
+    MPQ_FILE_DELETE_MARKER = 0x2000000, // Reported through the lookup functions' deleted output.
+    MPQ_FILE_SECTOR_CRC = 0x4000000, // Per-sector checksums replace the whole-file CRC check.
+    MPQ_FILE_EXISTS = 0x80000000,
+};
+
 #pragma pack(push, 1)
 struct BLOCKENTRY {
     /* 0000 */ int64_t m_offset;

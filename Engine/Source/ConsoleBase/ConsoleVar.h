@@ -8,8 +8,27 @@
 #include "Engine/Source/Storm/H/stpl.h"
 
 enum CVAR_FLAGS : uint32_t {
+    CVAR_NONE = 0,
     CVAR_ARCHIVE = 1,
     CVAR_LATCH = 2,
+    CVAR_READ_ONLY = 0x4,
+    CVAR_PROTECTED = 0x8,
+    CVAR_HIDDEN = 0x40,
+    CVAR_UNKNOWN_80 = 0x80,
+    CVAR_CONSOLE_READ_ONLY = 0x100,
+    CVAR_CODE_REGISTERED = 0x80000000,
+    CVAR_ARCHIVE_LATCH = 3,
+    CVAR_LATCH_READ_ONLY = 6,
+    CVAR_ACCOUNT_HIDDEN = 0x50,
+    CVAR_ACCOUNT_CONSOLE_READ_ONLY = 0x110,
+    CVAR_CHARACTER_CONSOLE_READ_ONLY = 0x120,
+};
+
+enum CVAR_ARCHIVE_SCOPE : uint32_t {
+    CVAR_SCOPE_CONFIG = 0,
+    CVAR_SCOPE_ACCOUNT = 0x10,
+    CVAR_SCOPE_CHARACTER = 0x20,
+    CVAR_SCOPE_MASK = 0x30,
 };
 
 struct CVar;
@@ -79,10 +98,16 @@ class CVarArrayWrapper {
 
 class CVarIntListWrapper {
     public:
+    enum STATE : uint32_t {
+        INITIAL = 0,
+        READ = 1,
+        WRITE = 2,
+    };
+
     /* 0000 */ CVar* m_cvar;
     /* 0004 */ uint32_t m_pos;
     /* 0008 */ char m_buffer[256];
-    /* 0108 */ uint32_t m_state;
+    /* 0108 */ STATE m_state;
 
     void AddNextValue(uint32_t value);
     uint32_t GetNextValue();

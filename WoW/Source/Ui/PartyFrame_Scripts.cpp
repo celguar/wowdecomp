@@ -113,7 +113,7 @@ static int32_t Script_IsRealPartyLeader(lua_State* L) {
 static int32_t Script_GetPartyMember(lua_State* L) {
     uint32_t index;
 
-    if (!lua_isnumber(L, 1) || (index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1) >= 4) {
+    if (!lua_isnumber(L, 1) || (index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1) >= CGPartyInfo::MAX_PARTY_MEMBERS) {
         luaL_error(L, "Usage: GetPartyMember(1-4)");
         return 0;
     }
@@ -147,7 +147,7 @@ static int32_t Script_SetLootThreshold(lua_State* L) {
 
     uint32_t threshold = static_cast<uint32_t>(lua_tonumber(L, 1));
 
-    if (threshold - 2 > 4) {
+    if (threshold < ITEM_QUALITY::ITEM_QUALITY_UNCOMMON || threshold > ITEM_QUALITY::ITEM_QUALITY_ARTIFACT) {
         luaL_error(L, "SetLootThreshold(): threshold must be between %d and %d", 2, 6);
         return 0;
     }
@@ -194,7 +194,7 @@ static int32_t Script_GetLootMethod(lua_State* L) {
         if (master == ClntObjMgrGetActivePlayer()) {
             partyIndex = 0;
         } else {
-            for (int32_t i = 0; i < 4; i++) {
+            for (int32_t i = 0; i < CGPartyInfo::MAX_PARTY_MEMBERS; i++) {
                 if (master == CGPartyInfo::m_members[i]) {
                     partyIndex = i + 1;
                     break;
@@ -232,7 +232,7 @@ static int32_t Script_GetLootMethod(lua_State* L) {
 static int32_t Script_SetOptOutOfLoot(lua_State* L) {
     int32_t optOut = lua_toboolean(L, 1);
     CGPartyInfo::SetOptOutOfLoot(optOut);
-    CGChat::AddChatMessage(FrameScript_GetText(optOut ? "OPT_OUT_LOOT_TOGGLE_ON" : "OPT_OUT_LOOT_TOGGLE_OFF", -1, GENDER_NOT_APPLICABLE), 0, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
+    CGChat::AddChatMessage(FrameScript_GetText(optOut ? "OPT_OUT_LOOT_TOGGLE_ON" : "OPT_OUT_LOOT_TOGGLE_OFF", -1, GENDER_NOT_APPLICABLE), CHAT_MSG_SYSTEM, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
     return 0;
 }
 
@@ -247,7 +247,7 @@ static int32_t Script_GetPartyAssignment(lua_State* L) {
     const char* assignment = lua_tolstring(L, 1, nullptr);
 
     if (!SStrCmpI(assignment, "MAINTANK", STORM_MAX_STR)) {
-        return CGPartyInfo::GetPartyAssignments(L, 0);
+        return CGPartyInfo::GetPartyAssignments(L, CGPartyInfo::ASSIGNMENT::MAINTANK);
     }
 
     if (SStrCmpI(assignment, "MAINASSIST", STORM_MAX_STR)) {
@@ -255,7 +255,7 @@ static int32_t Script_GetPartyAssignment(lua_State* L) {
         return 0;
     }
 
-    return CGPartyInfo::GetPartyAssignments(L, 1);
+    return CGPartyInfo::GetPartyAssignments(L, CGPartyInfo::ASSIGNMENT::MAINASSIST);
 }
 
 // VERIFY: 11c07222 manual
@@ -275,7 +275,7 @@ static int32_t Script_SilenceMember(lua_State* L) {
     }
 
     const char* name = lua_tolstring(L, 1, nullptr);
-    WOWGUID guid = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, (CGRaidInfo::m_numMembers != 0) + 5, 0, 3.4028235e38f, 0);
+    WOWGUID guid = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, CGRaidInfo::m_numMembers ? UNIT_TARGET_RAID_MEMBER : UNIT_TARGET_PARTY_MEMBER, 0, 3.4028235e38f, 0);
 
     if (!guid) {
         CGGameUI::DisplayError(ERR_TARGET_NOT_IN_GROUP_S, name);
@@ -310,7 +310,7 @@ static int32_t Script_UnSilenceMember(lua_State* L) {
     }
 
     const char* name = lua_tolstring(L, 1, nullptr);
-    WOWGUID guid = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, (CGRaidInfo::m_numMembers != 0) + 5, 0, 3.4028235e38f, 0);
+    WOWGUID guid = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, CGRaidInfo::m_numMembers ? UNIT_TARGET_RAID_MEMBER : UNIT_TARGET_PARTY_MEMBER, 0, 3.4028235e38f, 0);
 
     if (!guid) {
         CGGameUI::DisplayError(ERR_TARGET_NOT_IN_GROUP_S, name);
@@ -386,9 +386,9 @@ static int32_t Script_SetLootMethod(lua_State* L) {
         }
 
         if (CGRaidInfo::m_numMembers) {
-            master = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, 6, StringToBOOL(L, 3, 0), 3.4028235e38f, 0);
+            master = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, UNIT_TARGET_RAID_MEMBER, StringToBOOL(L, 3, 0), 3.4028235e38f, 0);
         } else {
-            master = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, 5, StringToBOOL(L, 3, 0), 3.4028235e38f, 0);
+            master = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, UNIT_TARGET_PARTY_MEMBER, StringToBOOL(L, 3, 0), 3.4028235e38f, 0);
         }
 
         if (!master || (!CGPartyInfo::IsMember(master) && !IsGuidInMyRaid(master))) {
@@ -407,7 +407,7 @@ static int32_t Script_SetLootMethod(lua_State* L) {
 // VERIFY: dcbd648d manual
 // OFFSET: 0x0052DF40
 static int32_t SetOrClearAssignment(lua_State* L, bool set) {
-    if (set && !CGGameUI::CanPerformAction(4)) {
+    if (set && !CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_PARTY_ASSIGNMENT)) {
         return 0;
     }
 
@@ -432,17 +432,17 @@ static int32_t SetOrClearAssignment(lua_State* L, bool set) {
 
     WOWGUID guid = WOWGUID();
     const char* assignmentName = lua_tolstring(L, 1, nullptr);
-    uint8_t assignment;
+    CGPartyInfo::ASSIGNMENT assignment;
 
     if (!SStrCmpI(assignmentName, "MAINTANK", STORM_MAX_STR)) {
-        assignment = 0;
+        assignment = CGPartyInfo::ASSIGNMENT::MAINTANK;
     } else {
         if (SStrCmpI(assignmentName, "MAINASSIST", STORM_MAX_STR)) {
             luaL_error(L, "Invalid Party assignment");
             return 0;
         }
 
-        assignment = 1;
+        assignment = CGPartyInfo::ASSIGNMENT::MAINASSIST;
     }
 
     if (!CanSendPartyCommand()) {
@@ -451,10 +451,10 @@ static int32_t SetOrClearAssignment(lua_State* L, bool set) {
 
     if (lua_isstring(L, 2)) {
         const char* name = lua_tolstring(L, 2, nullptr);
-        guid = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, 6, StringToBOOL(L, 3, 0), 3.4028235e38f, 0);
+        guid = CGGameUI::ClosestObjectMatch(name, TYPE_PLAYER, UNIT_TARGET_RAID_MEMBER, StringToBOOL(L, 3, 0), 3.4028235e38f, 0);
 
         if (!guid) {
-            WOWGUID unit = CGGameUI::ClosestObjectMatch(name, TYPE_UNIT, 0, StringToBOOL(L, 3, 0), 3.4028235e38f, 0);
+            WOWGUID unit = CGGameUI::ClosestObjectMatch(name, TYPE_UNIT, UNIT_TARGET_ANY, StringToBOOL(L, 3, 0), 3.4028235e38f, 0);
 
             if (ClntObjMgrObjectPtr(unit, TYPE_UNIT, __FILE__, __LINE__)) {
                 CGGameUI::DisplayError(ERR_MEETING_STONE_TARGET_NOT_IN_PARTY);

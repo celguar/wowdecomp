@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "WoW/Common/ComponentCore/ComponentUtils.h"
+#include "WoW/Common/Types.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "WoW/Source/DB/DBClient/DBClient.h"
 #include "WoW/Source/DB/Rec/CharSectionsRec.h"
@@ -8,28 +9,28 @@
 
 // VERIFY: 764bd294 manual
 // OFFSET: 0x004F39A0
-bool ComponentFlagsMatch(uint32_t flags, COMPONENT_SELECTION selection) {
+bool ComponentFlagsMatch(CharSectionsRec::SECTION_FLAGS flags, COMPONENT_SELECTION selection) {
     switch (selection) {
         case COMPONENT_SELECTION_0:
-            return (flags & 0x1) && !(flags & 0xC);
+            return (flags & CharSectionsRec::SECTION_FLAGS::PLAYER) && !(flags & CharSectionsRec::SECTION_FLAGS::DEATH_KNIGHT_OR_NPC_SKIN);
 
         case COMPONENT_SELECTION_1:
-            return (flags & 0x1) && (flags & 0x14) && !(flags & 0x8);
+            return (flags & CharSectionsRec::SECTION_FLAGS::PLAYER) && (flags & CharSectionsRec::SECTION_FLAGS::DEATH_KNIGHT_VARIANTS) && !(flags & CharSectionsRec::SECTION_FLAGS::NPC_SKIN);
 
         case COMPONENT_SELECTION_2:
-            return (flags & 0x3) && !(flags & 0xC);
+            return (flags & CharSectionsRec::SECTION_FLAGS::PLAYER_OR_BARBERSHOP) && !(flags & CharSectionsRec::SECTION_FLAGS::DEATH_KNIGHT_OR_NPC_SKIN);
 
         case COMPONENT_SELECTION_3:
-            return (flags & 0x3) && (flags & 0x14) && !(flags & 0x8);
+            return (flags & CharSectionsRec::SECTION_FLAGS::PLAYER_OR_BARBERSHOP) && (flags & CharSectionsRec::SECTION_FLAGS::DEATH_KNIGHT_VARIANTS) && !(flags & CharSectionsRec::SECTION_FLAGS::NPC_SKIN);
 
         case COMPONENT_SELECTION_4:
             return true;
 
         case COMPONENT_SELECTION_5:
-            return !(flags & 0xC);
+            return !(flags & CharSectionsRec::SECTION_FLAGS::DEATH_KNIGHT_OR_NPC_SKIN);
 
         case COMPONENT_SELECTION_6:
-            return (flags & 0x14) && !(flags & 0x8);
+            return (flags & CharSectionsRec::SECTION_FLAGS::DEATH_KNIGHT_VARIANTS) && !(flags & CharSectionsRec::SECTION_FLAGS::NPC_SKIN);
 
         default:
             return false;
@@ -41,16 +42,16 @@ bool ComponentFlagsMatch(uint32_t flags, COMPONENT_SELECTION selection) {
 COMPONENT_SELECTION GetSelectionFromContext(COMPONENT_CONTEXT context, int32_t classID) {
     switch (context) {
         case COMPONENT_CONTEXT_1:
-            return static_cast<COMPONENT_SELECTION>((classID == 6) + COMPONENT_SELECTION_2);
+            return static_cast<COMPONENT_SELECTION>((classID == CLASS_DEATH_KNIGHT) + COMPONENT_SELECTION_2);
 
         case COMPONENT_CONTEXT_2:
             return COMPONENT_SELECTION_4;
 
         case COMPONENT_CONTEXT_3:
-            return static_cast<COMPONENT_SELECTION>((classID == 6) + COMPONENT_SELECTION_5);
+            return static_cast<COMPONENT_SELECTION>((classID == CLASS_DEATH_KNIGHT) + COMPONENT_SELECTION_5);
 
         default:
-            return static_cast<COMPONENT_SELECTION>(classID == 6);
+            return static_cast<COMPONENT_SELECTION>(classID == CLASS_DEATH_KNIGHT);
     }
 }
 
@@ -249,7 +250,7 @@ int32_t BuildComponentArray(uint32_t count, st_race** lookupOut) {
     CharSectionsRec* first = (0 >= g_charSectionsDB.m_numRecords) ? nullptr : &g_charSectionsDB.m_records[0];
     int32_t raceID = first->m_raceID;
     int32_t sexID = first->m_sexID;
-    int32_t baseSection = first->m_baseSection;
+    COMPONENT_VARIATIONS baseSection = first->m_baseSection;
 
     for (int32_t i = 0; i < g_charSectionsDB.m_numRecords; i++) {
         CharSectionsRec* rec = (i < 0 || i >= g_charSectionsDB.m_numRecords) ? nullptr : &g_charSectionsDB.m_records[i];
@@ -286,8 +287,8 @@ int32_t BuildComponentArray(uint32_t count, st_race** lookupOut) {
     }
 
     sexID = 0;
-    raceID = 1;
-    baseSection = 0;
+    raceID = RACE_HUMAN;
+    baseSection = VARIATION_SKIN;
     variationIndex = 0;
     int32_t colorIndex = 0;
 

@@ -116,8 +116,8 @@ void CGCommentator::Init() {
     this->m_mapID = 0;
     this->m_pitch = 0.0f;
     this->m_distance = 12.0f;
-    this->m_fov = 1.5707964f;
-    this->m_targetFov = 1.5707964f;
+    this->m_fov = HALF_PI;
+    this->m_targetFov = HALF_PI;
     this->m_moveSpeed = 10.0f;
     this->m_targetHeightOffset = 0.0f;
     this->m_key.unk_0004 = 13;
@@ -353,7 +353,7 @@ void CGCommentator::OnUpdate(float elapsed) {
         C3Vector hit(0.0f, 0.0f, 0.0f);
         float hitDistance = 1.0f;
 
-        if (this->m_cameraCollision && World::Intersect(target, eye, &hit, &hitDistance, 0x100171, nullptr)) {
+        if (this->m_cameraCollision && World::Intersect(target, eye, &hit, &hitDistance, WORLD_QUERY_COLLISION_MASK | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_WMO_CAMERA, nullptr)) {
             C3Vector direction(target.x - hit.x, target.y - hit.y, target.z - hit.z);
             direction.NormalizeSafe();
             this->m_position.x = direction.x * 0.80000001f + hit.x;
@@ -382,7 +382,7 @@ void CGCommentator::OnUpdate(float elapsed) {
             C3Vector hit(0.0f, 0.0f, 0.0f);
             float hitDistance = 1.0f;
 
-            if (!this->m_cameraCollision || !World::Intersect(this->m_position, next, &hit, &hitDistance, 0x100171, nullptr)) {
+            if (!this->m_cameraCollision || !World::Intersect(this->m_position, next, &hit, &hitDistance, WORLD_QUERY_COLLISION_MASK | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_WMO_CAMERA, nullptr)) {
                 this->m_position = next;
             }
         }
@@ -468,15 +468,15 @@ uint64_t CGCommentator::GetArenaMember(int32_t index) {
     CGCommentator::MapInfo* map;
     CGCommentator::InstanceInfo* instance;
 
-    if (!player || !(player->m_player->m_playerFlags & 0x80000) || !this->GetCommentatorInfo(&map, &instance)) {
+    if (!player || !(player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_COMMENTATOR) || !this->GetCommentatorInfo(&map, &instance)) {
         return 0;
     }
 
     int32_t faction = 0;
 
-    if (index >= 5) {
+    if (index >= CGCommentator::MAX_TEAM_PLAYERS) {
         faction = 1;
-        index -= 5;
+        index -= CGCommentator::MAX_TEAM_PLAYERS;
     }
 
     if (index >= 0 && static_cast<uint32_t>(index) < instance->m_numPlayers[faction]) {

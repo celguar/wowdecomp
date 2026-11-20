@@ -59,7 +59,11 @@ static int32_t Script_VoiceEnumerateOutputDevices(lua_State* L) {
 
     int32_t index = static_cast<int32_t>(lua_tonumber(L, 1));
 
+#if defined(WOWDECOMP_ARCH_64)
+    if (index < 0 || static_cast<uint32_t>(index) >= sizeof(devices) / sizeof(devices[0]) || comsat->EnumerateOutputDevices(devices, 20) <= index) {
+#else
     if (comsat->EnumerateOutputDevices(devices, 20) <= index) {
+#endif
         lua_pushnil(L);
     } else {
         lua_pushstring(L, devices[index].m_name);
@@ -88,7 +92,11 @@ static int32_t Script_VoiceEnumerateCaptureDevices(lua_State* L) {
 
     int32_t index = static_cast<int32_t>(lua_tonumber(L, 1));
 
+#if defined(WOWDECOMP_ARCH_64)
+    if (index < 0 || static_cast<uint32_t>(index) >= sizeof(devices) / sizeof(devices[0]) || comsat->EnumerateCaptureDevices(devices, 20) <= index) {
+#else
     if (comsat->EnumerateCaptureDevices(devices, 20) <= index) {
+#endif
         lua_pushnil(L);
     } else {
         lua_pushstring(L, devices[index].m_name);
@@ -179,7 +187,7 @@ static int32_t Script_GetVoiceCurrentSessionID(lua_State* L) {
 
     int32_t id = 0;
 
-    for (int32_t i = 0; i < 32; i++) {
+    for (int32_t i = 0; i < MAX_VOICE_SESSIONS; i++) {
         if (static_cast<uint32_t>(s_comsatData[i].m_sessionID)) {
             id++;
 
@@ -199,28 +207,28 @@ static int32_t Script_GetVoiceCurrentSessionID(lua_State* L) {
 static int32_t Script_GetVoiceSessionInfo(lua_State* L) {
     uint32_t id;
 
-    if (!lua_isnumber(L, 1) || (id = static_cast<uint32_t>(lua_tonumber(L, 1))) > 31) {
+    if (!lua_isnumber(L, 1) || (id = static_cast<uint32_t>(lua_tonumber(L, 1))) >= MAX_VOICE_SESSIONS) {
         lua_pushnil(L);
         return 1;
     }
 
     uint32_t count = 0;
 
-    for (int32_t i = 0; i < 32; i++) {
+    for (int32_t i = 0; i < MAX_VOICE_SESSIONS; i++) {
         if (!static_cast<uint32_t>(s_comsatData[i].m_sessionID) || ++count != id) {
             continue;
         }
 
         switch (s_comsatData[i].m_type) {
-            case 2:
+            case COMSATDATA::SESSION_TYPE::PARTY:
                 lua_pushstring(L, FrameScript_GetText("CHAT_MSG_PARTY", -1, GENDER_NOT_APPLICABLE));
                 break;
 
-            case 3:
+            case COMSATDATA::SESSION_TYPE::RAID:
                 lua_pushstring(L, FrameScript_GetText("CHAT_MSG_RAID", -1, GENDER_NOT_APPLICABLE));
                 break;
 
-            case 1:
+            case COMSATDATA::SESSION_TYPE::BATTLEGROUND:
                 lua_pushstring(L, FrameScript_GetText("CHAT_MSG_BATTLEGROUND", -1, GENDER_NOT_APPLICABLE));
                 break;
 
@@ -251,13 +259,13 @@ static int32_t Script_GetNumVoiceSessionMembersBySessionID(lua_State* L) {
 
     uint32_t id = static_cast<uint32_t>(lua_tonumber(L, 1));
 
-    if (id > 31) {
+    if (id >= MAX_VOICE_SESSIONS) {
         return 0;
     }
 
     uint32_t count = 0;
 
-    for (int32_t i = 0; i < 32; i++) {
+    for (int32_t i = 0; i < MAX_VOICE_SESSIONS; i++) {
         if (static_cast<uint32_t>(s_comsatData[i].m_sessionID) && ++count == id) {
             lua_pushnumber(L, s_comsatData[i].m_numMembers);
             return 1;
@@ -347,19 +355,19 @@ static int32_t Script_SetActiveVoiceChannelBySessionID(lua_State* L) {
     int32_t id = static_cast<int32_t>(lua_tonumber(L, 1));
 
     if (id <= 0) {
-        CGChat::SetActiveVoiceSession(nullptr, 4, -1);
+        CGChat::SetActiveVoiceSession(nullptr, COMSATDATA::SESSION_TYPE::NONE, -1);
         lua_pushnumber(L, 1.0);
         return 1;
     }
 
-    if (id >= 32) {
+    if (id >= MAX_VOICE_SESSIONS) {
         lua_pushnil(L);
         return 1;
     }
 
     int32_t count = 0;
 
-    for (int32_t i = 0; i < 32; i++) {
+    for (int32_t i = 0; i < MAX_VOICE_SESSIONS; i++) {
         if (s_comsatData[i].m_sessionID && ++count == id) {
             CGChat::SetActiveVoiceSession(s_comsatData[i].m_name, s_comsatData[i].m_type, -1);
             lua_pushnumber(L, 1.0);
@@ -414,26 +422,26 @@ int32_t Script_GetVoiceSessionMemberInfoBySessionID(lua_State* L) {
 
     uint32_t sessionNumber = static_cast<uint32_t>(lua_tonumber(L, 1));
 
-    if (sessionNumber > 31) {
+    if (sessionNumber >= MAX_VOICE_SESSIONS) {
         return 0;
     }
 
     uint32_t memberIndex = static_cast<uint32_t>(lua_tonumber(L, 2)) - 1;
 
-    if (memberIndex > 39) {
+    if (memberIndex >= MAX_VOICE_SESSION_MEMBERS) {
         return 0;
     }
 
     uint32_t found = 0;
     int32_t index;
 
-    for (index = 0; index < 32; index++) {
+    for (index = 0; index < MAX_VOICE_SESSIONS; index++) {
         if (s_comsatData[index].m_sessionID && ++found == sessionNumber) {
             break;
         }
     }
 
-    if (index >= 32) {
+    if (index >= MAX_VOICE_SESSIONS) {
         return 0;
     }
 
@@ -447,13 +455,13 @@ int32_t Script_GetVoiceSessionMemberInfoBySessionID(lua_State* L) {
 
     lua_pushstring(L, name);
 
-    if (member.m_flags & 0x4) {
+    if (member.m_flags & COMSATMEMBER::F_TALKER_ENABLED) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (member.m_flags & 0x40) {
+    if (member.m_flags & COMSATMEMBER::F_TALKER_ACTIVE) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -465,7 +473,7 @@ int32_t Script_GetVoiceSessionMemberInfoBySessionID(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (member.m_flags & 0x8) {
+    if (member.m_flags & COMSATMEMBER::F_TALKER_SQUELCHED) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);

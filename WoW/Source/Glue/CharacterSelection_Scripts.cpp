@@ -1,4 +1,5 @@
 #include "CharacterSelection.h"
+#include "WoW/Common/Types.h"
 #include <cstdint>
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
 #include "Engine/Source/Frame/CScriptObject.h"
@@ -122,10 +123,10 @@ static int32_t Script_GetCharacterInfo(lua_State* L) {
     }
 
     lua_pushnumber(L, g_scriptSexIndex[display->m_characterInfo.m_sexID]);
-    lua_pushboolean(L, display->m_characterInfo.m_flags & 0x2000);
-    lua_pushboolean(L, display->m_characterInfo.m_customizeFlags & 0x1);
-    lua_pushboolean(L, display->m_characterInfo.m_customizeFlags & 0x100000);
-    lua_pushboolean(L, display->m_characterInfo.m_customizeFlags & 0x10000);
+    lua_pushboolean(L, display->m_characterInfo.m_flags & CharEnumFlags::CHARACTER_FLAG_GHOST);
+    lua_pushboolean(L, display->m_characterInfo.m_customizeFlags & CHARACTER_INFO::CUSTOMIZE_FLAG_APPEARANCE);
+    lua_pushboolean(L, display->m_characterInfo.m_customizeFlags & CHARACTER_INFO::CUSTOMIZE_FLAG_RACE_CHANGE);
+    lua_pushboolean(L, display->m_characterInfo.m_customizeFlags & CHARACTER_INFO::CUSTOMIZE_FLAG_FACTION_CHANGE);
     return 10;
 }
 
@@ -172,7 +173,7 @@ static int32_t Script_RenameCharacter(lua_State* L) {
 
     CharacterSelectionDisplay* display = GetCharacterInfo(index);
 
-    if (!display || !(display->m_characterInfo.m_flags & 0x4000)) {
+    if (!display || !(display->m_characterInfo.m_flags & CharEnumFlags::CHARACTER_FLAG_RENAME)) {
         return 0;
     }
 
@@ -216,7 +217,7 @@ static int32_t Script_DeclineCharacter(lua_State* L) {
 
     CharacterSelectionDisplay* display = &CCharacterSelection::s_characterList[index];
 
-    if (!display || (display->m_characterInfo.m_flags & 0x2000000)) {
+    if (!display || (display->m_characterInfo.m_flags & CharEnumFlags::CHARACTER_FLAG_DECLINED)) {
         return 0;
     }
 
@@ -249,8 +250,8 @@ static int32_t Script_GetSelectBackgroundModel(lua_State* L) {
     if (index >= 0 && index < static_cast<int32_t>(CCharacterSelection::s_characterList.Count())) {
         CharacterSelectionDisplay* display = CCharacterSelection::GetCharacterDisplay(index);
 
-        if (display->m_characterInfo.m_classID == 6) {
-            ChrClassesRec* classRec = g_chrClassesDB.GetRecord(6);
+        if (display->m_characterInfo.m_classID == CLASS_DEATH_KNIGHT) {
+            ChrClassesRec* classRec = g_chrClassesDB.GetRecord(CLASS_DEATH_KNIGHT);
 
             if (classRec) {
                 lua_pushstring(L, classRec->m_filename);
@@ -263,15 +264,15 @@ static int32_t Script_GetSelectBackgroundModel(lua_State* L) {
 
         uint32_t raceID = display->m_characterInfo.m_raceID;
 
-        if (raceID == 7) {
-            raceID = 3;
-        } else if (raceID == 8) {
-            raceID = 2;
+        if (raceID == RACE_GNOME) {
+            raceID = RACE_DWARF;
+        } else if (raceID == RACE_TROLL) {
+            raceID = RACE_ORC;
         }
 
         raceRec = g_chrRacesDB.GetRecord(raceID);
     } else {
-        raceRec = g_chrRacesDB.GetRecord(2);
+        raceRec = g_chrRacesDB.GetRecord(RACE_ORC);
     }
 
     if (raceRec) {
@@ -301,11 +302,11 @@ static int32_t Script_GetCharacterListUpdate(lua_State* L) {
     CCharacterSelection::s_characterList.SetCount(0);
 
     if (CCharacterSelection::m_modelFrame && CCharacterSelection::m_modelFrame->m_model) {
-        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(0);
+        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_SHIELD);
     }
 
     if (CCharacterSelection::m_modelFrame && CCharacterSelection::m_modelFrame->m_model) {
-        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(1);
+        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_HANDR);
     }
 
     CGlueMgr::GetCharacterList();

@@ -2,14 +2,19 @@
 #define WOW_SOURCE_UI_SPELLBOOKFRAME_H
 
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/RCString.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
+#include "WoW/Source/Ui/TotemInfo.h"
 
 struct lua_State;
 class CGUnit_C;
 class CGObject_C;
 class AuraData;
+
+// Spellbook slot capacity for the player and pet spell lists (FrameXML MAX_SPELLS).
+static const uint32_t MAX_SPELLS = 1024;
 
 struct SpellUsableInfo {
     /* 0000 */ int32_t m_spellId;
@@ -33,10 +38,21 @@ struct SPELLRANKNODE : public TSLinkedNode<SPELLRANKNODE> {
 
 struct SPELLSBYNAME : public TSHashObject<SPELLSBYNAME, HASHKEY_UTF8I> {
     /* 0018 */ TSList<SPELLRANKNODE> m_spells;
+
+    ~SPELLSBYNAME();
 };
 
 class CGPlayer_C;
 class SpellRec;
+
+// Companion list index; names follow the s_companionTypes Lua tokens.
+enum COMPANION_TYPE : int32_t {
+    COMPANION_TYPE_CRITTER = 0,
+    COMPANION_TYPE_MOUNT = 1,
+    NUM_COMPANION_TYPES = 2,
+    // GetCompanionType result for a non-companion spell; SendCompanionUpdate signals without a type.
+    COMPANION_TYPE_NONE = NUM_COMPANION_TYPES,
+};
 
 class CGSpellBook {
     public:
@@ -53,7 +69,7 @@ class CGSpellBook {
     static int32_t m_stuckSpell;
     static uint32_t m_numPetSpells;
     static int32_t m_summonFriendSpell;
-    static TSGrowableArray<int32_t> m_companions[2];
+    static TSGrowableArray<int32_t> m_companions[NUM_COMPANION_TYPES];
 
     static void AddKnownSpell(int32_t spellId, int32_t notify, int32_t replaceSpell);
     static void AddSpellToNameCache(int32_t spellId, int32_t isPet);
@@ -61,7 +77,7 @@ class CGSpellBook {
     static int32_t GetSpellProgressionRank(const SpellRec* spell);
     static int32_t GetCompanionType(const SpellRec* spell);
     static int32_t FindCompanionSlotByID(int32_t spellId, int32_t type);
-    static TSGrowableArray<int32_t> m_totemSpells[4];
+    static TSGrowableArray<int32_t> m_totemSpells[MAX_TOTEMS];
     static uint32_t m_interruptSchoolMask;
     static uint32_t m_interruptSpecialSchoolMask;
     static uint32_t m_silenceSchoolMask;
@@ -71,7 +87,7 @@ class CGSpellBook {
     static void UpdateCompanions();
     static void UpdateSelection();
     static void UpdateUsablePower();
-    static void UpdateSpells(int32_t a1, int32_t a2, int32_t a3);
+    static void UpdateSpells(BOOL sortSpells, BOOL sortPetSpells, BOOL updateSchoolMasks);
     static void UpdateUsable();
     static void CastSpell(int32_t spellId, int32_t petSpell, WOWGUID target);
     static void InitializeGame();
@@ -103,11 +119,11 @@ int32_t GetSpellIdBySlot(int32_t slot, int32_t petSpell);
 bool HasSpell(int32_t spellId, int32_t petSpell);
 bool HasSpell(uint32_t spellId);
 void ClearPetSpellInfo();
-extern const char* s_companionTypes[2];
+extern const char* s_companionTypes[NUM_COMPANION_TYPES];
 extern TSGrowableArray<SpellUsableInfo> s_shapeshiftSpells;
 extern uint32_t s_numSkillInfos;
-extern uint32_t s_displayedSpells[1024];
-extern int32_t s_spellList[1024];
+extern uint32_t s_displayedSpells[MAX_SPELLS];
+extern int32_t s_spellList[MAX_SPELLS];
 extern uint32_t s_numSpells;
 extern uint32_t s_displayedSpellCount;
 extern TSGrowableArray<SpellBookSkillInfo*> s_skillInfos;
@@ -125,14 +141,14 @@ int __cdecl SortCompanions(const void* a, const void* b);
 
 extern TSGrowableArray<int32_t> s_trackingSpells;
 
-extern int32_t s_spellList[1024];
+extern int32_t s_spellList[MAX_SPELLS];
 extern uint32_t s_numSpells;
-extern uint32_t s_petSpellList[1024];
+extern uint32_t s_petSpellList[MAX_SPELLS];
 extern TSBitField<TSFixedArray<uint32_t> > s_knownSpellBits;
 
 int32_t FindSpellSlotByName(const char* name, const char* subtext, int32_t* petSpell);
 int32_t GetSpellIdByName(const char* name, int32_t* petSpell);
-bool GetSlotFromLua(lua_State* L, uint32_t* slot, int32_t* petSpell, int32_t* type, int32_t allowName);
+bool GetSlotFromLua(lua_State* L, uint32_t* slot, int32_t* petSpell, int32_t* nextArg, int32_t allowName);
 bool HasPetSpell(int32_t spellId);
 extern TSGrowableArray<int32_t> s_openLockSpells;
 

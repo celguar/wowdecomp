@@ -118,14 +118,14 @@ void CMap::RenderWaterRipples() {
         ripple = next;
     }
 
-    if (!vertexCounts[0] && !vertexCounts[1]) {
+    if (!vertexCounts[CWaterRipple::SPLASH] && !vertexCounts[CWaterRipple::WAKE]) {
         return;
     }
 
     float polygonOffset = CWorldParam::cvar_footstepBias->m_floatValue * 0.0009765774f;
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 3);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Add);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_DepthWrite, 0);
@@ -302,7 +302,7 @@ void WaterRipple::Destroy() {
 // VERIFY: 3fca29ac manual
 // OFFSET: 0x0079CF40
 void CWaterRipple::InitRipple(const C3Vector& pos, float rotation, float size, float alpha, float duration, float growth, int32_t type) {
-    int32_t directional = type != 0;
+    TYPE directional = static_cast<TYPE>(type != 0);
     this->m_type = directional;
     this->m_position = pos;
     this->m_rotation = rotation;
@@ -322,14 +322,14 @@ void CWaterRipple::InitRipple(const C3Vector& pos, float rotation, float size, f
     box.t.y = endSize + pos.y;
     box.t.z = pos.z + 1.0f;
     this->m_verts.SetCount(0);
-    World::TriData::statusFlags = 0;
+    World::TriData::statusFlags = WORLD_TRI_QUERY_STATUS::TRI_QUERY_STATUS_NONE;
     World::TriData::nBatches = 0;
     World::TriData::faceIndexCursor = 0;
     World::TriData::indexCursor = 0;
     World::TriData::matrixPoolCount = 0;
     World::TriData triData;
 
-    if (!World::GetTris(box, &triData, 0x20000)) {
+    if (!World::GetTris(box, &triData, WORLD_QUERY_LIQUID)) {
         return;
     }
 

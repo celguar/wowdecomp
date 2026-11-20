@@ -21,7 +21,7 @@
 #include "Engine/Source/Tempest/CImVector.h"
 
 // STATIC: 0x00A45390
-const uint32_t s_fogModes[M2BLEND_COUNT] = { 1, 1, 1, 2, 2, 3, 4 };
+const CM2SceneRender::FOG_MODE s_fogModes[M2BLEND_COUNT] = { CM2SceneRender::FOG_LIGHTING_COLOR, CM2SceneRender::FOG_LIGHTING_COLOR, CM2SceneRender::FOG_LIGHTING_COLOR, CM2SceneRender::FOG_BLACK, CM2SceneRender::FOG_BLACK, CM2SceneRender::FOG_WHITE, CM2SceneRender::FOG_GRAY };
 
 // STATIC: 0x00AF58A8
 static C44Matrix s_identity;
@@ -33,8 +33,8 @@ CM2SceneRender::CM2SceneRender(CM2Scene* scene) {
     this->m_cache = scene->m_cache;
     this->m_prevElement = nullptr;
     this->m_curElement = nullptr;
-    this->m_prevType = -1;
-    this->m_curType = -1;
+    this->m_prevType = M2_ELEMENT_UNSET;
+    this->m_curType = M2_ELEMENT_UNSET;
     this->m_prevModel = nullptr;
     this->m_curModel = nullptr;
     this->m_prevShared = nullptr;
@@ -44,15 +44,15 @@ CM2SceneRender::CM2SceneRender(CM2Scene* scene) {
     this->m_curLighting = nullptr;
     this->m_prevLocalLighting = 0;
     this->m_curLocalLighting = 0;
-    this->m_prevFogMode = 0xFFFFFFFF;
-    this->m_curFogMode = 0xFFFFFFFF;
+    this->m_prevFogMode = FOG_UNSET;
+    this->m_curFogMode = FOG_UNSET;
     this->m_prevBatch = nullptr;
     this->m_curBatch = nullptr;
     this->m_prevSkinSection = nullptr;
     this->m_curSkinSection = nullptr;
     this->m_prevMaterial = nullptr;
     this->m_curMaterial = nullptr;
-    this->m_defaultMaterial.m_flags = 0;
+    this->m_defaultMaterial.m_flags = M2Material::FLAGS::NONE;
     this->m_defaultMaterial.m_blendMode = M2BLEND_OPAQUE;
     this->m_particleEffect = CShaderEffectManager::GetEffect("Particle");
     this->m_particleUnlitEffect = CShaderEffectManager::GetEffect("Particle_Unlit");
@@ -65,7 +65,7 @@ CM2SceneRender::CM2SceneRender(CM2Scene* scene) {
 // VERIFY: 43a75437 manual
 // OFFSET: 0x0081F450
 void CM2SceneRender::SetupTextures() {
-    if (this->m_curType > 2) {
+    if (this->m_curType > M2_ELEMENT_DOODAD_BATCH) {
         for (uint32_t i = 0; i < 2; i++) {
             g_theGxDevicePtr->RsSet(static_cast<EGxRenderState>(GxRs_Texture0 + i), nullptr);
             CShaderEffect::SetTexMtx_Identity(i);
@@ -79,13 +79,13 @@ void CM2SceneRender::SetupTextures() {
     int32_t envSecond;
 
     if (!CShaderEffect::s_enableShaders) {
-        if (batch->m_shader & 0x8000) {
+        if (batch->m_shader & M2Batch::SHADER_ID::SPECIAL) {
             count = 1;
         }
 
         envSecond = 0;
     } else {
-        envSecond = (batch->m_shader & 0x4000) && count == 1;
+        envSecond = (batch->m_shader & M2Batch::SHADER_ID::TEX_COORD_1) && count == 1;
     }
 
     uint32_t i = 0;
@@ -113,7 +113,7 @@ void CM2SceneRender::SetupTextures() {
             uint32_t stage = envSecond ? 1 : i;
             uint16_t shader = this->m_curBatch->m_shader;
 
-            if ((shader & 0x8000) || !((shader >> shift) & 8)) {
+            if ((shader & M2Batch::SHADER_ID::SPECIAL) || !((shader >> shift) & M2COMBINER_ENVMAP)) {
                 if (transform >= this->m_data->m_textureTransforms.m_count) {
                     CShaderEffect::SetTexMtx_Identity(stage);
                 } else {
@@ -174,18 +174,18 @@ void CM2SceneRender::SetBatchVertices(int32_t sharedVertices) {
         return;
     }
 
-    uint32_t env = this->m_curBatch->m_shader & 0x4000;
-    int32_t sameEnv = this->m_prevBatch && env == (this->m_prevBatch->m_shader & 0x4000u);
+    uint32_t env = this->m_curBatch->m_shader & M2Batch::SHADER_ID::TEX_COORD_1;
+    int32_t sameEnv = this->m_prevBatch && env == (this->m_prevBatch->m_shader & M2Batch::SHADER_ID::TEX_COORD_1);
 
     if (sharedVertices) {
         if (this->m_curType != this->m_prevType || this->m_curShared != this->m_prevShared || !sameEnv) {
             this->m_curShared->SetVertices(env != 0);
         }
     } else if (this->m_curType != this->m_prevType || this->m_curModel != this->m_prevModel || this->m_curSkinSection != this->m_prevSkinSection || !sameEnv) {
-        if (this->m_curBatch->m_flags & 0x40) {
-            this->m_curModel->SetVerticesMultiSample(this->m_curElement->m_flags & 4, this->m_curSkinSection);
+        if (this->m_curBatch->m_flags & M2Batch::FLAGS::MULTI_SAMPLE_VERTICES) {
+            this->m_curModel->SetVerticesMultiSample(this->m_curElement->m_flags & M2Element::FLAGS::OPTIMIZED, this->m_curSkinSection);
         } else {
-            this->m_curModel->SetVertices(this->m_curElement->m_flags & 4, this->m_curSkinSection, env != 0);
+            this->m_curModel->SetVertices(this->m_curElement->m_flags & M2Element::FLAGS::OPTIMIZED, this->m_curSkinSection, env != 0);
         }
     }
 }
@@ -200,17 +200,17 @@ int32_t CM2SceneRender::LightingColorsMatch(const CM2Lighting* a, const CM2Light
 // OFFSET: 0x0081FB10
 void CM2SceneRender::SetupLighting() {
     M2Material* material = this->m_curMaterial;
-    int32_t localLighting = !(material->m_flags & 1) && s_localLighting[material->m_blendMode];
+    BOOL localLighting = !(material->m_flags & M2Material::FLAGS::UNLIT) && s_localLighting[material->m_blendMode];
     uint32_t shadow = this->m_curElement->m_shadowValue;
 
     this->m_curLocalLighting = localLighting;
     CShaderEffect::SetLocalLighting(this->m_curLighting, localLighting, nullptr);
     CShaderEffect::s_shadowValue = shadow;
 
-    uint32_t fogMode;
+    FOG_MODE fogMode;
 
-    if ((this->m_curMaterial->m_flags & 2) || this->m_curLighting->m_fogScale <= 0.0f) {
-        fogMode = 0;
+    if ((this->m_curMaterial->m_flags & M2Material::FLAGS::UNFOGGED) || this->m_curLighting->m_fogScale <= 0.0f) {
+        fogMode = FOG_DISABLED;
     } else {
         fogMode = s_fogModes[this->m_curMaterial->m_blendMode];
     }
@@ -221,7 +221,7 @@ void CM2SceneRender::SetupLighting() {
         uint32_t color = 0;
 
         switch (fogMode) {
-            case 1: {
+            case FOG_LIGHTING_COLOR: {
                 const C3Vector& fogColor = this->m_curLighting->m_fogColor;
                 uint8_t b = fogColor.z > 0.0f ? static_cast<uint8_t>(fogColor.z < 1.0f ? fogColor.z * 255.0f + 0.5f : 255.0f) : 0;
                 uint8_t g = fogColor.y > 0.0f ? static_cast<uint8_t>(1.0f > fogColor.y ? fogColor.y * 255.0f + 0.5f : 255.0f) : 0;
@@ -229,13 +229,13 @@ void CM2SceneRender::SetupLighting() {
                 color = 0xFF000000 | (r << 16) | (g << 8) | b;
                 break;
             }
-            case 2:
+            case FOG_BLACK:
                 color = 0;
                 break;
-            case 3:
+            case FOG_WHITE:
                 color = 0xFFFFFF;
                 break;
-            case 4:
+            case FOG_GRAY:
                 color = 0x808080;
                 break;
             default:
@@ -248,11 +248,11 @@ void CM2SceneRender::SetupLighting() {
         CShaderEffect::SetFogEnabled(0);
     }
 
-    if (this->m_curType == this->m_prevType && this->m_curModel == this->m_prevModel && this->m_curLighting == this->m_prevLighting && !((this->m_curElement->m_flags ^ this->m_prevElement->m_flags) & 2)) {
+    if (this->m_curType == this->m_prevType && this->m_curModel == this->m_prevModel && this->m_curLighting == this->m_prevLighting && !((this->m_curElement->m_flags ^ this->m_prevElement->m_flags) & M2Element::FLAGS::LIQUID_CLIP)) {
         return;
     }
 
-    if (this->m_curElement->m_flags & 2) {
+    if (this->m_curElement->m_flags & M2Element::FLAGS::LIQUID_CLIP) {
         C4Vector plane;
         plane.x = this->m_curLighting->m_liquidPlane.n.x;
         plane.y = this->m_curLighting->m_liquidPlane.n.y;
@@ -280,16 +280,16 @@ void CM2SceneRender::SetupLighting() {
 // VERIFY: 767b92a0 manual
 // OFFSET: 0x0081FE90
 void CM2SceneRender::SetupMaterial() {
-    if (this->m_curType != this->m_prevType || this->m_curMaterial != this->m_prevMaterial || ((this->m_prevElement->m_flags ^ this->m_curElement->m_flags) & 1) || this->m_prevElement->m_alpha != this->m_curElement->m_alpha) {
+    if (this->m_curType != this->m_prevType || this->m_curMaterial != this->m_prevMaterial || ((this->m_prevElement->m_flags ^ this->m_curElement->m_flags) & M2Element::FLAGS::DEPTH_ONLY) || this->m_prevElement->m_alpha != this->m_curElement->m_alpha) {
         int32_t blend;
 
-        if (this->m_curElement->m_flags & 1) {
+        if (this->m_curElement->m_flags & M2Element::FLAGS::DEPTH_ONLY) {
             blend = this->m_curMaterial->m_blendMode == M2BLEND_ALPHA_KEY;
         } else {
             blend = s_blendModes[this->m_pass][this->m_curMaterial->m_blendMode];
         }
 
-        GxRsSet(GxRs_ColorWrite, (this->m_curElement->m_flags & 1) ? 0 : 15);
+        GxRsSet(GxRs_ColorWrite, (this->m_curElement->m_flags & M2Element::FLAGS::DEPTH_ONLY) ? 0 : 15);
         GxRsSet(GxRs_BlendingMode, blend);
 
         float alphaRef;
@@ -306,17 +306,17 @@ void CM2SceneRender::SetupMaterial() {
     }
 
     if (this->m_curType != this->m_prevType || this->m_curMaterial != this->m_prevMaterial) {
-        GxRsSet(GxRs_Culling, !(this->m_curMaterial->m_flags & 4));
-        GxRsSet(GxRs_DepthTest, !(this->m_curMaterial->m_flags & 8));
-        GxRsSet(GxRs_DepthWrite, !(this->m_curMaterial->m_flags & 0x10));
+        GxRsSet(GxRs_Culling, !(this->m_curMaterial->m_flags & M2Material::FLAGS::TWO_SIDED));
+        GxRsSet(GxRs_DepthTest, !(this->m_curMaterial->m_flags & M2Material::FLAGS::NO_DEPTH_TEST));
+        GxRsSet(GxRs_DepthWrite, !(this->m_curMaterial->m_flags & M2Material::FLAGS::NO_DEPTH_WRITE));
     }
 
     float scale = 1.0f;
 
-    if (!CShaderEffect::s_enableShaders && this->m_curType != 2) {
+    if (!CShaderEffect::s_enableShaders && this->m_curType != M2_ELEMENT_DOODAD_BATCH) {
         int32_t normalize;
 
-        if (this->m_curType > 2) {
+        if (this->m_curType > M2_ELEMENT_DOODAD_BATCH) {
             const C44Matrix& matrix = this->m_curModel->m_matrixF4;
             normalize = fabsf(matrix.a2 * matrix.a2 + matrix.a1 * matrix.a1 + matrix.a0 * matrix.a0 - 1.0f) > 0.001f;
             GxRsSet(GxRs_NormalizeNormals, normalize);
@@ -333,7 +333,7 @@ void CM2SceneRender::SetupMaterial() {
 
     M2Element* element = this->m_curElement;
 
-    if (element->m_type > 2) {
+    if (element->m_type > M2_ELEMENT_DOODAD_BATCH) {
         if (this->m_curType != this->m_prevType || this->m_prevElement->m_alpha != element->m_alpha) {
             C4Vector diffuse;
             diffuse.x = scale;
@@ -449,15 +449,15 @@ void CM2SceneRender::DrawBatch() {
         g_theGxDevicePtr->ShaderConstantsUnlock(GxSh_Vertex, 31, 3 * this->m_curSkinSection->m_boneCount);
     }
 
-    if (this->m_curElement->m_flags & 4) {
+    if (this->m_curElement->m_flags & M2Element::FLAGS::OPTIMIZED) {
         if (this->m_curType != this->m_prevType || this->m_curModel != this->m_prevModel) {
             this->m_curModel->SetIndices();
         }
-    } else if (this->m_curType != this->m_prevType || this->m_curShared != this->m_prevShared || (this->m_prevElement->m_flags & 4)) {
+    } else if (this->m_curType != this->m_prevType || this->m_curShared != this->m_prevShared || (this->m_prevElement->m_flags & M2Element::FLAGS::OPTIMIZED)) {
         this->m_curShared->SetIndices();
     }
 
-    int32_t sharedVertices = this->m_curModel->m_shared->m_data->m_bones.m_count == 1 && (this->m_cache->m_flags & 0x40);
+    int32_t sharedVertices = this->m_curModel->m_shared->m_data->m_bones.m_count == 1 && (this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_SINGLE_BONE_SHARED_VERTICES);
     this->SetBatchVertices(sharedVertices);
     CShaderEffect::SetShaders(this->m_curElement->m_vertexPermute, this->m_curElement->m_pixelPermute);
 
@@ -564,7 +564,7 @@ void CM2SceneRender::DrawBatchProj() {
 
     CShaderEffect* effect;
 
-    if (g_theGxDevicePtr->m_appRenderStates[GxRs_BlendingMode].m_value.m_data.i[0] == 4) {
+    if (g_theGxDevicePtr->m_appRenderStates[GxRs_BlendingMode].m_value.m_data.i[0] == GxBlend_Mod) {
         effect = this->m_curLocalLighting ? this->m_projectedModAddEffect : this->m_projectedModAddUnlitEffect;
     } else {
         effect = this->m_curLocalLighting ? this->m_projectedModModEffect : this->m_projectedModModUnlitEffect;
@@ -574,7 +574,7 @@ void CM2SceneRender::DrawBatchProj() {
     this->SetupBillboardView(*reinterpret_cast<const C3Vector*>(&this->m_scene->m_viewInv.d0));
     CShaderEffect::SetTexMtx_TexGen(GxTexGen_World, texMatrix, 0);
     CShaderEffect::SetTexMtx_TexGen(GxTexGen_World, depthMatrix, 1);
-    this->m_scene->m_projectTextureCallback(box, imColor, this->m_curLocalLighting, this->m_scene->m_projectTextureParam, (this->m_curModel->m_fFlags >> 2) & 1);
+    this->m_scene->m_projectTextureCallback(box, imColor, this->m_curLocalLighting, this->m_scene->m_projectTextureParam, (this->m_curModel->m_runtimeFlags & M2_FLAGS::M2_FORCE_PROJECTED_TEXTURES) != 0);
     g_theGxDevicePtr->XformSetView(s_identity);
 
     CGxMatrixStack& world = g_theGxDevicePtr->m_xforms[GxXform_World];
@@ -660,7 +660,7 @@ void CM2SceneRender::DrawBatchDoodad(M2Element* elements, uint32_t* indices) {
                 instances = total - done;
             }
 
-            CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, 32, instances * this->m_curSkinSection->m_vertexCount);
+            CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, sizeof(CGxVertexPNT0), instances * this->m_curSkinSection->m_vertexCount);
             uint8_t* vertices = reinterpret_cast<uint8_t*>(g_theGxDevicePtr->BufLock(buf));
 
             if (!vertices) {
@@ -674,7 +674,7 @@ void CM2SceneRender::DrawBatchDoodad(M2Element* elements, uint32_t* indices) {
                 CM2Model* model = elements[indices[done + n]].m_model;
                 CM2Model::s_transformVertices[section->m_boneInfluences](model, section, vertices, 0);
                 section = this->m_curSkinSection;
-                vertices += 32 * section->m_vertexCount;
+                vertices += static_cast<int32_t>(sizeof(CGxVertexPNT0)) * section->m_vertexCount;
 
                 if (!normalize) {
                     const C44Matrix& bone = model->m_boneMatrices[this->m_data->m_boneCombos[section->m_boneComboIndex]];
@@ -706,7 +706,7 @@ void CM2SceneRender::DrawRibbon() {
     this->SetupMaterial();
     this->SetupBillboardView(C3Vector(0.0f, 0.0f, 0.0f));
     CShaderEffect::SetTexMtx_Identity(0);
-    this->m_curModel->m_ribbonEmitters[this->m_curElement->m_index]->Render(static_cast<const C44Matrix*>(this->m_curModel->m_frameOfReference));
+    this->m_curModel->m_ribbonEmitters[this->m_curElement->m_index]->Render(this->m_curModel->m_frameOfReference);
     g_theGxDevicePtr->XformSetView(s_identity);
 
     CGxMatrixStack& world = g_theGxDevicePtr->m_xforms[GxXform_World];
@@ -718,7 +718,7 @@ void CM2SceneRender::DrawRibbon() {
 // VERIFY: 693b5e5e manual
 // OFFSET: 0x00821040
 void CM2SceneRender::RenderBatchedParticle(CParticleEmitter2* emitter, CGxBuf* buf, EGxVertexBufferFormat format, uint32_t vertexCount, uint32_t indexCount) {
-    CShaderEffect* effect = (emitter->m_params.m_materialFlags & 1) ? this->m_particleEffect : this->m_particleUnlitEffect;
+    CShaderEffect* effect = (emitter->m_params.m_material.m_flags & CParticleMat::FLAGS::LIT) ? this->m_particleEffect : this->m_particleUnlitEffect;
 
     g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(emitter->m_texture, 0, nullptr));
     GxRsSet(GxRs_Texture1, nullptr);
@@ -734,10 +734,10 @@ uint32_t CM2SceneRender::DrawBatchedParticle(uint32_t index, M2Element* elements
     uint32_t* first = &indices[index];
     M2Element* element = &elements[*first];
     CParticleEmitter2* emitter = element->m_emitter;
-    EGxVertexBufferFormat format = (emitter->m_params.m_materialFlags & 1) ? GxVBF_PNCT : GxVBF_PCT;
+    EGxVertexBufferFormat format = (emitter->m_params.m_material.m_flags & CParticleMat::FLAGS::LIT) ? GxVBF_PNCT : GxVBF_PCT;
     uint32_t vertexSize = GxVertexSize(format);
-    uint32_t materialFlags = emitter->m_params.m_materialFlags;
-    uint32_t materialBlend = emitter->m_params.m_materialBlend;
+    uint32_t materialFlags = emitter->m_params.m_material.m_flags;
+    uint32_t materialBlend = emitter->m_params.m_material.m_blendMode;
     CM2Lighting* lighting = element->m_model->m_currentLighting;
     uint32_t live = emitter->m_liveList.m_count;
     uint32_t maxVertices = 0x100000 / vertexSize;
@@ -760,7 +760,7 @@ uint32_t CM2SceneRender::DrawBatchedParticle(uint32_t index, M2Element* elements
     for (uint32_t i = index + 1; i < count; i++) {
         M2Element* other = &elements[indices[i]];
 
-        if (other->m_type != 4) {
+        if (other->m_type != M2_ELEMENT_PARTICLE) {
             break;
         }
 
@@ -780,13 +780,13 @@ uint32_t CM2SceneRender::DrawBatchedParticle(uint32_t index, M2Element* elements
 
         uint32_t otherIndices = otherLive * otherEmitter->m_indicesPerParticle;
 
-        if (otherEmitter->m_params.m_materialBlend != materialBlend) {
+        if (otherEmitter->m_params.m_material.m_blendMode != materialBlend) {
             break;
         }
 
-        uint32_t lit = otherEmitter->m_params.m_materialFlags & 1;
+        BOOL lit = otherEmitter->m_params.m_material.m_flags & CParticleMat::FLAGS::LIT;
 
-        if (lit != (materialFlags & 1) || ((otherEmitter->m_params.m_materialFlags ^ materialFlags) & 2) || ((otherEmitter->m_params.m_materialFlags ^ materialFlags) & 4)) {
+        if (lit != (materialFlags & CParticleMat::FLAGS::LIT) || ((otherEmitter->m_params.m_material.m_flags ^ materialFlags) & CParticleMat::FLAGS::FOGGED) || ((otherEmitter->m_params.m_material.m_flags ^ materialFlags) & CParticleMat::FLAGS::DEPTH_WRITE)) {
             break;
         }
 
@@ -824,7 +824,7 @@ uint32_t CM2SceneRender::DrawBatchedParticle(uint32_t index, M2Element* elements
 
     for (uint32_t i = 0; i < batched; i++) {
         emitter = elements[first[i]].m_emitter;
-        emitter->Render(static_cast<const C44Matrix*>(this->m_curModel->m_frameOfReference), data, i == 0);
+        emitter->Render(this->m_curModel->m_frameOfReference, data, i == 0);
         renderedVertices += emitter->m_renderedParticles * emitter->m_vertsPerParticle;
         data += vertexSize * emitter->m_renderedParticles * emitter->m_vertsPerParticle;
         renderedIndices += emitter->m_renderedParticles * emitter->m_indicesPerParticle;
@@ -846,28 +846,28 @@ uint32_t CM2SceneRender::DrawBatchedParticle(uint32_t index, M2Element* elements
 // OFFSET: 0x008214E0
 uint32_t CM2SceneRender::DrawParticle(uint32_t index, M2Element* elements, uint32_t* indices, uint32_t count) {
     CParticleEmitter2* emitter = this->m_curElement->m_emitter;
-    uint32_t flags = emitter->m_params.m_materialFlags;
+    uint32_t flags = emitter->m_params.m_material.m_flags;
     M2Material material;
-    material.m_flags = 4;
+    material.m_flags = M2Material::FLAGS::TWO_SIDED;
 
-    if (!(flags & 1)) {
-        material.m_flags = 5;
+    if (!(flags & CParticleMat::FLAGS::LIT)) {
+        material.m_flags = M2Material::FLAGS::UNLIT_TWO_SIDED;
     }
 
-    if (!(flags & 2)) {
-        material.m_flags |= 2;
+    if (!(flags & CParticleMat::FLAGS::FOGGED)) {
+        material.m_flags |= M2Material::FLAGS::UNFOGGED;
     }
 
-    if (!(flags & 4)) {
-        material.m_flags |= 0x10;
+    if (!(flags & CParticleMat::FLAGS::DEPTH_WRITE)) {
+        material.m_flags |= M2Material::FLAGS::NO_DEPTH_WRITE;
     }
 
-    material.m_blendMode = static_cast<M2BLEND>(ParticleBlendToM2Blend(emitter->m_params.m_materialBlend));
+    material.m_blendMode = static_cast<M2BLEND>(ParticleBlendToM2Blend(emitter->m_params.m_material.m_blendMode));
 
     this->m_curMaterial = &material;
     this->m_prevMaterial = nullptr;
 
-    if (this->m_cache->m_flags & 0x80) {
+    if (this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_BATCH_PARTICLES) {
         return this->DrawBatchedParticle(index, elements, indices, count);
     }
 
@@ -879,14 +879,14 @@ uint32_t CM2SceneRender::DrawParticle(uint32_t index, M2Element* elements, uint3
 
     DebugLog("Particle: model=%s", this->m_curModel->m_shared->m_fileNameWithoutPath);
 
-    CShaderEffect* effect = (emitter->m_params.m_materialFlags & 1) ? this->m_particleEffect : this->m_particleUnlitEffect;
+    CShaderEffect* effect = (emitter->m_params.m_material.m_flags & CParticleMat::FLAGS::LIT) ? this->m_particleEffect : this->m_particleUnlitEffect;
     g_theGxDevicePtr->RsSet(GxRs_Texture0, gxTex);
     GxRsSet(GxRs_Texture1, nullptr);
     effect->SetCurrent();
     this->SetupLighting();
     this->SetupMaterial();
     this->SetupBillboardView(*reinterpret_cast<const C3Vector*>(&this->m_scene->m_viewInv.d0));
-    emitter->Render(static_cast<const C44Matrix*>(this->m_curModel->m_frameOfReference), nullptr, 1);
+    emitter->Render(this->m_curModel->m_frameOfReference, nullptr, 1);
     g_theGxDevicePtr->XformSetView(s_identity);
 
     CGxMatrixStack& world = g_theGxDevicePtr->m_xforms[GxXform_World];
@@ -970,7 +970,7 @@ void CM2SceneRender::Draw(M2PASS pass, M2Element* elements, uint32_t* indices, u
     for (uint32_t i = 0; i < count; i++) {
         M2Element* element = &elements[indices[i]];
 
-        if (element->m_type != 2 && (element->m_model->m_fFlags & 0x2000) && element->m_type != 4) {
+        if (element->m_type != M2_ELEMENT_DOODAD_BATCH && (element->m_model->m_runtimeFlags & M2_FLAGS::M2_CULLED) && element->m_type != M2_ELEMENT_PARTICLE) {
             continue;
         }
 
@@ -979,7 +979,7 @@ void CM2SceneRender::Draw(M2PASS pass, M2Element* elements, uint32_t* indices, u
         this->m_curModel = element->m_model;
         this->m_curShared = this->m_curModel->m_shared;
         this->m_curLocalLighting = 1;
-        this->m_curFogMode = 1;
+        this->m_curFogMode = FOG_LIGHTING_COLOR;
         this->m_curBatch = nullptr;
         this->m_curSkinSection = nullptr;
         this->m_curLighting = this->m_curModel->m_currentLighting;
@@ -988,23 +988,23 @@ void CM2SceneRender::Draw(M2PASS pass, M2Element* elements, uint32_t* indices, u
         this->m_cache->LinkToSharedUpdateList(this->m_curShared);
 
         switch (this->m_curElement->m_type) {
-            case 0:
+            case M2_ELEMENT_BATCH:
                 this->DrawBatch();
                 break;
-            case 1:
+            case M2_ELEMENT_PROJECTED_BATCH:
                 this->DrawBatchProj();
                 break;
-            case 2:
+            case M2_ELEMENT_DOODAD_BATCH:
                 this->DrawBatchDoodad(elements, &indices[i]);
                 i += this->m_curElement->m_count - 1;
                 break;
-            case 3:
+            case M2_ELEMENT_RIBBON:
                 this->DrawRibbon();
                 break;
-            case 4:
+            case M2_ELEMENT_PARTICLE:
                 i += this->DrawParticle(i, elements, indices, count);
                 break;
-            case 5:
+            case M2_ELEMENT_CALLBACK:
                 this->DrawCallback();
                 break;
             default:

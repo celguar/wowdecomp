@@ -1,4 +1,5 @@
 #include "RaidInfo.h"
+#include "WoW/Source/Ui/LFGInfo.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
 #include <cstdint>
 #include "Engine/Source/FrameScript/FrameScript.h"
@@ -151,7 +152,7 @@ static int32_t Script_ConfirmReadyCheck(lua_State* L) {
 static int32_t Script_IsRaidOfficer(lua_State* L) {
     CGRaidMember* member = CGRaidInfo::FindMemberByGuid(ClntObjMgrGetActivePlayer());
 
-    if (member && member->m_rank > 0) {
+    if (member && member->m_rank > CGRaidMember::RANK::MEMBER) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -205,7 +206,7 @@ static int32_t Script_GetReadyCheckStatus(lua_State* L) {
 
     CGRaidMember* self = CGRaidInfo::FindMemberByGuid(ClntObjMgrGetActivePlayer());
 
-    if (!self || self->m_rank <= 0) {
+    if (!self || self->m_rank <= CGRaidMember::RANK::MEMBER) {
         lua_pushstring(L, status);
         return 1;
     }
@@ -247,7 +248,7 @@ static int32_t Script_GetRaidTargetIndex(lua_State* L) {
 
     uint32_t index = GetRaidTargetIndexFromGuid(GetGuidByKeyword(lua_tolstring(L, 1, nullptr)));
 
-    if (index == 8) {
+    if (index == CGRaidInfo::NUM_RAID_ICONS) {
         lua_pushnil(L);
     } else {
         lua_pushnumber(L, index + 1);
@@ -302,7 +303,7 @@ static int32_t Script_GetRaidRosterInfo(lua_State* L) {
 
     if (unit) {
         lua_pushnumber(L, static_cast<int32_t>(unit->m_unit->m_unitFieldLevel));
-    } else if (member->m_stats.m_flags & 1) {
+    } else if (member->m_stats.m_flags & CGPartyMemberState::MEMBER_FLAG_CONNECTED) {
         lua_pushnumber(L, member->m_stats.m_level);
     } else {
         lua_pushnumber(L, 0.0);
@@ -319,7 +320,7 @@ static int32_t Script_GetRaidRosterInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (unit || (member->m_stats.m_flags & 1)) {
+    if (unit || (member->m_stats.m_flags & CGPartyMemberState::MEMBER_FLAG_CONNECTED)) {
         int32_t zoneID = unit ? CGGameUI::m_areaID : member->m_stats.m_zoneID;
         AreaTableRec* area = g_areaTableDB.GetRecord(zoneID);
 
@@ -340,7 +341,7 @@ static int32_t Script_GetRaidRosterInfo(lua_State* L) {
     if (unit) {
         dead = unit->m_unit->m_unitFieldHealth <= 0;
     } else {
-        dead = (member->m_stats.m_flags & 4) && (member->m_stats.m_flags & 1);
+        dead = (member->m_stats.m_flags & CGPartyMemberState::MEMBER_FLAG_DEAD) && (member->m_stats.m_flags & CGPartyMemberState::MEMBER_FLAG_CONNECTED);
     }
 
     if (dead) {
@@ -349,9 +350,9 @@ static int32_t Script_GetRaidRosterInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (member->m_assignments & 2) {
+    if (member->m_assignments & CGPartyInfo::ASSIGNMENT_FLAGS::MAIN_TANK) {
         lua_pushstring(L, "MAINTANK");
-    } else if (member->m_assignments & 4) {
+    } else if (member->m_assignments & CGPartyInfo::ASSIGNMENT_FLAGS::MAIN_ASSIST) {
         lua_pushstring(L, "MAINASSIST");
     } else {
         lua_pushnil(L);
@@ -363,19 +364,19 @@ static int32_t Script_GetRaidRosterInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (member->m_groupRole & 2) {
+    if (member->m_groupRole & ROLE_FLAGS::TANK) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (member->m_groupRole & 4) {
+    if (member->m_groupRole & ROLE_FLAGS::HEALER) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (member->m_groupRole & 8) {
+    if (member->m_groupRole & ROLE_FLAGS::DAMAGER) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -392,14 +393,14 @@ static int32_t Script_SetRaidSubgroup(lua_State* L) {
         return 0;
     }
 
-    if (!CGGameUI::CanPerformAction(11)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_RAID_SUBGROUP)) {
         return 0;
     }
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
     uint32_t subgroup = static_cast<uint32_t>(lua_tonumber(L, 2)) - 1;
 
-    if (subgroup >= 8) {
+    if (subgroup >= CGRaidInfo::NUM_RAID_GROUPS) {
         luaL_error(L, "Usage: SetRaidSubgroup(index, subgroup)");
         return 0;
     }
@@ -434,7 +435,7 @@ static int32_t Script_SwapRaidSubgroup(lua_State* L) {
         return 0;
     }
 
-    if (!CGGameUI::CanPerformAction(11)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_RAID_SUBGROUP)) {
         return 0;
     }
 
@@ -473,7 +474,7 @@ static int32_t Script_PromoteToLeader(lua_State* L) {
     }
 
     int32_t exact = StringToBOOL(L, 2, 0);
-    WOWGUID guid = CGGameUI::ClosestObjectMatch(lua_tolstring(L, 1, nullptr), TYPE_PLAYER, 6, exact, 3.4028235e38f, 0);
+    WOWGUID guid = CGGameUI::ClosestObjectMatch(lua_tolstring(L, 1, nullptr), TYPE_PLAYER, UNIT_TARGET_RAID_MEMBER, exact, 3.4028235e38f, 0);
 
     if (guid) {
         CDataStore msg;
@@ -495,7 +496,7 @@ static int32_t Script_PromoteToAssistant(lua_State* L) {
     }
 
     int32_t exact = StringToBOOL(L, 2, 0);
-    WOWGUID guid = CGGameUI::ClosestObjectMatch(lua_tolstring(L, 1, nullptr), TYPE_PLAYER, 6, exact, 3.4028235e38f, 0);
+    WOWGUID guid = CGGameUI::ClosestObjectMatch(lua_tolstring(L, 1, nullptr), TYPE_PLAYER, UNIT_TARGET_RAID_MEMBER, exact, 3.4028235e38f, 0);
 
     if (guid) {
         CDataStore msg;
@@ -518,7 +519,7 @@ static int32_t Script_DemoteAssistant(lua_State* L) {
     }
 
     int32_t exact = StringToBOOL(L, 2, 0);
-    WOWGUID guid = CGGameUI::ClosestObjectMatch(lua_tolstring(L, 1, nullptr), TYPE_PLAYER, 6, exact, 3.4028235e38f, 0);
+    WOWGUID guid = CGGameUI::ClosestObjectMatch(lua_tolstring(L, 1, nullptr), TYPE_PLAYER, UNIT_TARGET_RAID_MEMBER, exact, 3.4028235e38f, 0);
 
     if (guid) {
         CDataStore msg;
@@ -555,7 +556,7 @@ static int32_t Script_SetRaidTarget(lua_State* L) {
 
     uint32_t index = static_cast<uint8_t>(lua_tonumber(L, 2)) - 1;
 
-    if (index < 8) {
+    if (index < CGRaidInfo::NUM_RAID_ICONS) {
         if (guid && !CGRaidInfo::IsPlayerOrPetInRaid(guid) && !CGPartyInfo::IsPlayerOrPetInParty(guid)) {
             CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
@@ -576,7 +577,7 @@ static int32_t Script_SetRaidTarget(lua_State* L) {
         guid = WOWGUID();
     }
 
-    if (index >= 8) {
+    if (index >= CGRaidInfo::NUM_RAID_ICONS) {
         return 0;
     }
 
@@ -592,7 +593,7 @@ static int32_t Script_SetRaidTarget(lua_State* L) {
 
     uint32_t current = GetRaidTargetIndexFromGuid(guid);
 
-    if (current == index || current < 8) {
+    if (current == index || current < CGRaidInfo::NUM_RAID_ICONS) {
         WOWGUID none = WOWGUID();
         CGRaidInfo::SetRaidTarget(current, none);
     }

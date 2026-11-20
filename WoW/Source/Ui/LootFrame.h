@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "WoW/Source/Ui/Types.h"
 
@@ -23,6 +24,9 @@ struct LootInfo {
 void LootDestroy();
 void LootInitialize();
 
+// Loot window item slots (inferred name; size of the loot slot tables).
+static const uint32_t NUM_LOOT_SLOTS = 18;
+
 struct LootSlot {
     /* 0000 */ int32_t m_pending;
     /* 0004 */ int32_t m_itemID;
@@ -32,14 +36,14 @@ struct LootSlot {
     /* 0014 */ int32_t m_randomPropertyId;
     /* 0018 */ uint8_t m_slot;
     /* 0019 */ uint8_t unused_0019[3];
-    /* 001C */ int32_t m_slotType;
+    /* 001C */ int32_t m_slotType; // LOOT_SLOT_TYPE
 };
 
 class CGLootInfo {
     public:
     static uint32_t m_itemsPending;
     static LOOT_ACQUIRE m_lootAcquire;
-    static LootSlot m_slots[18];
+    static LootSlot m_slots[NUM_LOOT_SLOTS];
     static int32_t m_coins;
     static WOWGUID m_lootObj;
     static int32_t m_autolooted;
@@ -47,7 +51,7 @@ class CGLootInfo {
     static void InitializeGame();
     static void ShutdownGame();
     static void LeaveWorld();
-    static void DoAutoLoot(int32_t a1);
+    static void DoAutoLoot(BOOL closing);
     static int32_t HasLoot();
     static void LootSlot(uint32_t slot);
     static void ConfirmLootSlot(uint32_t slot);

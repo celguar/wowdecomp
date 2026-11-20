@@ -1,9 +1,12 @@
 #ifndef WOW_SOURCE_OBJECT_OBJECTCLIENT_ITEM_C_H
 #define WOW_SOURCE_OBJECT_OBJECTCLIENT_ITEM_C_H
 
+#include "WoW/Common/ComponentCore/Types.h"
+
 #include <cstddef>
 #include <cstdint>
 #include "Engine/Source/Storm/H/stpl.h"
+#include "WoW/Source/Magic/MagicClient/SpellEnums.h"
 #include "WoW/Source/Object/Item.h"
 #include "WoW/Source/Object/ObjectClient/Object_C.h"
 #include "WoW/Source/Object/ObjectClient/Unit_C.h"
@@ -16,6 +19,8 @@ class LockRec;
 
 struct INVENTORYART : public TSHashObject<INVENTORYART, HASHKEY_NONE> {
     /* 0018 */ char* m_texture;
+
+    ~INVENTORYART();
 };
 
 struct ITEMBYNAME : public TSHashObject<ITEMBYNAME, HASHKEY_UTF8I> {
@@ -24,20 +29,33 @@ struct ITEMBYNAME : public TSHashObject<ITEMBYNAME, HASHKEY_UTF8I> {
 
 int32_t GetItemIDByName(const char* name);
 
-extern const uint32_t s_inventoryTypeSlots[29];
+extern const uint32_t s_inventoryTypeSlots[INVTYPE_COUNT];
 
 class CGItem_C : public CGObject_C, public CGItem {
     public:
+    // Client runtime state, separate from replicated and template item flags.
+    enum ITEM_CLIENT_FLAGS : uint32_t {
+        ITEM_CLIENT_NONE                     = 0x00000000u,
+        ITEM_CLIENT_LOCKED                   = 0x00000001u,
+        ITEM_CLIENT_STATS_INITIALIZED        = 0x00000002u,
+        ITEM_CLIENT_PURCHASE_DATA_PENDING    = 0x00000004u,
+    };
+
+    static const int32_t BIND_TRADE_PERIOD_SECONDS = 7200;
+
     static void Initialize();
     static void Shutdown();
     struct ItemPurchaseData {
+        static const int32_t NUM_REFUND_ITEMS = 5;
+        static const int32_t REFUND_PERIOD_SECONDS = 7200;
+
         /* 0000 */ uint32_t m_money;
         /* 0004 */ uint32_t m_honorPoints;
         /* 0008 */ uint32_t m_arenaPoints;
-        /* 000C */ uint32_t m_itemId [5];
-        /* 0020 */ uint32_t m_itemCount [5];
-        /* 0034 */ uint32_t unk_0034;
-        /* 0038 */ uint32_t m_refundTimeLeft;
+        /* 000C */ uint32_t m_itemId [NUM_REFUND_ITEMS];
+        /* 0020 */ uint32_t m_itemCount [NUM_REFUND_ITEMS];
+        /* 0034 */ uint32_t unknown_0034;
+        /* 0038 */ uint32_t m_purchasePlayedTime; // Played-time baseline; readers add the refund period.
     };
 
     static char* BuildItemName(char* buffer, uint32_t size, int32_t itemId, int32_t randomPropertiesId);
@@ -48,14 +66,14 @@ class CGItem_C : public CGObject_C, public CGItem {
     static const char* GetInventoryArt(int32_t displayId);
     const char* GetInventoryArt() const;
 
-    /* 00DC */ TSList<void> m_itemMirrorLists [58];
+    /* 00DC */ TSList<void> m_itemMirrorLists [CGItemData::NUM_FIELDS];
     /* 0394 */ uint32_t m_itemFlags;
     /* 0398 */ CGUnitVirtualItem m_virtualItem;
     /* 03A0 */ uint32_t m_expirationTime;
-    /* 03A4 */ uint32_t m_enchantmentExpiration [12];
+    /* 03A4 */ uint32_t m_enchantmentExpiration [CGItemData::NUM_ENCHANTMENTS];
     /* 03D4 */ ItemPurchaseData* m_itemPurchaseData;
     /* 03D8 */ const ItemGroupSoundsRec* m_groupSounds;
-    /* 03DC */ uint8_t unused_03DC [4];
+    /* 03DC */ uint8_t unknown_03DC [4];
 
     ~CGItem_C() override;
     void PostReenable() override;
@@ -81,14 +99,14 @@ class CGItem_C : public CGObject_C, public CGItem {
     int32_t CanBeUsed();
     uint32_t GetExpirationTimeLeft() const;
     char* GetFullItemName(char* buffer, uint32_t size) const;
-    uint32_t GetInventoryType() const;
+    INVENTORY_TYPES GetInventoryType() const;
     static char* GetStatName(uint32_t stat, char* buffer, int32_t size);
     int32_t GetNumSockets();
     int32_t GetOnUseSlot() const;
     int32_t GetPrismaticSocketCount();
     int32_t GetRandomItemSlot() const;
     int32_t GetRandomPropertyPoints() const;
-    uint32_t GetSheatheType() const;
+    SHEATHE_TYPE GetSheatheType() const;
     uint32_t GetSpellItemEnchantmentId() const;
     ItemStats_C* GetStats() const;
     uint32_t GetSubtypeID() const;
@@ -106,14 +124,14 @@ class CGItem_C : public CGObject_C, public CGItem {
     static int32_t IsLocked(const LockRec* lock, int32_t itemLevel, int32_t* spellId, int32_t* skillValue, int32_t* requiredSkill, int32_t* lockIndex, CGItem_C** key, int32_t* entry);
     int32_t GetRandomPropertyValue(int32_t slot);
     int32_t GetRepairCost();
-    int32_t GetEnchantmentSpell(int32_t a1);
+    int32_t GetEnchantmentSpell(SPELL_EFFECT effect);
     void GetSpellCooldownInfo(uint32_t& cooldown, uint32_t& categoryCooldown, uint32_t& category);
     bool IsBoundForTrade();
     bool IsPetition();
     bool IsInstanceBound() const;
     bool IsPermanentlyBoundForTrade();
     bool IsZoneBound() const;
-    void PostInit(uint32_t time, const CClientObjCreate& create, bool a3);
+    void PostInit(uint32_t time, const CClientObjCreate& create, bool reenable);
     void PostInitWithStats();
     void RequestItemCacheInfo();
     void RequestItemPurchaseData();

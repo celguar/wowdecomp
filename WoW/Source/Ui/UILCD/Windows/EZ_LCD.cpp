@@ -228,8 +228,8 @@ HRESULT CEzLcd::SetText(void* handle, const WCHAR* text) {
         return E_FAIL;
     }
 
-    if (object->GetObjectType() == 1 || object->GetObjectType() == 0) {
-        if (object->GetObjectType() == 1) {
+    if (object->GetObjectType() == LCD_OBJECT_TYPE_TEXT || object->GetObjectType() == LCD_OBJECT_TYPE_UNKNOWN_0) {
+        if (object->GetObjectType() == LCD_OBJECT_TYPE_TEXT) {
             static_cast<CLCDText*>(object)->SetText(text);
             return S_OK;
         }
@@ -243,7 +243,7 @@ HRESULT CEzLcd::SetText(void* handle, const WCHAR* text) {
 HRESULT CEzLcd::SetTextWordWrap(void* handle, bool enable) {
     CLCDBase* object = static_cast<CLCDBase*>(handle);
 
-    if (!object || object->GetObjectType() != 1) {
+    if (!object || object->GetObjectType() != LCD_OBJECT_TYPE_TEXT) {
         return E_FAIL;
     }
 
@@ -370,6 +370,15 @@ void CEzLcd::ShowSubscreen(int32_t subscreen) {
 // VERIFY: 6e0acd1e manual
 // OFFSET: 0x009594A0
 int32_t CEzLcd::AddNewPage(int32_t page) {
+#if defined(WOWDECOMP_ARCH_64)
+    {
+        auto* pages = this->m_output == this->m_connection.MonoOutput() ? &this->m_monoPages : &this->m_colorPages;
+        if (static_cast<uint32_t>(page) >= pages->Count()) {
+            return -1;
+        }
+    }
+#endif
+
     CEzLcdPage* newPage = new CEzLcdPage(this);
     newPage->Initialize();
     newPage->SetExpiration(INFINITE);
@@ -396,11 +405,21 @@ int32_t CEzLcd::ShowPage(int32_t page) {
         pages = &this->m_colorPages;
     }
 
+#if defined(WOWDECOMP_ARCH_64)
+    if (static_cast<uint32_t>(page) >= pages->Count()) {
+#else
     if (page > static_cast<int32_t>(pages->Count()) || page < -1) {
+#endif
         return E_FAIL;
     }
 
     CEzLcdPage* newPage = (*pages)[page];
+
+#if defined(WOWDECOMP_ARCH_64)
+    if (!newPage) {
+        return E_FAIL;
+    }
+#endif
 
     if (this->m_connection.MonoOutput() == this->m_output) {
         this->m_currentMonoPage = newPage;
@@ -452,7 +471,7 @@ void CEzLcd::SetBackground(COLORREF color) {
 
 // VERIFY: c0fc03e2 manual
 // OFFSET: 0x00959680
-CLCDText* CEzLcd::AddText(int32_t type, int32_t size, int32_t alignment, int32_t maxLengthPixels, int32_t userData, int32_t numberOfLines, int32_t fontWeight) {
+CLCDText* CEzLcd::AddText(LCD_OBJECT_TYPE type, int32_t size, int32_t alignment, int32_t maxLengthPixels, int32_t userData, int32_t numberOfLines, int32_t fontWeight) {
     CEzLcdPage* page;
 
     if (this->m_output == this->m_connection.MonoOutput()) {
@@ -569,7 +588,11 @@ HRESULT CEzLcd::ModifyControlsOnPage(int32_t page) {
         pages = &this->m_colorPages;
     }
 
+#if defined(WOWDECOMP_ARCH_64)
+    if (static_cast<uint32_t>(page) >= pages->Count()) {
+#else
     if (page > static_cast<int32_t>(pages->Count()) || page < -1) {
+#endif
         return E_FAIL;
     }
 

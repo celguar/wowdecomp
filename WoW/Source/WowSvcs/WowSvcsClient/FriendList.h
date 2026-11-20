@@ -32,9 +32,25 @@ enum FRIEND_RESULT : uint8_t {
     FRIEND_VOICE_IGNORE_ADDED = 22,
     FRIEND_VOICE_IGNORE_REMOVED = 23,
     FRIEND_VOICE_IGNORE_AMBIGUOUS = 24,
-    FRIEND_UNKNOWN_25 = 25,
+    FRIEND_NOOP = 25,
     FRIEND_FLAGS_UPDATED = 26,
     FRIEND_AREA_UPDATED = 27,
+};
+
+// Contact list kinds: SMSG_CONTACT_LIST list mask and entry flags, CMSG_CONTACT_LIST request mask.
+enum CONTACT_LIST_FLAGS : uint32_t {
+    CONTACT_LIST_FRIEND = 0x1,
+    CONTACT_LIST_IGNORE = 0x2,
+    CONTACT_LIST_MUTE = 0x4,
+};
+
+// Friend status byte; AFK/DND/REFER_A_FRIEND follow the GetFriendInfo status and RAF returns.
+enum FRIEND_STATUS_FLAGS : uint8_t {
+    FRIEND_STATUS_OFFLINE = 0x0,
+    FRIEND_STATUS_ONLINE = 0x1,
+    FRIEND_STATUS_AFK = 0x2,
+    FRIEND_STATUS_DND = 0x4,
+    FRIEND_STATUS_REFER_A_FRIEND = 0x8,
 };
 
 class CDataStore;
@@ -90,23 +106,28 @@ struct WhoSortField {
 
 class FriendList {
     public:
+    static const int32_t MAX_FRIENDS = 100;
+    static const int32_t MAX_IGNORES = 50;
+    static const int32_t MAX_MUTES = 50;
+    static const int32_t MAX_WHO_RESULTS = 50;
+
     static void __stdcall AddFriend(const char* name, const char* note);
     static FriendList* s_friendList;
     static WhoSortField s_whoSort[NUM_WHO_SORT_TYPES];
     static uint32_t s_numWhoResults;
     static uint32_t s_totalWhoResults;
-    static WhoResult s_whoResults[50];
+    static WhoResult s_whoResults[MAX_WHO_RESULTS];
     static int32_t s_whoToUI;
 
-    /* 0000 */ FriendInfo m_friends[100];
+    /* 0000 */ FriendInfo m_friends[MAX_FRIENDS];
     /* D480 */ uint32_t m_pendingFriendNames;
     /* D484 */ uint32_t unused_D484;
     /* D488 */ WOWGUID m_selectedFriend;
-    /* D490 */ IgnoreInfo m_ignores[50];
+    /* D490 */ IgnoreInfo m_ignores[MAX_IGNORES];
     /* D7B0 */ uint32_t m_pendingIgnoreNames;
     /* D7B4 */ uint32_t unused_D7B4;
     /* D7B8 */ WOWGUID m_selectedIgnore;
-    /* D7C0 */ IgnoreInfo m_mutes[50];
+    /* D7C0 */ IgnoreInfo m_mutes[MAX_MUTES];
     /* DAE0 */ uint32_t m_pendingMuteNames;
     /* DAE4 */ uint32_t unused_DAE4;
     /* DAE8 */ WOWGUID m_selectedMute;

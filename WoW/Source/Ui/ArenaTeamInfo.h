@@ -5,9 +5,66 @@
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
 #include "WoW/Source/Net/Types.h"
+#include "WoW/Source/Object/Player.h"
 
 struct lua_State;
 class CDataStore;
+
+// SMSG_ARENA_TEAM_COMMAND_RESULT command word, named after the success
+// messages (ERR_ARENA_TEAM_CREATE_S, _INVITE_SS, _QUIT_S, _FOUNDER_S).
+enum ARENA_TEAM_COMMAND_TYPE : uint32_t {
+    ARENA_TEAM_COMMAND_CREATE  = 0,
+    ARENA_TEAM_COMMAND_INVITE  = 1,
+    ARENA_TEAM_COMMAND_QUIT    = 3,
+    ARENA_TEAM_COMMAND_FOUNDER = 14,
+};
+
+// SMSG_ARENA_TEAM_EVENT event byte, named after the error each one displays;
+// the values line up with GUILD_EVENT.
+enum ARENA_TEAM_EVENT : uint8_t {
+    // 0..2 are not handled by SMSG_ARENA_TEAM_EVENT (default branch).
+    ARENA_TEAM_EVENT_UNKNOWN_0      = 0,
+    ARENA_TEAM_EVENT_UNKNOWN_1      = 1,
+    ARENA_TEAM_EVENT_UNKNOWN_2      = 2,
+    ARENA_TEAM_EVENT_JOINED         = 3, // ERR_ARENA_TEAM_JOIN_SS / _YOU_JOIN_S
+    ARENA_TEAM_EVENT_LEFT           = 4, // ERR_ARENA_TEAM_LEAVE_SS
+    ARENA_TEAM_EVENT_REMOVED        = 5, // ERR_ARENA_TEAM_REMOVE_SSS
+    ARENA_TEAM_EVENT_LEADER_IS      = 6, // ERR_ARENA_TEAM_LEADER_IS_SS
+    ARENA_TEAM_EVENT_LEADER_CHANGED = 7, // ERR_ARENA_TEAM_LEADER_CHANGED_SSS
+    ARENA_TEAM_EVENT_DISBANDED      = 8, // ERR_ARENA_TEAM_DISBANDED_S
+};
+
+// SMSG_ARENA_TEAM_COMMAND_RESULT result word, separate from command/event IDs.
+// Unknown results retain the original silent default.
+enum ARENA_TEAM_COMMAND_RESULT : uint32_t {
+    ARENA_RESULT_SUCCESS                                     = 0,
+    ARENA_RESULT_INTERNAL                                    = 1,
+    ARENA_RESULT_ALREADY_IN_TEAM                             = 2,
+    ARENA_RESULT_PLAYER_ALREADY_IN_TEAM                      = 3,
+    ARENA_RESULT_ALREADY_INVITED                             = 4,
+    ARENA_RESULT_PLAYER_ALREADY_INVITED                      = 5,
+    ARENA_RESULT_NAME_INVALID                                = 6,
+    ARENA_RESULT_NAME_EXISTS                                 = 7,
+    // Quit command 3 reports leader-cannot-leave; others report permissions.
+    ARENA_RESULT_LEADER_CANNOT_LEAVE_OR_NO_PERMISSION        = 8,
+    ARENA_RESULT_NOT_IN_TEAM                                 = 9,
+    ARENA_RESULT_PLAYER_NOT_IN_TEAM                          = 10,
+    ARENA_RESULT_PLAYER_NOT_FOUND                            = 11,
+    ARENA_RESULT_NOT_ALLIED                                  = 12,
+    ARENA_RESULT_IGNORING_YOU                                = 19,
+    ARENA_RESULT_TARGET_TOO_LOW                              = 21,
+    ARENA_RESULT_TARGET_TOO_HIGH                             = 22,
+    ARENA_RESULT_TOO_MANY_MEMBERS                            = 23,
+    ARENA_RESULT_TEAM_NOT_FOUND                              = 27,
+    ARENA_RESULT_TEAMS_LOCKED                                = 30,
+};
+
+// Team sizes, separate from the zero-based bracket index used by rating checks.
+enum ARENA_TEAM_SIZE : int32_t {
+    TWO_VS_TWO = 2,
+    THREE_VS_THREE = 3,
+    FIVE_VS_FIVE = 5,
+};
 
 struct ArenaTeamMember {
     /* 0000 */ WOWGUID m_guid;
@@ -49,10 +106,22 @@ struct ArenaTeamSort {
 
 class CGArenaTeamInfo {
     public:
-    static ArenaTeam m_arenaTeams[3];
+    // Arena roster keys and exclusive sort-order bound;raw reorder API retained.
+    enum SORT_COLUMN : int32_t {
+        COLUMN_NAME = 0,
+        COLUMN_CLASS = 1,
+        COLUMN_WEEK_GAMES = 2,
+        COLUMN_WEEK_WINS = 3,
+        COLUMN_SEASON_GAMES = 4,
+        COLUMN_SEASON_WINS = 5,
+        COLUMN_PERSONAL_RATING = 6,
+        NUM_COLUMNS = 7,
+    };
+
+    static ArenaTeam m_arenaTeams[MAX_ARENA_TEAMS];
     static int32_t m_showOffline;
-    static uint32_t m_nextAllowedQuery[3];
-    static ArenaTeamSort m_sortOrder[7];
+    static uint32_t m_nextAllowedQuery[MAX_ARENA_TEAMS];
+    static ArenaTeamSort m_sortOrder[CGArenaTeamInfo::SORT_COLUMN::NUM_COLUMNS];
     static WOWGUID m_selectedMember;
     static void EnterWorld();
     static void InitializeGame();

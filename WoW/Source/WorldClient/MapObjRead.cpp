@@ -23,8 +23,8 @@ TSList<CMapObjGroup, TSGetExplicitLink<CMapObjGroup> > CMapObj::s_loadedGroups =
 // OFFSET: 0x007D72D0
 void CMapObj::CreateMaterials() {
     for (uint32_t i = 0; i < static_cast<uint32_t>(this->m_materialsCount); i++) {
-        this->m_materialList[i].Textures()[0] = nullptr;
-        this->m_materialList[i].Textures()[1] = nullptr;
+        this->m_materialList[i].Textures()[SMOMaterial::MAPID_DIFFUSE] = nullptr;
+        this->m_materialList[i].Textures()[SMOMaterial::MAPID_ENV] = nullptr;
     }
 }
 
@@ -86,7 +86,7 @@ void CMapObj::Load() {
 
     if (!this->m_skybox) {
         for (uint32_t i = 0; i < static_cast<uint32_t>(this->m_groupInfoCount); i++) {
-            this->m_groupInfo[i].m_flags &= ~0x40000;
+            this->m_groupInfo[i].m_flags &= ~CMapObjGroup::MOGP_FLAGS::F_USE_SKYBOX;
         }
     }
 
@@ -142,7 +142,7 @@ void CMapObj::Load() {
     uint8_t* end = static_cast<uint8_t*>(this->m_pWmoData) + this->m_wmoFileSize;
     chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + chunk->m_size);
 
-    if (reinterpret_cast<uint8_t*>(chunk) < end && chunk->m_token == 0x4D435650) {
+    if (reinterpret_cast<uint8_t*>(chunk) < end && chunk->m_token == SIffChunk::TOKEN_MCVP) {
         this->m_convexVolumePlanes = reinterpret_cast<C4Plane*>(&chunk->m_data);
         this->m_convexVolumePlaneCount = chunk->m_size / sizeof(C4Plane);
     }
@@ -153,7 +153,7 @@ void CMapObj::Load() {
 void CMapObj::CreateMaterial(uint8_t texture) {
     SMOMaterial& material = this->m_materialList[texture];
 
-    if (material.Textures()[0]) {
+    if (material.Textures()[SMOMaterial::MAPID_DIFFUSE]) {
         return;
     }
 
@@ -169,21 +169,21 @@ void CMapObj::CreateMaterial(uint8_t texture) {
     }
 
     switch (material.m_shader) {
-        case 3:
-        case 5:
-        case 6:
+        case CMapObj::SHADER_TYPE::ENVIRONMENT:
+        case CMapObj::SHADER_TYPE::ENVIRONMENT_METAL:
+        case CMapObj::SHADER_TYPE::COMPOSITE:
             if (*texture2) {
                 break;
             }
 
-            material.m_shader = 4;
+            material.m_shader = CMapObj::SHADER_TYPE::OPAQUE_EFFECT;
             texture2 = nullptr;
             break;
 
-        case 0:
-        case 1:
-        case 2:
-        case 4:
+        case CMapObj::SHADER_TYPE::DIFFUSE:
+        case CMapObj::SHADER_TYPE::SPECULAR:
+        case CMapObj::SHADER_TYPE::METAL:
+        case CMapObj::SHADER_TYPE::OPAQUE_EFFECT:
             texture2 = nullptr;
             break;
 
@@ -191,19 +191,19 @@ void CMapObj::CreateMaterial(uint8_t texture) {
             break;
     }
 
-    material.Textures()[0] = CMap::LoadTexture(texture1);
+    material.Textures()[SMOMaterial::MAPID_DIFFUSE] = CMap::LoadTexture(texture1);
 
     if (texture2) {
-        material.Textures()[1] = CMap::LoadTexture(texture2);
+        material.Textures()[SMOMaterial::MAPID_ENV] = CMap::LoadTexture(texture2);
     } else {
-        material.Textures()[1] = nullptr;
+        material.Textures()[SMOMaterial::MAPID_ENV] = nullptr;
     }
 }
 
 // VERIFY: 03cc8920 manual
 // OFFSET: 0x007D78C0
 CMapObjGroup* CMapObj::AttenTransVerts(CMapObjGroup* group) {
-    group->m_unkLoadedFlag |= 0x2;
+    group->m_unkLoadedFlag |= CMapObjGroup::RUNTIME_FLAGS::TRANS_VERTEX_ATTENUATION_HANDLED;
 
     if (!group->m_transparencyBatchesCount) {
         return group;
@@ -246,7 +246,7 @@ CMapObjGroup* CMapObj::AttenTransVerts(CMapObjGroup* group) {
                     dist = NTempest::DistanceFromPolygonEdge(vert, portalVerts, portal.m_count);
                 }
 
-                if (this->m_groupInfo[ref.m_groupIndex].m_flags & 0x48) {
+                if (this->m_groupInfo[ref.m_groupIndex].m_flags & CMapObjGroup::MOGP_FLAGS::F_EXTERIOR_CLASSIFICATION_MASK) {
                     if (dist < 0.0f) {
                         dist = 0.0f;
                     }
@@ -286,46 +286,46 @@ void CMapObjGroup::CreateOptionalDataPointers(SIffChunk* dataChunk) {
     SIffChunk* chunk = dataChunk;
     uint32_t flags = this->m_flags;
 
-    if (flags & 0x200) {
+    if (flags & CMapObjGroup::MOGP_FLAGS::F_HAS_LIGHT_REFS) {
         this->m_lightRefList = reinterpret_cast<uint16_t*>(&chunk->m_data);
         this->m_lightRefListCount = chunk->m_size >> 1;
         chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + chunk->m_size);
     }
 
-    if (flags & 0x800) {
+    if (flags & CMapObjGroup::MOGP_FLAGS::F_HAS_DOODAD_REFS) {
         this->m_doodadRefList = reinterpret_cast<uint16_t*>(&chunk->m_data);
         this->m_doodadRefListCount = chunk->m_size >> 1;
         chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + chunk->m_size);
     }
 
-    if (flags & 0x1) {
+    if (flags & CMapObjGroup::MOGP_FLAGS::F_HAS_BSP_TREE) {
         uint32_t nodeSize = chunk->m_size;
         CAaBspNode* nodes = reinterpret_cast<CAaBspNode*>(&chunk->m_data);
         chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + nodeSize);
         uint32_t faceSize = chunk->m_size;
         uint16_t* faces = reinterpret_cast<uint16_t*>(&chunk->m_data);
         chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + faceSize);
-        this->m_cAaBspNodePtr1.Set(nodes, nodeSize >> 4, faces, faceSize >> 1, this->m_bbox);
+        this->m_aaBsp.Set(nodes, nodeSize >> 4, faces, faceSize >> 1, this->m_bbox);
     }
 
-    if (this->m_flags & 0x400) {
+    if (this->m_flags & CMapObjGroup::MOGP_FLAGS::F_UNKNOWN_0x400) {
         for (uint32_t i = 0; i < 4; i++) {
             chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + chunk->m_size);
         }
     }
 
-    if (this->m_flags & 0x4) {
+    if (this->m_flags & CMapObjGroup::MOGP_FLAGS::F_HAS_VERTEX_COLORS) {
         CMapObj* parent = this->m_parent;
         this->m_colorVertexList = reinterpret_cast<CImVector*>(&chunk->m_data);
         this->m_colorVertexListSize = chunk->m_size >> 2;
         chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + chunk->m_size);
 
-        if (!(parent->m_header->m_flags & 0x8)) {
+        if (!(parent->m_header->m_flags & SMOHeader::FLAGS::NO_VERTEX_ALPHA_FIX)) {
             this->FixColorVertexAlpha();
         }
     }
 
-    if (this->m_flags & 0x1000) {
+    if (this->m_flags & CMapObjGroup::MOGP_FLAGS::F_HAS_LIQUID) {
         uint32_t* header = reinterpret_cast<uint32_t*>(&chunk->m_data);
         this->m_liquidVerts.x = header[0];
         this->m_liquidVerts.y = header[1];
@@ -335,7 +335,7 @@ void CMapObjGroup::CreateOptionalDataPointers(SIffChunk* dataChunk) {
 
         uint16_t materialId = *reinterpret_cast<uint16_t*>(&header[7]);
         uint8_t* data = reinterpret_cast<uint8_t*>(&header[7]) + 2;
-        this->m_liquidVertexList = reinterpret_cast<SMOLiquidVert*>(data);
+        this->m_liquidVertexList = reinterpret_cast<SMOLVert*>(data);
         data += 8 * this->m_liquidVerts.x * this->m_liquidVerts.y;
         this->m_liquidTileList = reinterpret_cast<SMOLTile*>(data);
         data += this->m_liquidTiles.x * this->m_liquidTiles.y;
@@ -350,7 +350,7 @@ void CMapObjGroup::CreateOptionalDataPointers(SIffChunk* dataChunk) {
         this->GenLiquidVerts();
     }
 
-    if (this->m_flags & 0x20000) {
+    if (this->m_flags & CMapObjGroup::MOGP_FLAGS::F_HAS_MORI_MORB) {
         this->m_stripIndices = reinterpret_cast<uint16_t*>(&chunk->m_data);
         this->m_stripIndexCount = chunk->m_size >> 1;
         chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + chunk->m_size + 8);
@@ -366,13 +366,13 @@ void CMapObjGroup::CreateOptionalDataPointers(SIffChunk* dataChunk) {
 
     flags = this->m_flags;
 
-    if (flags & 0x2000000) {
+    if (flags & CMapObjGroup::MOGP_FLAGS::F_HAS_SECOND_TEXTURE_COORDS) {
         this->m_textureVertexList2 = reinterpret_cast<C2Vector*>(&chunk->m_data);
         this->m_textureVertexList2Count = chunk->m_size >> 3;
         chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&chunk->m_data) + chunk->m_size);
     }
 
-    if (flags & 0x1000000) {
+    if (flags & CMapObjGroup::MOGP_FLAGS::F_HAS_EXTRA_COLOR_VERTICES) {
         this->m_colorVertexListExtra = reinterpret_cast<CImVector*>(&chunk->m_data);
         this->m_colorVertexListExtraSize = chunk->m_size >> 2;
     }
@@ -418,7 +418,7 @@ void CMapObj::PostloadCallback(void* arg) {
     mapObj->m_asyncLoadLink.Unlink();
     mapObj->Load();
     mapObj->CreateMaterials();
-    mapObj->m_argbColor = *reinterpret_cast<CImVector*>(&mapObj->m_header->m_ambColor);
+    mapObj->m_argbColor = mapObj->m_header->m_ambColor;
     mapObj->m_bbox = mapObj->m_header->m_boundingBox;
     mapObj->m_mapObjGroupCount = mapObj->m_groupInfoCount;
 
@@ -451,7 +451,7 @@ bool CMapObj::Read(char* fileName) {
     this->m_asyncObject->m_userArg = this;
     this->m_asyncObject->m_buffer = this->m_pWmoData;
     this->m_asyncObject->m_size = this->m_wmoFileSize;
-    this->m_asyncObject->m_userPostloadCallback = reinterpret_cast<void*>(CMapObj::PostloadCallback);
+    this->m_asyncObject->m_userPostloadCallback = CMapObj::PostloadCallback;
     this->m_asyncObject->m_priority = 124;
     AsyncFileReadObject(this->m_asyncObject, 0);
 
@@ -508,7 +508,7 @@ void CMapObjGroup::Create() {
     this->m_flags = header->m_flags;
 
     if (!parent->m_skybox) {
-        this->m_flags &= ~0x40000;
+        this->m_flags &= ~CMapObjGroup::MOGP_FLAGS::F_USE_SKYBOX;
     }
 
     this->m_bbox = header->m_boundingBox;
@@ -520,7 +520,7 @@ void CMapObjGroup::Create() {
     memcpy(this->m_fogs, header->m_fogIds, sizeof(this->m_fogs));
     this->m_wmoGroupId = header->m_uniqueID;
 
-    if (parent->m_header->m_flags & 0x4) {
+    if (parent->m_header->m_flags & SMOHeader::FLAGS::LIQUID_TYPE_IDS) {
         this->m_liquidType = this->GetLiquidType(header->m_groupLiquid);
     } else {
         this->m_liquidType = this->GetLiquidType(header->m_groupLiquid == 15 ? 0 : header->m_groupLiquid + 1);
@@ -534,17 +534,17 @@ void CMapObjGroup::Create() {
         mapObj->CreateMaterial(this->m_batchList[i].m_texture);
     }
 
-    this->m_unkLoadedFlag = (this->m_unkLoadedFlag & ~0x2) | 0x1;
+    this->m_unkLoadedFlag = (this->m_unkLoadedFlag & ~CMapObjGroup::RUNTIME_FLAGS::TRANS_VERTEX_ATTENUATION_HANDLED) | CMapObjGroup::RUNTIME_FLAGS::LOADED;
 
-    if (mapObj->m_header->m_flags & 0x1) {
-        this->m_unkLoadedFlag |= 0x2;
+    if (mapObj->m_header->m_flags & SMOHeader::FLAGS::NO_VERTEX_ATTENUATION) {
+        this->m_unkLoadedFlag |= CMapObjGroup::RUNTIME_FLAGS::TRANS_VERTEX_ATTENUATION_HANDLED;
     }
 
     if (!SStrCmp(this->m_groupName, "antiportal", STORM_MAX_STR)) {
         this->HandleAntiportal();
     }
 
-    this->m_unkLoadedFlag |= 0x4;
+    this->m_unkLoadedFlag |= CMapObjGroup::RUNTIME_FLAGS::ALL_BATCHES_OPAQUE;
 
     uint32_t batchCount = this->m_batchListCount;
 
@@ -561,7 +561,7 @@ void CMapObjGroup::Create() {
         SMOBatch& batch = this->m_batchList[i];
 
         if (mapObj->m_materialList[batch.m_texture].m_blendMode) {
-            this->m_unkLoadedFlag &= ~0x4;
+            this->m_unkLoadedFlag &= ~CMapObjGroup::RUNTIME_FLAGS::ALL_BATCHES_OPAQUE;
             break;
         }
 
@@ -585,8 +585,8 @@ void CMapObjGroup::Create() {
     }
 
     for (uint32_t i = 0; i < batchCount; i++) {
-        if (mapObj->m_materialList[this->m_batchList[i].m_texture].m_shader == 6) {
-            this->m_unkLoadedFlag |= 0x8;
+        if (mapObj->m_materialList[this->m_batchList[i].m_texture].m_shader == CMapObj::SHADER_TYPE::COMPOSITE) {
+            this->m_unkLoadedFlag |= CMapObjGroup::RUNTIME_FLAGS::EXTENDED_VERTEX_FORMAT;
             return;
         }
     }
@@ -631,7 +631,7 @@ void CMapObj::ReadGroup(uint32_t index, bool preLoad) {
     object->m_buffer = group->m_filePtr;
     object->m_size = group->m_fileSize;
     object->m_userArg = group;
-    object->m_userPostloadCallback = reinterpret_cast<void*>(CMapObjGroup::AsyncPostloadCallback);
+    object->m_userPostloadCallback = CMapObjGroup::AsyncPostloadCallback;
     group->m_asyncObjPtr = object;
     AsyncFileReadObject(object, 0);
 

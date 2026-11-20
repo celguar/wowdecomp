@@ -4,27 +4,96 @@
 #include <cstddef>
 #include <cstdint>
 #include "WoW/Source/Object/WGUID.h"
+#include "Engine/Source/Tempest/C4Quaternion.h"
 
 class CGGameObjectData;
 
 class CGGameObject {
     public:
-    static uint32_t s_mirrorFieldIndex[4];
+    static const int32_t NUM_MIRROR_FIELDS = 4;
+    static uint32_t s_mirrorFieldIndex[NUM_MIRROR_FIELDS];
 
     static uint32_t DescriptorToMirrorOffset(uint32_t offset, uint32_t size, int32_t local, uint32_t base);
-    static uint32_t MirrorIndexFromFieldIndex(uint32_t fieldIndex, uint32_t count, int32_t local);
+    static uint32_t GetSavedIndexFromDataIndex(uint32_t fieldIndex, uint32_t unused_count, int32_t unused_local);
     static int32_t TotalFieldsSaved();
 
     /* 0000 */ CGGameObjectData* m_gameObject;
     /* 0004 */ void* m_gameObjectMirror;
 };
 
+// Destructible building state packed in CGGameObjectData::m_flags. States 1..3 use
+// DestructibleModelData m_state1WMO..m_state3WMO, whose models are named *_damaged,
+// *_destroyed and *_destroyed_construction (e.g. GuardTower); state 0 is the base display.
+enum DESTRUCTIBLE_STATE : int32_t {
+    DESTRUCTIBLE_STATE_INTACT = 0,
+    DESTRUCTIBLE_STATE_DAMAGED = 1,
+    DESTRUCTIBLE_STATE_DESTROYED = 2,
+    DESTRUCTIBLE_STATE_REBUILDING = 3,
+    NUM_DESTRUCTIBLE_STATES = 4,
+};
+
 class CGGameObjectData {
     public:
+    // Static flags and packed destructible data share a raw uint32 mirror.
+    // Bits0/4 block interaction; bit2 requires dynamic bit0. Broader roles unresolved.
+    enum : uint32_t {
+        FLAG_UNKNOWN_0 = 0x1,
+        FLAG_LOCKED = 2,
+        FLAG_UNKNOWN_2 = 0x4,
+        FLAG_TRANSPORT = 0x8,
+        FLAG_UNKNOWN_4 = 0x10,
+        FLAG_INTERACTION_BLOCK_MASK = 0x11,
+        FLAG_KEEP_ANIMATION_TIME = 0x80,
+        FLAG_DESTRUCTIBLE_IMPACT_TOGGLE = 0x100,
+        FLAG_DESTRUCTIBLE_DATA_MASK = 0xF00,
+    };
+
+    // Values and shifts inside the destructible payload, not independent flags.
+    enum : uint32_t {
+        DESTRUCTIBLE_DATA_SHIFT = 8,
+        DESTRUCTIBLE_STATE_SHIFT = 9,
+        DESTRUCTIBLE_STATE_IN_DATA_SHIFT = 1,
+        DESTRUCTIBLE_DATA_VALUE_MASK = 0xF,
+        DESTRUCTIBLE_STATE_IN_DATA_MASK = 0xE,
+        DESTRUCTIBLE_STATE_VALUE_MASK = 0x7,
+    };
+
+    // Low16 of GAMEOBJECT_DYNAMIC; upper16 is path progress, not more flags.
+    enum : uint16_t {
+        // Bypasses static flag0x4 in CanUse; broader meaning unresolved.
+        DYNFLAG_UNKNOWN_0 = 0x1,
+        // Dungeon difficulty indicators use full alpha; broader meaning unresolved.
+        DYNFLAG_UNKNOWN_1 = 2,
+        DYNFLAG_INTERACTION_DISABLED = 0x4,
+        DYNFLAG_PASSIVE_HIGHLIGHT = 0x8,
+        DYNFLAG_STOP_AT_CURRENT_LOCATION = 0x10,
+    };
+
+    // DWORD indices relative to this data block, not absolute network-field indices.
+    enum FIELD_ID : uint32_t {
+        OBJECT_FIELD_CREATED_BY = 0,
+        GAMEOBJECT_DISPLAYID = 2,
+        GAMEOBJECT_FLAGS = 3,
+        GAMEOBJECT_PARENTROTATION = 4,
+        GAMEOBJECT_DYNAMIC = 8,
+        GAMEOBJECT_FACTION = 9,
+        GAMEOBJECT_LEVEL = 10,
+        GAMEOBJECT_BYTES_1 = 11,
+        GAMEOBJECT_END = 12,
+    };
+
+    // Descriptor spans are measured in DWORDs.
+    enum FIELD_SIZE : uint32_t {
+        OBJECT_FIELD_CREATED_BY_SIZE = 2,
+        GAMEOBJECT_PARENTROTATION_SIZE = 4,
+    };
+
+
+    static const int32_t NUM_FIELDS = 12;
     /* 0000 */ WOWGUID m_createdBy;
     /* 0008 */ uint32_t m_displayID;
     /* 000C */ uint32_t m_flags;
-    /* 0010 */ float m_parentRotation[4];
+    /* 0010 */ C4Quaternion m_parentRotation; // Native XYZW quaternion; four network float words remain unchanged.
     /* 0020 */ uint16_t m_dynamicFlags;
     /* 0022 */ uint16_t m_pathProgress;
     /* 0024 */ uint32_t m_faction;

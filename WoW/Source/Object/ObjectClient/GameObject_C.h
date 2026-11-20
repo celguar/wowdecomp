@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "WoW/Source/Object/GameObjectDef.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
@@ -23,6 +24,8 @@ static const float MAX_LOOT_DISTANCE = 5.0f;
 static const float MAX_OBJ_INTEREST_RADIUS = 100.0f;
 static const float MAX_SITCHAIRUSE_DISTANCE = 3.0f;
 static const float MAX_SITCHAIR_DISTANCE_SQUARED = 0.16666667f;
+
+enum LOCK_ACTION : int32_t;
 
 class SpellRec;
 class CMapBaseObj;
@@ -69,10 +72,10 @@ class CGGameObject_C_TypeBase {
     virtual float GetFacing() const;
     virtual float GetRawFacing() const;
     virtual float GetSpeed() const;
-    virtual void AddPassenger(CPassenger* passenger, int32_t a2);
+    virtual void AddPassenger(CPassenger* passenger, int32_t reason);
     virtual int32_t IsPointInside(const C3Vector& point) const;
     virtual CMapBaseObj* GetMapObjectTransportID() const;
-    virtual void PostInit(bool a1);
+    virtual void PostInit(bool reenable);
     virtual void PostInitWithStats();
     virtual void Reenable();
     virtual void Disable();
@@ -91,6 +94,14 @@ class CGGameObject_C_TypeBase {
     CGGameObject_C_TypeBase(CGGameObject_C* owner);
 };
 
+// Display state passed to CGGameObject_C::SetDisplayState/UpdateState;
+// distinct from the model animation IDs (ANIMSTATE_*).
+enum GAMEOBJECT_DISPLAY_STATE : int32_t {
+    GAMEOBJECT_DISPLAY_STATE_OPEN = 0,
+    GAMEOBJECT_DISPLAY_STATE_CLOSED = 1,
+    GAMEOBJECT_DISPLAY_STATE_DESTROYED = 2,
+};
+
 enum : int32_t {
     ANIMSTATE_SPAWN = 0,
     ANIMSTATE_CLOSED = 1,
@@ -107,6 +118,18 @@ enum : int32_t {
     ANIMSTATE_CUSTOM3 = 11,
     ANIMSTATE_DESPAWN = 12,
     NUM_GAMEOBJ_ANIMSTATES = 13,
+};
+
+// CGGameObject_C::m_pendingOneShotAnim: index into s_oneShotAnims, queued until the model loads (inferred names).
+enum : int32_t {
+    ONE_SHOT_ANIM_NONE = 0,
+    ONE_SHOT_ANIM_SPAWN = 1,
+    ONE_SHOT_ANIM_CUSTOM0 = 2,
+    ONE_SHOT_ANIM_CUSTOM1 = 3,
+    ONE_SHOT_ANIM_CUSTOM2 = 4,
+    ONE_SHOT_ANIM_CUSTOM3 = 5,
+    ONE_SHOT_ANIM_DESPAWN = 6,
+    NUM_ONE_SHOT_ANIMS = 7,
 };
 
 class CGGameObject_C_TypeAnimated : public CGGameObject_C_TypeBase {
@@ -130,7 +153,7 @@ class CGGameObject_C_TypeAnimated : public CGGameObject_C_TypeBase {
     virtual void HandleAnimFinished();
     virtual void ActivateOneShotAnim(uint32_t anim);
     virtual const char* DebugStatus();
-    virtual void PostInit(bool a1);
+    virtual void PostInit(bool reenable);
     virtual void Disable();
     virtual void PostReenable();
     virtual void UpdateDisplay(uint32_t time);
@@ -185,7 +208,7 @@ class CGGameObject_C_Type_TransportBase : public CGGameObject_C_Type_WorldObj {
     virtual C3Vector GetPosition() const;
     virtual C3Vector GetRawPosition() const;
     virtual float GetSpeed() const;
-    virtual void AddPassenger(CPassenger* passenger, int32_t a2);
+    virtual void AddPassenger(CPassenger* passenger, int32_t reason);
     virtual int32_t IsPointInside(const C3Vector& point) const;
     virtual void PostInitWithStats();
     virtual void Reenable();
@@ -204,7 +227,7 @@ class CGGameObject_C_Type_MapObjTransport : public CGGameObject_C_Type_Transport
     /* 0080 */ uint32_t m_currentLeg;
 
     virtual void UpdateState(int32_t oldState, int32_t newState);
-    virtual void AddPassenger(CPassenger* passenger, int32_t a2);
+    virtual void AddPassenger(CPassenger* passenger, int32_t reason);
     virtual void PostInitWithStats();
     virtual void PostReenable();
     virtual ShipPath* GetShipPath() const;
@@ -222,7 +245,7 @@ struct DestructibleBuildingState {
     /* 0008 */ CMapEntity* m_object;
     /* 000C */ uint8_t m_loading;
     /* 000D */ uint8_t m_animate;
-    /* 000E */ uint8_t unused_000E[2];
+    /* 000E */ uint8_t unknown_000E[2];
 };
 
 class CGGameObject_C_Type_DestructibleBuilding : public CGGameObject_C_Type_WorldObj {
@@ -233,7 +256,7 @@ class CGGameObject_C_Type_DestructibleBuilding : public CGGameObject_C_Type_Worl
     static void ImpactEffectSequenceFinishedHandler(CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time, uint64_t param);
     static void MovedDoodadSequenceHandler(CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time, uint64_t param);
 
-    /* 0014 */ DestructibleBuildingState m_states [4];
+    /* 0014 */ DestructibleBuildingState m_states [NUM_DESTRUCTIBLE_STATES];
     /* 0054 */ int32_t m_previousState;
     /* 0058 */ float m_baseZ;
     /* 005C */ uint32_t m_animStartTime;
@@ -244,7 +267,7 @@ class CGGameObject_C_Type_DestructibleBuilding : public CGGameObject_C_Type_Worl
     /* 0070 */ float m_previousSinkDepth;
     /* 0074 */ SE2SoundKitObject m_sound;
     /* 0088 */ CDestructibleProxy m_proxy;
-    /* 00A8 */ DestructibleModelDataRec* m_modelData;
+    /* 00A8 */ const DestructibleModelDataRec* m_modelData;
     /* 00AC */ uint8_t m_loadPending;
     /* 00AD */ uint8_t m_animating;
 
@@ -253,7 +276,7 @@ class CGGameObject_C_Type_DestructibleBuilding : public CGGameObject_C_Type_Worl
     virtual int32_t IsHighlightSuppressed() const;
     virtual void OnUpdateFlags(uint32_t changed);
     virtual void HandleAnimEvent(uint32_t eventId, uint32_t data, const C3Vector& position, uint32_t time);
-    virtual void PostInit(bool a1);
+    virtual void PostInit(bool reenable);
     virtual void PostInitWithStats();
     virtual void Disable();
     virtual void PostReenable();
@@ -313,10 +336,10 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     static void SequenceCallback(CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time, uint64_t param);
 
     /* 00D8 */ CPassenger m_passenger;
-    /* 0108 */ TSList<void> m_gameObjectMirrorLists [12];
+    /* 0108 */ TSList<void> m_gameObjectMirrorLists [CGGameObjectData::NUM_FIELDS];
     /* 0198 */ TSLink<CGGameObject_C> m_transportLink;
     /* 01A0 */ CGGameObject_C_TypeBase* m_typeData;
-    /* 01A4 */ GameObjectStats* m_stats;
+    /* 01A4 */ const GameObjectStats* m_stats;
     /* 01A8 */ C44Matrix m_matrix;
     /* 01E8 */ CAaBox m_worldBounds;
     /* 0200 */ uint32_t m_transportTimeOffset;
@@ -324,11 +347,11 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     /* 0208 */ int32_t m_pendingOneShotAnim;
     /* 020C */ int32_t m_hasWorldBounds;
     /* 0210 */ CM2Model* m_lootEffect;
-    /* 0214 */ uint32_t m_effectAnimState;
+    /* 0214 */ OBJECT_EFFECT_STATE m_effectAnimState;
 
     virtual C3Vector GetPosition() const;
     virtual C3Vector GetRawPosition() const;
-    void UpdateWorldObject(int32_t a2) override;
+    void UpdateWorldObject(int32_t skipEntityUpdate) override;
     float GetFacing() const override;
     float GetRawFacing() const override;
     C4Quaternion GetRotation() const override;
@@ -348,7 +371,7 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     virtual float GetBaseAlpha() const;
     virtual bool IsTransport() const;
     virtual int32_t IsPointInside(const C3Vector& point) const;
-    virtual int32_t AddPassenger(CPassenger* passenger, int32_t a2);
+    virtual int32_t AddPassenger(CPassenger* passenger, int32_t reason);
     virtual float GetSpeed() const;
     virtual ShipPath* GetShipPath() const;
     C3Vector GetNamePosition() const override;
@@ -372,7 +395,7 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     int32_t CheckRange() const;
     void CloseInteraction();
     void UseObject();
-    CMapEntity* CreateWorldObject(uint64_t guid, int32_t a4, uint32_t doodadSetCount, const int16_t* doodadSets);
+    CMapEntity* CreateWorldObject(uint64_t guid, int32_t waitLoad, uint32_t doodadSetCount, const int16_t* doodadSets);
     void AddWorldDamageText(int32_t amount);
     void AddWorldHealingText(int32_t amount, const SpellRec* spell);
     const char* GetCloseText() const;
@@ -380,10 +403,10 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     float GetInteractDistanceSquared() const;
     const char* GetModelFileNameInternal() const;
     const char* GetOpenText() const;
-    uint32_t GetPropertyValue(uint32_t index) const;
+    uint32_t GetPropertyValue(uint32_t propertyIndex) const;
     int32_t GetPageTextMaterial() const;
     int32_t GetPageTextLanguage() const;
-    bool IsValidOpenAction(int32_t action) const;
+    bool IsValidOpenAction(LOCK_ACTION action) const;
     void LoadBaseObject(GameObjectStats_C* stats);
     void PlayCustomAnim(uint32_t anim);
     void PostInit(uint32_t time, const CClientObjCreate& create, bool reenable);
@@ -400,11 +423,16 @@ class CGGameObject_C : public CGObject_C, public CGGameObject {
     void UpdateObjectEffectAnimationStates(uint32_t anim);
     CAaBox GetWorldBounds() const;
     void UpdateDisplay(uint32_t time);
-    uint32_t GetProperty(int32_t prop) const;
+    uint32_t GetProperty(int32_t propertyId) const;
     bool IsLocked(int32_t* spellId, int32_t* skillValue, int32_t* requiredSkill, CGItem_C** key, uint32_t* entry) const;
     bool IsUsableInCombat() const;
     bool IsUsableMounted() const;
     bool IsUsableWhileImmune() const;
+
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug feature (Unit_C_Debug.cpp), stripped from the 3.3.5 release build.
+    const char* GetDebugStatus() const;
+#endif
 };
 
 void ApplyGameObjectArtKit(CM2Model* model, int32_t artKit);

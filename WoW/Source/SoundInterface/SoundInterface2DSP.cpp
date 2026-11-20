@@ -13,7 +13,7 @@ static TSHashTable<DSP_CHAIN_HEAD_LOOKUP, HASHKEY_STRI> s_dspChains;
 
 // VERIFY: 4b244940 auto
 // OFFSET: 0x004CD9D0
-static FMOD_DSP_TYPE TranslateDspType(int32_t type) {
+static FMOD_DSP_TYPE TranslateDspType(SI2_DSP_TYPE type) {
     switch (type) {
         case SI2_DSP_TYPE_PITCHSHIFT:
             return FMOD_DSP_TYPE_PITCHSHIFT;
@@ -38,7 +38,7 @@ static FMOD_DSP_TYPE TranslateDspType(int32_t type) {
 // INLINED
 SI2DspNode::SI2DspNode() {
     this->m_dsp = nullptr;
-    this->m_type = -1;
+    this->m_type = SI2_DSP_TYPE_UNINITIALIZED;
 }
 
 // INLINED
@@ -90,7 +90,7 @@ void SI2::DSP_ShutDown() {
 
 // VERIFY: 015e69f4 manual
 // OFFSET: 0x004CDF70
-void SI2::DSP_CreateDsp(const char* name, int32_t type, const float* params) {
+void SI2::DSP_CreateDsp(const char* name, SI2_DSP_TYPE type, const float* params) {
     static CVar* s_enableDSPEffects = CVar::Lookup("Sound_EnableDSPEffects");
 
     if (!s_enableDSPEffects->m_intValue) {

@@ -15,9 +15,15 @@ struct lua_State;
 
 class CGRaidMember {
     public:
+    enum RANK : int32_t {
+        MEMBER = 0,
+        ASSISTANT = 1,
+        LEADER = 2,
+    };
+
     /* 0000 */ WOWGUID m_guid;
     /* 0008 */ uint32_t m_subgroup;
-    /* 000C */ int32_t m_rank;
+    /* 000C */ RANK m_rank;
     /* 0010 */ CGPartyMemberState m_stats;
     /* 0320 */ int32_t m_readyCheckPending;
     /* 0324 */ int32_t m_readyCheckReady;
@@ -28,10 +34,16 @@ class CGRaidMember {
 
 class CGRaidInfo {
     public:
+    // Raid member slots (FrameXML MAX_RAID_MEMBERS).
+    static const int32_t MAX_RAID_MEMBERS = 40;
+    // Raid subgroups (FrameXML NUM_RAID_GROUPS).
+    static const int32_t NUM_RAID_GROUPS = 8;
+    // Raid target icons (FrameXML NUM_RAID_ICONS); this value also means no icon.
+    static const int32_t NUM_RAID_ICONS = 8;
     static void LeaveWorld();
-    static CGRaidMember* m_members[40];
+    static CGRaidMember* m_members[MAX_RAID_MEMBERS];
     static uint32_t m_numMembers;
-    static WOWGUID m_raidTargets[8];
+    static WOWGUID m_raidTargets[NUM_RAID_ICONS];
     static uint32_t m_realNumMembers;
     static WOWGUID m_selectedMember;
 
@@ -40,8 +52,8 @@ class CGRaidInfo {
     static WOWGUID m_readyCheckInitiator;
     static uint32_t m_readyCheckTimer;
     static uint8_t m_rosterCounter;
-    static int32_t m_partyReadyCheckReady[4];
-    static int32_t m_partyReadyCheckPending[4];
+    static int32_t m_partyReadyCheckReady[CGPartyInfo::MAX_PARTY_MEMBERS];
+    static int32_t m_partyReadyCheckPending[CGPartyInfo::MAX_PARTY_MEMBERS];
 
     static void EnterWorld();
     static void InitializeGame();

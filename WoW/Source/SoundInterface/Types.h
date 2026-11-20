@@ -82,6 +82,29 @@ enum VOCALUISOUNDS : int32_t {
     VUI_GUILDPERMISSIONS = 62,
     VUI_NORAGE = 63,
     VUI_NOENERGY = 64,
+    // Supported table slots with unresolved current semantic names.
+    VUI_UNKNOWN_6 = 6,
+    VUI_UNKNOWN_9 = 9,
+    VUI_UNKNOWN_14 = 14,
+    VUI_UNKNOWN_16 = 16,
+    VUI_UNKNOWN_17 = 17,
+    VUI_UNKNOWN_18 = 18,
+    VUI_UNKNOWN_19 = 19,
+    VUI_UNKNOWN_21 = 21,
+    VUI_UNKNOWN_23 = 23,
+    VUI_UNKNOWN_24 = 24,
+    VUI_UNKNOWN_34 = 34,
+    VUI_UNKNOWN_36 = 36,
+    VUI_UNKNOWN_37 = 37,
+    VUI_UNKNOWN_39 = 39,
+    VUI_UNKNOWN_53 = 53,
+    VUI_UNKNOWN_55 = 55,
+    VUI_UNKNOWN_56 = 56,
+    VUI_UNKNOWN_58 = 58,
+    VUI_UNKNOWN_60 = 60,
+    VUI_UNKNOWN_65 = 65,
+    VUI_UNKNOWN_66 = 66,
+    VUI_UNKNOWN_67 = 67,
     NUM_VOCALUISOUNDS = 68,
     VUI_NONE = 68,
 };
@@ -123,7 +146,39 @@ enum ITEMSOUNDTYPE : int32_t {
     // ITEMSOUND_CLOSE = 3,
 };
 
-enum SI2_DSP_TYPE {
+// Game sound-kit groups; 7..17 share SFX routing but have separate voice limits.
+// Names describe 3.3.5 tables/callers; original enum spelling is unknown.
+enum SI2_SOUND_GROUP : int32_t {
+    SI2_SOUND_GROUP_SFX = 0,
+    SI2_SOUND_GROUP_MUSIC = 1,
+    SI2_SOUND_GROUP_AMBIENCE = 2,
+    SI2_SOUND_GROUP_CINEMATIC = 3,
+    SI2_SOUND_GROUP_SCRIPT_SOUND = 4,
+    SI2_SOUND_GROUP_SCRIPT_MUSIC = 5,
+    SI2_SOUND_GROUP_RACIAL_CINEMATIC = 6,
+    SI2_SOUND_GROUP_VOCAL_ERROR = 7,
+    SI2_SOUND_GROUP_SPLASH = 8,
+    SI2_SOUND_GROUP_EXERTION = 9,
+    SI2_SOUND_GROUP_WEAPON_SWING = 10,
+    SI2_SOUND_GROUP_INJURY = 11,
+    SI2_SOUND_GROUP_PLAYER_INJURY = 12,
+    SI2_SOUND_GROUP_FOOTSTEP = 13,
+    SI2_SOUND_GROUP_IMPACT = 14,
+    SI2_SOUND_GROUP_MORE_AUDIBLE_EXERTION = 15,
+    SI2_SOUND_GROUP_MORE_AUDIBLE_INJURY = 16,
+    SI2_SOUND_GROUP_PLAYER_FOOTSTEP = 17,
+    SI2_SOUND_GROUP_COUNT = 18,
+};
+
+// Inferred from 3.3.5 playback/update dispatch; original enum spelling is unknown.
+enum SI2_SOUND_USAGE : int32_t {
+    SI2_SOUND_USAGE_LOOPING = 0,
+    SI2_SOUND_USAGE_INTERVAL = 1,
+    SI2_SOUND_USAGE_ONESHOT = 2,
+};
+
+enum SI2_DSP_TYPE : int32_t {
+    SI2_DSP_TYPE_UNINITIALIZED = -1,
     SI2_DSP_TYPE_NONE = 0,
     SI2_DSP_TYPE_PITCHSHIFT = 1,
     SI2_DSP_TYPE_HIGHPASS = 2,

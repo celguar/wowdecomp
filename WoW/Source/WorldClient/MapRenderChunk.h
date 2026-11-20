@@ -11,6 +11,7 @@
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Tempest/C4Vector.h"
 #include "Engine/Source/Tempest/CImVector.h"
+#include "WoW/Source/WorldClient/WorldConstants.h"
 
 class CMapArea;
 class CM2Lighting;
@@ -62,6 +63,24 @@ class CMapRenderChunkLayer {
 
 class CMapRenderChunk {
     public:
+    enum RENDER_FLAGS : int32_t {
+        FLAG_NONE = 0,
+        FLAG_UNLIT_LAYERS = 0x1,
+        FLAG_SPECULAR = 0x4,
+        FLAG_BLEND_MIP1 = 0x8,
+        FLAG_REQUEST_BLEND_MIP1 = 0x10,
+        FLAG_LAYER_TEXTURES_DIRTY = 0x20,
+        FLAG_TEXTURE_UPDATE_REQUESTS = 0x30,
+    };
+
+    enum BATCH_FLAGS : int32_t {
+        BATCH_NONE = 0,
+        BATCH_PAIR_VERTICAL = 0x1,
+        BATCH_PAIR_HORIZONTAL = 0x2,
+        BATCH_PAIR_MASK = 0x3,
+        BATCH_LAYER_TEXTURES_LOADED = 0x8,
+    };
+
     struct SLayerAlpha;
     struct SVertexShaderConstants;
     typedef void (*RenderLayersFunc)(CMapRenderChunk* renderChunk);
@@ -99,7 +118,7 @@ class CMapRenderChunk {
     static void UpdateShadowGxTexture(EGxTexCommand cmd, uint32_t w, uint32_t h, uint32_t d, uint32_t mipLevel, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     static void RenderMultiPassAlpha(CMapRenderChunk* renderChunk);
     static void RenderMultiPassAdditive(CMapRenderChunk* renderChunk);
-    static void SetShaders(int32_t a1, int32_t a2);
+    static void SetShaders(int32_t specular, int32_t unlitLayers);
     static void InitializeVertexShaderConstants(const C44Matrix& world, const C44Matrix& view);
     static CGxShader* GetVertexShader(int32_t pointLights, int32_t layers, int32_t specular, int32_t vertexColor, int32_t a5, int32_t shadow);
     static void ComputeTexMatrices(C44Matrix& layerMatrix, C44Matrix& alphaMatrix, const C3Vector& offset, float scale);
@@ -132,7 +151,7 @@ class CMapRenderChunk {
     /* 0009 */ uint8_t m_layersCount;
     /* 000A */ int16_t m_renderFlags;
     /* 000C */ float m_lastUpdateTime;
-    /* 0010 */ CMapChunk* m_mapChunks [2];
+    /* 0010 */ CMapChunk* m_mapChunks [MAP_CHUNKS_PER_RENDER_BATCH];
     /* 0018 */ C3Vector m_vec1;
     /* 0024 */ CAaSphere m_sphere;
     /* 0034 */ CMapRenderChunkLayer m_layers [4];
@@ -203,6 +222,17 @@ struct CMapRenderChunk::SVertexShaderConstants {
 };
 
 struct SMMapHeader {
+    enum MAP_FLAGS : int32_t {
+        HAS_GLOBAL_WMO = 1,
+        VERTEX_COLORS = 2,
+        BIG_ALPHA = 0x4,
+        UNKNOWN_8 = 0x8,
+    };
+
+    enum MAP_BITS : int32_t {
+        BIG_ALPHA_BIT_INDEX = 2,
+    };
+
     /* 0000 */ uint32_t m_flags;
     /* 0004 */ uint32_t m_something;
     /* 0008 */ uint32_t m_unused [6];

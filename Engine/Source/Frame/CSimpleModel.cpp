@@ -208,7 +208,7 @@ void CSimpleModel::SetLight(const CM2Light& light) {
 // OFFSET: 0x0095F5E0
 void CSimpleModel::SetSequence(uint32_t sequence) {
     if (this->m_model) {
-        this->m_model->SetBoneSequence(0xFFFFFFFF, sequence, 0xFFFFFFFF, 0, 1.0f, 0, 1);
+        this->m_model->SetBoneSequence(M2_KEY_BONE_NONE, sequence, M2_RANDOM_VARIATION, 0, 1.0f, 0, 1);
     }
 }
 
@@ -216,7 +216,7 @@ void CSimpleModel::SetSequence(uint32_t sequence) {
 // OFFSET: 0x0095F610
 int32_t CSimpleModel::SetSequenceTime(uint32_t sequence, int32_t time) {
     if (this->m_model) {
-        this->m_model->SetBoneSequence(0xFFFFFFFF, sequence, 0xFFFFFFFF, time, 1.0f, 0, 1);
+        this->m_model->SetBoneSequence(M2_KEY_BONE_NONE, sequence, M2_RANDOM_VARIATION, time, 1.0f, 0, 1);
     }
 
     return 1;
@@ -336,12 +336,12 @@ void CSimpleModel::SetCameraByIndex(uint32_t index) {
 
     CM2Model* model = this->m_model;
 
-    if (!(model->m_fFlags & 0x1)) {
+    if (!(model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
         model->WaitForLoad(nullptr);
     }
 
     if (index < model->m_shared->m_data->m_cameras.m_count) {
-        this->SetCamera(static_cast<CCamera*>(this->m_model->GetCameraByIndex(index)));
+        this->SetCamera(this->m_model->GetCameraByIndex(index));
         return;
     }
 
@@ -520,7 +520,7 @@ void CSimpleModel::SetModel(CM2Model* model) {
 
     if (model) {
         model->m_fadeAlpha = static_cast<uint8_t>(this->m_alpha * this->m_parentAlpha / 255) * 0.0039215689f;
-        this->m_model->SetSequenceCallback(reinterpret_cast<void*>(&AnimFinishedCallback), reinterpret_cast<uintptr_t>(this));
+        this->m_model->SetSequenceCallback(&AnimFinishedCallback, reinterpret_cast<uintptr_t>(this));
         this->m_model->m_lightingCallback = &CSimpleModel::LightingCallback;
         this->m_model->m_lightingArg = this;
         this->m_model->SetLoadedCallback(&CSimpleModel::ModelLoaded, this);
@@ -550,7 +550,7 @@ void CSimpleModel::OnModelLoaded(CM2Model* model) {
 void CSimpleModel::OnFrameRender(CRenderBatch* batch, uint32_t layer) {
     this->CSimpleFrame::OnFrameRender(batch, layer);
 
-    if (this->m_model && layer == 2) {
+    if (this->m_model && layer == DRAWLAYER_ARTWORK) {
         batch->QueueCallback(&CSimpleModel::RenderModel, this);
     }
 }
@@ -566,15 +566,15 @@ void CSimpleModel::OnLayerUpdate(float elapsedSec) {
         CM2Model* model = this->m_model;
 
         if (model->m_attachParent) {
-            model->m_fFlags |= 0x80;
+            model->m_runtimeFlags |= M2_FLAGS::M2_ATTACHED_DRAW_ENABLED;
         } else {
-            model->m_fFlags |= 0x8;
+            model->m_runtimeFlags |= M2_FLAGS::M2_DRAW_ENABLED;
         }
 
         if (model->m_attachParent) {
-            model->m_fFlags |= 0x20000;
+            model->m_runtimeFlags |= M2_FLAGS::M2_ATTACHED_PARTICLES_ENABLED;
         } else {
-            model->m_fFlags |= 0x10000;
+            model->m_runtimeFlags |= M2_FLAGS::M2_PARTICLES_ENABLED;
         }
     }
 

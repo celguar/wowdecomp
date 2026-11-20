@@ -1,3 +1,4 @@
+#include "Engine/Source/Tempest/CMath.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -16,15 +17,15 @@
 static const float DEFAULT_DIST = 100.0f;
 static const float DEFAULT_FARZ = 5000.0f;
 static const float DEFAULT_NEARZ = 8.0f;
-static const float DEFAULT_FOV = 1.5707964f;
+static const float DEFAULT_FOV = HALF_PI;
 static const float DEFAULT_SCREEN_FRUSTUM_LENGTH = 500.0f;
 
 // STATIC: 0x00B4A304
-static float s_inv2Pi = 1.0f / 6.2831855f;
+static float s_inv2Pi = 1.0f / TWO_PI;
 
 // INLINED
 CBaseManaged::CBaseManaged() {
-    this->m_dataTypeId = 0;
+    this->m_dataTypeId = CBaseManaged::DATA_TYPE::UNKNOWN_0;
     this->m_flags = 0;
     this->m_updateFcn = nullptr;
     this->m_updateData = nullptr;
@@ -307,10 +308,10 @@ CCamera* CameraDuplicate(CCamera* source) {
 // VERIFY: 1384d21a auto
 // OFFSET: 0x004C1140
 float CAngle::ClampTo2Pi(float angle) {
-    float turns = static_cast<float>(static_cast<int32_t>(angle * s_inv2Pi)) * 6.2831855f;
+    float turns = static_cast<float>(static_cast<int32_t>(angle * s_inv2Pi)) * TWO_PI;
 
     if (angle < 0.0f) {
-        turns -= 6.2831855f;
+        turns -= TWO_PI;
     }
 
     return angle - turns;
@@ -318,7 +319,7 @@ float CAngle::ClampTo2Pi(float angle) {
 
 // VERIFY: d430685f manual
 // OFFSET: 0x004C1180
-static void GetManagedValue(CDataMgr* mgr, uint32_t index, float* value, uint8_t dataTypeId) {
+static void GetManagedValue(CDataMgr* mgr, uint32_t index, float* value, CBaseManaged::DATA_TYPE dataTypeId) {
     if (!value || !mgr || index >= mgr->m_managed.Count() || !mgr->m_managed[index] || mgr->m_managed[index]->m_dataTypeId != dataTypeId) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return;
@@ -341,14 +342,14 @@ static void GetManagedValue(CDataMgr* mgr, uint32_t index, float* value, uint8_t
 // OFFSET: 0x004C11F0
 float CameraGetFloat(CCamera* camera, uint32_t index) {
     float value = 0.0f;
-    GetManagedValue(camera, index, &value, 6);
+    GetManagedValue(camera, index, &value, CBaseManaged::DATA_TYPE::FLOAT);
 
     return value;
 }
 
 // VERIFY: ecbbb5cc manual
 // OFFSET: 0x004C1220
-static void GetManagedValue(CDataMgr* mgr, uint32_t index, C3Vector* value, uint8_t dataTypeId) {
+static void GetManagedValue(CDataMgr* mgr, uint32_t index, C3Vector* value, CBaseManaged::DATA_TYPE dataTypeId) {
     if (!value || !mgr || index >= mgr->m_managed.Count() || !mgr->m_managed[index] || mgr->m_managed[index]->m_dataTypeId != dataTypeId) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return;
@@ -370,18 +371,18 @@ static void GetManagedValue(CDataMgr* mgr, uint32_t index, C3Vector* value, uint
 // VERIFY: 15f73a5e auto
 // OFFSET: 0x004C1290
 void DataMgrGetCoord(CDataMgr* mgr, uint32_t index, C3Vector* value) {
-    GetManagedValue(mgr, index, value, 3);
+    GetManagedValue(mgr, index, value, CBaseManaged::DATA_TYPE::VECTOR3);
 }
 
 // VERIFY: 6e02d0ab manual
 // OFFSET: 0x004C12B0
 void CameraSetCoord(CCamera* camera, uint32_t index, const C3Vector& value, uint32_t keepMask) {
     C3Vector current(0.0f, 0.0f, 0.0f);
-    GetManagedValue(camera, index, &current, 3);
+    GetManagedValue(camera, index, &current, CBaseManaged::DATA_TYPE::VECTOR3);
 
     C3Vector newValue((keepMask & 0x1) ? current.x : value.x, (keepMask & 0x2) ? current.y : value.y, (keepMask & 0x4) ? current.z : value.z);
 
-    if (!camera || index >= camera->m_managed.Count() || !camera->m_managed[index] || camera->m_managed[index]->m_dataTypeId != 3 || (camera->m_managed[index]->m_flags & CBaseManaged::READONLY)) {
+    if (!camera || index >= camera->m_managed.Count() || !camera->m_managed[index] || camera->m_managed[index]->m_dataTypeId != CBaseManaged::DATA_TYPE::VECTOR3 || (camera->m_managed[index]->m_flags & CBaseManaged::READONLY)) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return;
     }
@@ -396,7 +397,7 @@ void CameraSetCoord(CCamera* camera, uint32_t index, const C3Vector& value, uint
 // VERIFY: ef5a2ea9 manual
 // OFFSET: 0x004C1360
 void CameraSetFloat(CCamera* camera, uint32_t index, float value) {
-    if (!camera || index >= camera->m_managed.Count() || !camera->m_managed[index] || camera->m_managed[index]->m_dataTypeId != 6 || (camera->m_managed[index]->m_flags & CBaseManaged::READONLY)) {
+    if (!camera || index >= camera->m_managed.Count() || !camera->m_managed[index] || camera->m_managed[index]->m_dataTypeId != CBaseManaged::DATA_TYPE::FLOAT || (camera->m_managed[index]->m_flags & CBaseManaged::READONLY)) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return;
     }
@@ -413,7 +414,7 @@ void CameraSetFloat(CCamera* camera, uint32_t index, float value) {
 void CDataMgr::InsertByPriority(CBaseManaged* data) {
     for (CBaseManaged* node = this->m_updateList.Head(); node; node = this->m_updateList.Next(node)) {
         if (node->m_updatePriority <= data->m_updatePriority) {
-            this->m_updateList.LinkNode(data, 2, node);
+            this->m_updateList.LinkNode(data, TSLIST_LINK_BEFORE, node);
             return;
         }
     }
@@ -425,7 +426,7 @@ void CDataMgr::InsertByPriority(CBaseManaged* data) {
 // OFFSET: 0x004C14B0
 void CDataMgr::AddManaged(TManaged<C3Vector>* data, uint32_t index, uint8_t flags) {
     data->m_flags = flags;
-    data->m_dataTypeId = 3;
+    data->m_dataTypeId = CBaseManaged::DATA_TYPE::VECTOR3;
     this->m_managed[index] = data;
 
     if (flags & CBaseManaged::ALWAYSUPDATE) {
@@ -437,7 +438,7 @@ void CDataMgr::AddManaged(TManaged<C3Vector>* data, uint32_t index, uint8_t flag
 // OFFSET: 0x004C14E0
 void CDataMgr::AddManaged(TManaged<float>* data, uint32_t index, uint8_t flags) {
     data->m_flags = flags;
-    data->m_dataTypeId = 6;
+    data->m_dataTypeId = CBaseManaged::DATA_TYPE::FLOAT;
     this->m_managed[index] = data;
 
     if (flags & CBaseManaged::ALWAYSUPDATE) {

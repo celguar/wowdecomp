@@ -2,11 +2,22 @@
 #define WOW_SOURCE_UI_TRADESKILLFRAME_H
 
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
 
 struct lua_State;
 class SkillLineRec;
+
+// Trade skill slot filter bits continue the inventory slots (1 << INVSLOT_*) with
+// these extra entries, named after their s_invSlotTokens strings.
+enum TRADESKILL_INVSLOT : int32_t {
+    TRADESKILL_INVSLOT_ENCH_WEAPON   = 23, // ENCHSLOT_WEAPON
+    TRADESKILL_INVSLOT_ENCH_2HWEAPON = 24, // ENCHSLOT_2HWEAPON
+    TRADESKILL_INVSLOT_SHIELD        = 25, // SHIELDSLOT
+    TRADESKILL_INVSLOT_NONEQUIP      = 26, // NONEQUIPSLOT
+    NUM_TRADESKILL_INVSLOTS          = 27,
+};
 
 enum TRADESKILL_CATEGORY : int32_t {
     TRADESKILL_OPTIMAL = 0,
@@ -56,7 +67,7 @@ class CGTradeSkillInfo {
     static uint32_t m_invTypeFilter;
     static uint32_t m_collapseFilter;
     static void ClearItemCallbacks();
-    static void SetInvTypeFilter(int32_t a1);
+    static void SetInvTypeFilter(BOOL applySubClassFilter);
     static int32_t GetSubClassIndexFromSkill(uint32_t index);
     static int32_t m_filteredSkills;
     static int32_t m_spellID;

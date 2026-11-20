@@ -11,12 +11,33 @@
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
 #include "WoW/Source/Net/Types.h"
+#include "WoW/Source/Object/ObjectClient/Types.h"
 #include "WoW/Source/Object/ObjectClient/Object_C.h"
 #include "WoW/Source/Object/WGUID.h"
 #include "WoW/Source/SoundInterface/SoundInterface2.h"
 #include "WoW/Source/Ui/PartyFrame.h"
 #include "WoW/Source/Ui/TotemInfo.h"
 #include "WoW/Source/Ui/Types.h"
+
+// Unit filter for TargetNearest*, TargetDirection* and ClosestObjectMatch,
+// named after the Script_TargetNearest* function that passes each value.
+enum UNIT_TARGET_TYPE : int32_t {
+    UNIT_TARGET_ANY           = 0, // TargetNearest
+    UNIT_TARGET_ENEMY         = 1, // TargetNearestEnemy
+    UNIT_TARGET_ENEMY_PLAYER  = 2, // TargetNearestEnemyPlayer
+    UNIT_TARGET_FRIEND        = 3, // TargetNearestFriend
+    UNIT_TARGET_FRIEND_PLAYER = 4, // TargetNearestFriendPlayer
+    UNIT_TARGET_PARTY_MEMBER  = 5, // TargetNearestPartyMember
+    UNIT_TARGET_RAID_MEMBER   = 6, // TargetNearestRaidMember
+};
+
+// CGGameUI::ShowBlockedActionFeedback type: forbidden actions signal
+// ADDON_ACTION_FORBIDDEN, the others ADDON_ACTION_BLOCKED (inferred names).
+enum BLOCKED_ACTION_TYPE : uint32_t {
+    BLOCKED_ACTION_FORBIDDEN = 0,
+    BLOCKED_ACTION_BLOCKED = 1,
+    BLOCKED_ACTION_BLOCKED_IN_COMBAT = 2,
+};
 
 class CGUnit_C;
 class CGItem_C;
@@ -204,7 +225,7 @@ class CGGameUI {
     static void DisplayNameError(VALIDATE_NAME_RESULT error);
     static void UpdateActivePlayer();
     static void ClearClientControls();
-    static void OpenPlayerSkinned(bool a1);
+    static void OpenPlayerSkinned(bool freeRepop);
     static void OpenResurrectRequest(const char* name);
     static void CancelPartyInvite();
     static void SetSummonRequest(WOWGUID summoner, uint32_t area, uint32_t timeout);
@@ -243,7 +264,7 @@ class CGGameUI {
     static uint32_t m_lastRegenTime;
     static WOWGUID m_comboTarget;
     static uint16_t m_accountDataGeneration;
-    static TotemInfo m_totems[4];
+    static TotemInfo m_totems[MAX_TOTEMS];
     static MirrorTimerInfo m_mirrorTimerInfo[NUM_UNIT_MIRROR_TIMERS];
     static MirrorTimerInfo* MirrorTimerGetInfo(uint32_t index);
     static uint32_t GetInstanceDifficulty();
@@ -253,11 +274,11 @@ class CGGameUI {
     static void HandleDisplaySizeChanged(const CSizeEvent& evt);
     static void DisplayError(UIErrors error, ...);
     static int32_t IsAutoLooting();
-    static void ShowCombatFeedback(const WOWGUID& guid, int32_t amount, uint32_t schoolMask, uint32_t flags);
-    static void ShowSpellMissFeedback(const WOWGUID& guid, int32_t reason);
+    static void ShowCombatFeedback(const WOWGUID& guid, int32_t amount, uint32_t schoolMask, uint32_t hitInfo);
+    static void ShowSpellMissFeedback(const WOWGUID& guid, MISS_REASON reason);
     static void ShowHealingFeedback(const WOWGUID& guid, int32_t amount, bool crit);
     static void ShowEnergizeFeedback(const WOWGUID& guid, int32_t powerType, int32_t amount);
-    static void SignalUnitCombat(const WOWGUID& guid, const char* action, int32_t amount, uint32_t schoolMask, uint32_t flags);
+    static void SignalUnitCombat(const WOWGUID& guid, const char* action, int32_t amount, uint32_t schoolMask, uint32_t hitInfo);
     static void ShowCombatFeedbackAttackRoundInfo(const ATTACKROUNDINFO* info);
     static void HandleFocusChanged(const CFocusEvent& evt);
     static int32_t Idle(const void* data, void* param);
@@ -272,7 +293,7 @@ class CGGameUI {
     static bool UnitHighlightsCVarCallback(CVar* var, const char* oldValue, const char* value, void* arg);
     static void ShowBlockedFrameFeedback(CScriptRegion* region);
     static void AutoMouseOver();
-    static void ClearCursor(int32_t a1, int32_t a2);
+    static void ClearCursor(int32_t unlock, int32_t sendEvent);
     static void UpdateThreatWarningEnabled(int32_t value);
     static void UpdateUnitHighlights();
     static void UpdateAreaSpiritHealerDistance();
@@ -309,15 +330,15 @@ class CGGameUI {
     static void OpenGuildInvite(const char* inviter, const char* guild);
     static void AcceptLevelGrant();
     static void AcceptAreaSpiritHeal();
-    static void TargetDirection(float facing, float angle, int32_t type);
-    static WOWGUID ClosestObjectMatch(const char* name, uint32_t typeMask, int32_t targetType, int32_t exact, float maxDistance, int32_t ignoreHostileTotems);
+    static void TargetDirection(float facing, float angle, UNIT_TARGET_TYPE type);
+    static WOWGUID ClosestObjectMatch(const char* name, uint32_t typeMask, UNIT_TARGET_TYPE targetType, int32_t exact, float maxDistance, int32_t ignoreHostileTotems);
     static bool CanInspect(CGUnit_C* unit);
     static void SetCursorMoney(uint32_t amount);
     static void SetCursorMoney(uint32_t amount, UICURSORTYPE type, int32_t event);
-    static int32_t VirtualItemIsLocked(int32_t id, uint32_t virtualSlot, int32_t a3);
-    static void LockVirtualItem(int32_t id, uint32_t virtualSlot, int32_t a3);
+    static BOOL VirtualItemIsLocked(int32_t id, uint32_t virtualSlot, int32_t unknownSource);
+    static void LockVirtualItem(int32_t id, uint32_t virtualSlot, int32_t unknownSource);
     static void TargetTradeItem();
-    static void SetCursorItem(WOWGUID item, WOWGUID container, uint32_t slot, int32_t a4, int32_t stackSplit, int32_t playSound);
+    static void SetCursorItem(WOWGUID item, WOWGUID container, uint32_t slot, int32_t unlock, int32_t stackSplit, int32_t playSound);
     static WOWGUID m_lockedTarget;
     static int32_t m_visible;
     static WOWGUID m_lastEnemyTarget;
@@ -360,7 +381,7 @@ class CGGameUI {
     static int32_t MirrorTimerToIndex(const char* timer);
     static int32_t CanResetInstance();
     static void SetLastInstanceTime(uint32_t time, int32_t mapId, int32_t currentMapId);
-    static void ShowBlockedActionFeedback(FrameScript_Object* object, uint32_t type);
+    static void ShowBlockedActionFeedback(FrameScript_Object* object, BLOCKED_ACTION_TYPE type);
     static void Reload();
     static void ResetCamera(WOWGUID guid);
     static void SetActiveCorpse(WOWGUID guid);
@@ -375,8 +396,8 @@ class CGGameUI {
     static TotemInfo* GetTotemInfo(uint32_t slot);
     static int32_t IsKeyDown(KEY key);
     static int32_t IsRaidMemberOrPet(const WOWGUID& guid);
-    static void ClearInteractTarget(const WOWGUID& guid, int32_t a2);
-    static void CloseLoot(bool a1, bool a2, bool a3);
+    static void ClearInteractTarget(const WOWGUID& guid, BOOL silent);
+    static void CloseLoot(bool sendRelease, bool interrupted, bool showNoUIError);
     static void OpenLoot(CGObject_C* object, int32_t coins, LOOT_ACQUIRE lootAcquire);
     static void ClearLootSlot(uint8_t slot);
     static void LootSlotChanged(uint8_t slot);
@@ -386,10 +407,10 @@ class CGGameUI {
     static void RegisterSavedVariable(const char* name, int32_t perCharacter);
     static void BreakTarget(WOWGUID guid);
     static void DestroyTotem(int32_t slot);
-    static void ClearTarget(WOWGUID guid, int32_t a2);
+    static void ClearTarget(WOWGUID guid, BOOL sendSelection);
     static int32_t IsPartyMember(const WOWGUID& guid);
     static int32_t IsInParty(const WOWGUID& guid);
-    static void GetSelectionHighlightColor(const WOWGUID& guid, CImVector* color, int32_t a3);
+    static void GetSelectionHighlightColor(const WOWGUID& guid, CImVector* color, int32_t socialColors);
     static void SetFocusTarget(const WOWGUID& guid);
     static void UnitModelUpdate(const WOWGUID& guid, uint32_t flags);
     static CGPartyMemberState* GetPartyMemberStateFromPet(const WOWGUID& petGuid);
@@ -399,8 +420,8 @@ class CGGameUI {
     static int32_t GetCursorSpell();
     static int32_t GetCursorVirtualItem();
     static void GetCursorVirtualItem(int32_t& id, int32_t& slot);
-    static int32_t GetVirtualItemCount(int32_t id, uint32_t virtualSlot, int32_t a3);
-    static void UnlockVirtualItem(int32_t id, uint32_t virtualSlot, int32_t a3);
+    static int32_t GetVirtualItemCount(int32_t id, uint32_t virtualSlot, int32_t unknownSource);
+    static void UnlockVirtualItem(int32_t id, uint32_t virtualSlot, int32_t unknownSource);
     static int32_t GetCursorVirtualItemOfType(UICURSORTYPE type);
     static void DropCursorSpell();
     static void SetCursorSpell(int32_t spellId);
@@ -491,6 +512,7 @@ extern CVar* g_predictedPowerCVar;
 
 WOWGUID GetRaidMemberGUID(uint32_t index);
 bool CanTriggerTutorial(uint32_t tutorial);
+bool CanTriggerTutorial(uint32_t tutorial);
 bool IsTutorialFlagged(uint32_t tutorial);
 
 bool AutoInteractStateChangedCallback(CVar* var, const char* oldValue, const char* value, void* arg);
@@ -511,7 +533,7 @@ struct TaintStackFrame {
 };
 
 struct TAINTEVENT : public TSHashObject<TAINTEVENT, HASHKEY_STR> {
-    /* 0018 */ int32_t m_type;
+    /* 0018 */ int32_t m_type; // LUA_TAINTEVENT_*
     /* 001C */ const char* m_name;
     /* 0020 */ const char* m_taint;
     /* 0024 */ TSGrowableArray<TaintStackFrame> m_stack;
@@ -532,8 +554,8 @@ bool SetTaintLogCallback(CVar* var, const char* oldValue, const char* value, voi
 bool ShowClassColorInNameplateCallback(CVar* var, const char* oldValue, const char* value, void* arg);
 void TaintEventCallback(lua_State* L, int32_t event, const char* name, const char* taint);
 
-void TargetNearestEnemy(int32_t reverse, int32_t type);
-int32_t UnitMatchesTargetType(CGUnit_C* unit, CGUnit_C* target, int32_t type);
+void TargetNearestEnemy(int32_t reverse, UNIT_TARGET_TYPE type);
+int32_t UnitMatchesTargetType(CGUnit_C* unit, CGUnit_C* target, UNIT_TARGET_TYPE type);
 int32_t Script_IsWindowsClient(lua_State* L);
 int32_t Script_IsMacClient(lua_State* L);
 int32_t Script_GetLocale(lua_State* L);
@@ -557,6 +579,13 @@ extern CVar* g_chatBubblesCVar;
 extern CVar* g_chatBubblesPartyCVar;
 
 void UpdateInstanceOwnershipPacket(int32_t owns);
+
+// UpdateModelForUI flags, named after the unit events each one sends.
+enum UI_MODEL_UPDATE_FLAGS : uint32_t {
+    UI_MODEL_UPDATE_MODEL = 0x1, // UNIT_MODEL_CHANGED
+    UI_MODEL_UPDATE_PORTRAIT = 0x2, // Dirties the cached portrait and sends UNIT_PORTRAIT_UPDATE.
+    UI_MODEL_UPDATE_ALL = 0x3,
+};
 
 void UpdateModelForUI(const WOWGUID& guid, uint32_t flags);
 

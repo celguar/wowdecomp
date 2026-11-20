@@ -1,4 +1,5 @@
 #include "MapLowDetail.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "WoW/Source/WorldClient/WorldConstants.h"
 #include <cmath>
 #include <cstring>
@@ -27,7 +28,7 @@ CMapAreaLow::CMapAreaLow() {
     this->m_horizonLink.m_next = nullptr;
     this->m_indexCount = 0;
     this->m_block = nullptr;
-    this->m_flags = 0;
+    this->m_flags = CMapAreaLow::FLAGS::NONE;
     this->m_heights = nullptr;
     this->m_holes = nullptr;
 }
@@ -82,17 +83,17 @@ void CMapLowDetail::CullHorizonAreas(const C3Vector* pos) {
         minCol = 0;
     }
 
-    if (maxCol >= 64) {
-        maxCol = 63;
+    if (maxCol >= MAP_AREAS_PER_AXIS) {
+        maxCol = MAP_AREAS_PER_AXIS - 1;
     }
 
-    if (maxRow >= 64) {
-        maxRow = 63;
+    if (maxRow >= MAP_AREAS_PER_AXIS) {
+        maxRow = MAP_AREAS_PER_AXIS - 1;
     }
 
     for (int32_t r = minRow; r <= maxRow; r++) {
         for (int32_t c = minCol; c <= maxCol; c++) {
-            CMapAreaLow* area = this->m_areas[64 * r + c];
+            CMapAreaLow* area = this->m_areas[CMap::GetAreaIndex(c, r)];
 
             if (!area || CWorldScene::FrustumCull(&area->m_bbox) || CWorldOcclusion::QueryVolumes(&area->m_sphere)) {
                 continue;
@@ -136,7 +137,7 @@ void CMapLowDetail::Load(const char* mapPath, const char* mapName) {
     uint32_t* chunk = reinterpret_cast<uint32_t*>(this->m_data + reinterpret_cast<uint32_t*>(this->m_data)[1] + 8);
     char* data = this->m_data + reinterpret_cast<uint32_t*>(this->m_data)[1] + 16;
 
-    if (chunk[0] == 0x4D574D4F) {
+    if (chunk[0] == SIffChunk::TOKEN_MWMO) {
         this->m_mapObjNames = data;
         uint32_t* mwid = reinterpret_cast<uint32_t*>(data + chunk[1]);
         this->m_mapObjNameOffsets = mwid + 2;
@@ -150,8 +151,8 @@ void CMapLowDetail::Load(const char* mapPath, const char* mapName) {
 
     uint32_t index = 0;
 
-    for (uint32_t y = 0; y < 1024; y += 16) {
-        for (uint32_t x = 0; x < 1024; x += 16) {
+    for (uint32_t y = 0; y < MAP_CHUNKS_PER_MAP_AXIS; y += MAP_CHUNKS_PER_AREA_AXIS) {
+        for (uint32_t x = 0; x < MAP_CHUNKS_PER_MAP_AXIS; x += MAP_CHUNKS_PER_AREA_AXIS) {
             if (this->m_areaOffsets[index]) {
                 char* mare = this->m_data + this->m_areaOffsets[index];
                 CMapAreaLow* area = CMap::AllocAreaLow();
@@ -162,7 +163,7 @@ void CMapLowDetail::Load(const char* mapPath, const char* mapName) {
                 int32_t minHeight = 100000;
                 int32_t maxHeight = -100000;
 
-                for (uint32_t i = 0; i < 545; i++) {
+                for (uint32_t i = 0; i < LOW_DETAIL_VERTEX_COUNT; i++) {
                     int32_t height = area->m_heights[i];
 
                     if (height > maxHeight) {
@@ -197,21 +198,21 @@ void CMapLowDetail::Load(const char* mapPath, const char* mapName) {
                 float dx = area->m_bbox.t.x - area->m_sphere.c.x;
                 area->m_sphere.r = sqrtf(dx * dx + dy * dy + dz * dz);
 
-                if (next[0] == 0x4D41484F) {
+                if (next[0] == SIffChunk::TOKEN_MAHO) {
                     uint16_t* holes = reinterpret_cast<uint16_t*>(next + 2);
                     area->m_holes = holes;
                     area->m_indexCount = 0;
 
-                    for (uint32_t row = 0; row < 16; row++) {
-                        for (uint32_t bit = 0; bit < 16; bit++) {
+                    for (uint32_t row = 0; row < LOW_DETAIL_CELLS_PER_AXIS; row++) {
+                        for (uint32_t bit = 0; bit < LOW_DETAIL_CELLS_PER_AXIS; bit++) {
                             if (!((1 << bit) & holes[row])) {
-                                area->m_indexCount += 12;
+                                area->m_indexCount += LOW_DETAIL_INDICES_PER_CELL;
                             }
                         }
                     }
                 } else {
                     area->m_holes = nullptr;
-                    area->m_indexCount = 3072;
+                    area->m_indexCount = LOW_DETAIL_INDEX_COUNT;
                 }
             }
 
@@ -280,14 +281,14 @@ void CMap::RenderLowDetail(CMapAreaLow* area) {
         area->m_block->m_lastUsedFrame = CWorld::frameCnt;
         GxPrimVertexPtr(area->m_block->m_buf, GxVBF_PC);
     } else {
-        CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, 16, 545);
+        CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, 16, LOW_DETAIL_VERTEX_COUNT);
         CMap::BuildLowDetailGridVertices(area, buf);
         GxPrimVertexPtr(buf, GxVBF_PC);
     }
 
     uint32_t count;
 
-    if (!(area->m_flags & 0x1) && area->m_indexCount == 3072) {
+    if (!(area->m_flags & CMapAreaLow::FLAGS::UNKNOWN_1) && area->m_indexCount == LOW_DETAIL_INDEX_COUNT) {
         GxRsSet(GxRs_Culling, 0);
         CGxBuf* indexBuf = CMap::lowDetailIndexBuf;
 
@@ -297,7 +298,7 @@ void CMap::RenderLowDetail(CMapAreaLow* area) {
         }
 
         g_theGxDevicePtr->PrimIndexPtr(indexBuf);
-        count = 3072;
+        count = LOW_DETAIL_INDEX_COUNT;
     } else {
         GxRsSet(GxRs_Culling, 0);
         CGxBuf* indexBuf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, 2, area->m_indexCount);
@@ -309,14 +310,14 @@ void CMap::RenderLowDetail(CMapAreaLow* area) {
         batch.m_start = 0;
         batch.m_count = area->m_indexCount;
         batch.m_minIndex = 0;
-        batch.m_maxIndex = 544;
+        batch.m_maxIndex = LOW_DETAIL_VERTEX_COUNT - 1;
         g_theGxDevicePtr->Draw(&batch, 1);
 
         GxRsSet(GxRs_Culling, 1);
-        indexBuf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, 2, 3072 - area->m_indexCount);
+        indexBuf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, 2, LOW_DETAIL_INDEX_COUNT - area->m_indexCount);
         CMap::BuildLowDetailGridIndices(area->m_holes, 1, indexBuf);
         g_theGxDevicePtr->PrimIndexPtr(indexBuf);
-        count = 3072 - area->m_indexCount;
+        count = LOW_DETAIL_INDEX_COUNT - area->m_indexCount;
     }
 
     CGxBatch batch;
@@ -324,7 +325,7 @@ void CMap::RenderLowDetail(CMapAreaLow* area) {
     batch.m_start = 0;
     batch.m_count = count;
     batch.m_minIndex = 0;
-    batch.m_maxIndex = 544;
+    batch.m_maxIndex = LOW_DETAIL_VERTEX_COUNT - 1;
     g_theGxDevicePtr->Draw(&batch, 1);
 
     g_theGxDevicePtr->RsPop();
@@ -338,14 +339,14 @@ void CMap::BuildLowDetailGridVertices(CMapAreaLow* area, CGxBuf* buf) {
     uint32_t index = 0;
     float x = area->m_topLeft.x;
 
-    for (int32_t row = 0; row < 17; row++) {
+    for (int32_t row = 0; row < LOW_DETAIL_OUTER_VERTICES_PER_AXIS; row++) {
         float y = area->m_topLeft.y;
 
-        for (int32_t col = 0; col < 17; col++) {
+        for (int32_t col = 0; col < LOW_DETAIL_OUTER_VERTICES_PER_AXIS; col++) {
             vertex->p.x = x;
             vertex->p.y = y;
             vertex->p.z = area->m_heights[index++];
-            vertex->c = CImVector(0xFF, 0xFF, 0xFF, 0xFF);
+            vertex->c = CImVector(COLOR_WHITE_BGRA);
             vertex++;
             y -= 33.333332f;
         }
@@ -355,14 +356,14 @@ void CMap::BuildLowDetailGridVertices(CMapAreaLow* area, CGxBuf* buf) {
 
     x = area->m_topLeft.x - 16.666666f;
 
-    for (int32_t row = 0; row < 16; row++) {
+    for (int32_t row = 0; row < LOW_DETAIL_CELLS_PER_AXIS; row++) {
         float y = area->m_topLeft.y - 16.666666f;
 
-        for (int32_t col = 0; col < 16; col++) {
+        for (int32_t col = 0; col < LOW_DETAIL_CELLS_PER_AXIS; col++) {
             vertex->p.x = x;
             vertex->p.y = y;
             vertex->p.z = area->m_heights[index++];
-            vertex->c = CImVector(0xFF, 0xFF, 0xFF, 0xFF);
+            vertex->c = CImVector(COLOR_WHITE_BGRA);
             vertex++;
             y -= 33.333332f;
         }
@@ -379,23 +380,23 @@ void CMap::BuildLowDetailGridVertices(CMapAreaLow* area, CGxBuf* buf) {
 void CMap::BuildLowDetailGridIndices(uint16_t* holes, int32_t pass, CGxBuf* buf) {
     uint16_t* indices = reinterpret_cast<uint16_t*>(g_theGxDevicePtr->BufLock(buf));
     uint32_t outer = 0;
-    uint32_t inner = 289;
+    uint32_t inner = LOW_DETAIL_OUTER_VERTEX_COUNT;
 
-    for (uint32_t row = 0; row < 16; row++) {
-        for (int32_t col = 0; col < 16; col++) {
+    for (uint32_t row = 0; row < LOW_DETAIL_CELLS_PER_AXIS; row++) {
+        for (int32_t col = 0; col < LOW_DETAIL_CELLS_PER_AXIS; col++) {
             if (!holes || (pass ? (holes[row] & (1 << col)) != 0 : (holes[row] & (1 << col)) == 0)) {
                 *indices++ = inner;
                 *indices++ = outer + 1;
                 *indices++ = outer;
                 *indices++ = inner;
-                *indices++ = outer + 18;
+                *indices++ = outer + LOW_DETAIL_OUTER_VERTICES_PER_AXIS + 1;
                 *indices++ = outer + 1;
                 *indices++ = inner;
-                *indices++ = outer + 17;
-                *indices++ = outer + 18;
+                *indices++ = outer + LOW_DETAIL_OUTER_VERTICES_PER_AXIS;
+                *indices++ = outer + LOW_DETAIL_OUTER_VERTICES_PER_AXIS + 1;
                 *indices++ = inner;
                 *indices++ = outer;
-                *indices++ = outer + 17;
+                *indices++ = outer + LOW_DETAIL_OUTER_VERTICES_PER_AXIS;
             }
 
             outer++;

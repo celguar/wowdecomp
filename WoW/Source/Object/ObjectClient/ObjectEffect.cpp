@@ -51,6 +51,14 @@ CObjectEffectModifier::CObjectEffectModifier() {
 }
 
 // INLINED
+CObjectEffectModifier::~CObjectEffectModifier() {
+    if (this->m_params) {
+        delete[] this->m_params;
+        this->m_params = nullptr;
+    }
+}
+
+// INLINED
 void CObjectEffectModifier::Init(const ObjectEffectModifierRec* rec) {
     this->m_inputType = rec->m_inputType;
     this->m_outputType = rec->m_outputType;
@@ -83,159 +91,195 @@ CObjectEffectGroupDefRef::CObjectEffectGroupDefRef() {
 void InitObjectEffectStateMap() {
     for (int32_t i = 0; i < ANIM_COUNT; i++) {
         s_objectEffectAnimStateMap[i].m_animID = ANIM_COUNT;
-        s_objectEffectAnimStateMap[i].m_stateID = 0;
+        s_objectEffectAnimStateMap[i].m_stateID = OBJECT_EFFECT_STATE_INVALID;
     }
 
     s_objectEffectAnimStateMap[ANIM_ATTACK_THROWN].m_animID = ANIM_ATTACK_THROWN;
-    s_objectEffectAnimStateMap[ANIM_ATTACK_THROWN].m_stateID = 8;
-    s_objectEffectAnimStateMap[ANIM_ATTACK_THROWN].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_ATTACK_THROWN].m_stateID = OBJECT_EFFECT_STATE_ANIM_ATTACK_THROWN;
+    s_objectEffectAnimStateMap[ANIM_ATTACK_THROWN].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_HOLD_THROWN].m_animID = ANIM_HOLD_THROWN;
-    s_objectEffectAnimStateMap[ANIM_HOLD_THROWN].m_stateID = 9;
-    s_objectEffectAnimStateMap[ANIM_HOLD_THROWN].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_HOLD_THROWN].m_stateID = OBJECT_EFFECT_STATE_ANIM_HOLD_THROWN;
+    s_objectEffectAnimStateMap[ANIM_HOLD_THROWN].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_LOAD_THROWN].m_animID = ANIM_LOAD_THROWN;
-    s_objectEffectAnimStateMap[ANIM_LOAD_THROWN].m_stateID = 10;
-    s_objectEffectAnimStateMap[ANIM_LOAD_THROWN].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_LOAD_THROWN].m_stateID = OBJECT_EFFECT_STATE_ANIM_LOAD_THROWN;
+    s_objectEffectAnimStateMap[ANIM_LOAD_THROWN].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_READY_THROWN].m_animID = ANIM_READY_THROWN;
-    s_objectEffectAnimStateMap[ANIM_READY_THROWN].m_stateID = 11;
-    s_objectEffectAnimStateMap[ANIM_READY_THROWN].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_READY_THROWN].m_stateID = OBJECT_EFFECT_STATE_ANIM_READY_THROWN;
+    s_objectEffectAnimStateMap[ANIM_READY_THROWN].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_RUN].m_animID = ANIM_RUN;
-    s_objectEffectAnimStateMap[ANIM_RUN].m_stateID = 12;
-    s_objectEffectAnimStateMap[ANIM_RUN].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_RUN].m_stateID = OBJECT_EFFECT_STATE_ANIM_RUN;
+    s_objectEffectAnimStateMap[ANIM_RUN].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_WALK].m_animID = ANIM_WALK;
-    s_objectEffectAnimStateMap[ANIM_WALK].m_stateID = 13;
-    s_objectEffectAnimStateMap[ANIM_WALK].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_WALK].m_stateID = OBJECT_EFFECT_STATE_ANIM_WALK;
+    s_objectEffectAnimStateMap[ANIM_WALK].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_COMBAT_WOUND].m_animID = ANIM_COMBAT_WOUND;
-    s_objectEffectAnimStateMap[ANIM_COMBAT_WOUND].m_stateID = 14;
-    s_objectEffectAnimStateMap[ANIM_COMBAT_WOUND].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_COMBAT_WOUND].m_stateID = OBJECT_EFFECT_STATE_ANIM_COMBAT_WOUND;
+    s_objectEffectAnimStateMap[ANIM_COMBAT_WOUND].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_DEATH].m_animID = ANIM_DEATH;
-    s_objectEffectAnimStateMap[ANIM_DEATH].m_stateID = 15;
-    s_objectEffectAnimStateMap[ANIM_DEATH].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_DEATH].m_stateID = OBJECT_EFFECT_STATE_ANIM_DEATH;
+    s_objectEffectAnimStateMap[ANIM_DEATH].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_DEAD].m_animID = ANIM_DEAD;
-    s_objectEffectAnimStateMap[ANIM_DEAD].m_stateID = 81;
-    s_objectEffectAnimStateMap[ANIM_DEAD].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_DEAD].m_stateID = OBJECT_EFFECT_STATE_ANIM_DEAD;
+    s_objectEffectAnimStateMap[ANIM_DEAD].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SPELL_CAST_DIRECTED].m_animID = ANIM_SPELL_CAST_DIRECTED;
-    s_objectEffectAnimStateMap[ANIM_SPELL_CAST_DIRECTED].m_stateID = 16;
-    s_objectEffectAnimStateMap[ANIM_SPELL_CAST_DIRECTED].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SPELL_CAST_DIRECTED].m_stateID = OBJECT_EFFECT_STATE_ANIM_SPELL_CAST_DIRECTED;
+    s_objectEffectAnimStateMap[ANIM_SPELL_CAST_DIRECTED].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_STAND_WOUND].m_animID = ANIM_STAND_WOUND;
-    s_objectEffectAnimStateMap[ANIM_STAND_WOUND].m_stateID = 17;
-    s_objectEffectAnimStateMap[ANIM_STAND_WOUND].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_STAND_WOUND].m_stateID = OBJECT_EFFECT_STATE_ANIM_STAND_WOUND;
+    s_objectEffectAnimStateMap[ANIM_STAND_WOUND].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_READY_UNARMED].m_animID = ANIM_READY_UNARMED;
-    s_objectEffectAnimStateMap[ANIM_READY_UNARMED].m_stateID = 18;
-    s_objectEffectAnimStateMap[ANIM_READY_UNARMED].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_READY_UNARMED].m_stateID = OBJECT_EFFECT_STATE_ANIM_READY_UNARMED;
+    s_objectEffectAnimStateMap[ANIM_READY_UNARMED].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_STAND].m_animID = ANIM_STAND;
-    s_objectEffectAnimStateMap[ANIM_STAND].m_stateID = 19;
-    s_objectEffectAnimStateMap[ANIM_STAND].m_altStateID = 41;
+    s_objectEffectAnimStateMap[ANIM_STAND].m_stateID = OBJECT_EFFECT_STATE_ANIM_STAND;
+    s_objectEffectAnimStateMap[ANIM_STAND].m_altStateID = OBJECT_EFFECT_STATE_ANIM_STAND_VAR1;
     s_objectEffectAnimStateMap[ANIM_SHUFFLE_LEFT].m_animID = ANIM_SHUFFLE_LEFT;
-    s_objectEffectAnimStateMap[ANIM_SHUFFLE_LEFT].m_stateID = 20;
-    s_objectEffectAnimStateMap[ANIM_SHUFFLE_LEFT].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SHUFFLE_LEFT].m_stateID = OBJECT_EFFECT_STATE_ANIM_SHUFFLE_LEFT;
+    s_objectEffectAnimStateMap[ANIM_SHUFFLE_LEFT].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SHUFFLE_RIGHT].m_animID = ANIM_SHUFFLE_RIGHT;
-    s_objectEffectAnimStateMap[ANIM_SHUFFLE_RIGHT].m_stateID = 21;
-    s_objectEffectAnimStateMap[ANIM_SHUFFLE_RIGHT].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SHUFFLE_RIGHT].m_stateID = OBJECT_EFFECT_STATE_ANIM_SHUFFLE_RIGHT;
+    s_objectEffectAnimStateMap[ANIM_SHUFFLE_RIGHT].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_WALKBACKWARDS].m_animID = ANIM_WALKBACKWARDS;
-    s_objectEffectAnimStateMap[ANIM_WALKBACKWARDS].m_stateID = 22;
-    s_objectEffectAnimStateMap[ANIM_WALKBACKWARDS].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_WALKBACKWARDS].m_stateID = OBJECT_EFFECT_STATE_ANIM_WALK_BACKWARDS;
+    s_objectEffectAnimStateMap[ANIM_WALKBACKWARDS].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_JUMP_START].m_animID = ANIM_JUMP_START;
-    s_objectEffectAnimStateMap[ANIM_JUMP_START].m_stateID = 23;
-    s_objectEffectAnimStateMap[ANIM_JUMP_START].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_JUMP_START].m_stateID = OBJECT_EFFECT_STATE_ANIM_JUMP_START;
+    s_objectEffectAnimStateMap[ANIM_JUMP_START].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_JUMP_END].m_animID = ANIM_JUMP_END;
-    s_objectEffectAnimStateMap[ANIM_JUMP_END].m_stateID = 24;
-    s_objectEffectAnimStateMap[ANIM_JUMP_END].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_JUMP_END].m_stateID = OBJECT_EFFECT_STATE_ANIM_JUMP_END;
+    s_objectEffectAnimStateMap[ANIM_JUMP_END].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_FALL].m_animID = ANIM_FALL;
-    s_objectEffectAnimStateMap[ANIM_FALL].m_stateID = 25;
-    s_objectEffectAnimStateMap[ANIM_FALL].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_FALL].m_stateID = OBJECT_EFFECT_STATE_ANIM_FALL;
+    s_objectEffectAnimStateMap[ANIM_FALL].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SWIM_IDLE].m_animID = ANIM_SWIM_IDLE;
-    s_objectEffectAnimStateMap[ANIM_SWIM_IDLE].m_stateID = 26;
-    s_objectEffectAnimStateMap[ANIM_SWIM_IDLE].m_altStateID = 42;
+    s_objectEffectAnimStateMap[ANIM_SWIM_IDLE].m_stateID = OBJECT_EFFECT_STATE_ANIM_SWIM_IDLE;
+    s_objectEffectAnimStateMap[ANIM_SWIM_IDLE].m_altStateID = OBJECT_EFFECT_STATE_ANIM_SWIM_IDLE_VAR1;
     s_objectEffectAnimStateMap[ANIM_SWIM].m_animID = ANIM_SWIM;
-    s_objectEffectAnimStateMap[ANIM_SWIM].m_stateID = 27;
-    s_objectEffectAnimStateMap[ANIM_SWIM].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SWIM].m_stateID = OBJECT_EFFECT_STATE_ANIM_SWIM;
+    s_objectEffectAnimStateMap[ANIM_SWIM].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SWIM_LEFT].m_animID = ANIM_SWIM_LEFT;
-    s_objectEffectAnimStateMap[ANIM_SWIM_LEFT].m_stateID = 28;
-    s_objectEffectAnimStateMap[ANIM_SWIM_LEFT].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SWIM_LEFT].m_stateID = OBJECT_EFFECT_STATE_ANIM_SWIM_LEFT;
+    s_objectEffectAnimStateMap[ANIM_SWIM_LEFT].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SWIM_RIGHT].m_animID = ANIM_SWIM_RIGHT;
-    s_objectEffectAnimStateMap[ANIM_SWIM_RIGHT].m_stateID = 29;
-    s_objectEffectAnimStateMap[ANIM_SWIM_RIGHT].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SWIM_RIGHT].m_stateID = OBJECT_EFFECT_STATE_ANIM_SWIM_RIGHT;
+    s_objectEffectAnimStateMap[ANIM_SWIM_RIGHT].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SWIM_BACKWARDS].m_animID = ANIM_SWIM_BACKWARDS;
-    s_objectEffectAnimStateMap[ANIM_SWIM_BACKWARDS].m_stateID = 30;
-    s_objectEffectAnimStateMap[ANIM_SWIM_BACKWARDS].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SWIM_BACKWARDS].m_stateID = OBJECT_EFFECT_STATE_ANIM_SWIM_BACKWARDS;
+    s_objectEffectAnimStateMap[ANIM_SWIM_BACKWARDS].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_RUN_LEFT].m_animID = ANIM_RUN_LEFT;
-    s_objectEffectAnimStateMap[ANIM_RUN_LEFT].m_stateID = 31;
-    s_objectEffectAnimStateMap[ANIM_RUN_LEFT].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_RUN_LEFT].m_stateID = OBJECT_EFFECT_STATE_ANIM_RUN_LEFT;
+    s_objectEffectAnimStateMap[ANIM_RUN_LEFT].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_RUN_RIGHT].m_animID = ANIM_RUN_RIGHT;
-    s_objectEffectAnimStateMap[ANIM_RUN_RIGHT].m_stateID = 32;
-    s_objectEffectAnimStateMap[ANIM_RUN_RIGHT].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_RUN_RIGHT].m_stateID = OBJECT_EFFECT_STATE_ANIM_RUN_RIGHT;
+    s_objectEffectAnimStateMap[ANIM_RUN_RIGHT].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_FLY].m_animID = ANIM_FLY;
-    s_objectEffectAnimStateMap[ANIM_FLY].m_stateID = 33;
-    s_objectEffectAnimStateMap[ANIM_FLY].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_FLY].m_stateID = OBJECT_EFFECT_STATE_ANIM_FLY;
+    s_objectEffectAnimStateMap[ANIM_FLY].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SPRINT].m_animID = ANIM_SPRINT;
-    s_objectEffectAnimStateMap[ANIM_SPRINT].m_stateID = 34;
-    s_objectEffectAnimStateMap[ANIM_SPRINT].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SPRINT].m_stateID = OBJECT_EFFECT_STATE_ANIM_SPRINT;
+    s_objectEffectAnimStateMap[ANIM_SPRINT].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_JUMP_LAND_RUN].m_animID = ANIM_JUMP_LAND_RUN;
-    s_objectEffectAnimStateMap[ANIM_JUMP_LAND_RUN].m_stateID = 35;
-    s_objectEffectAnimStateMap[ANIM_JUMP_LAND_RUN].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_JUMP_LAND_RUN].m_stateID = OBJECT_EFFECT_STATE_ANIM_JUMP_LAND_RUN;
+    s_objectEffectAnimStateMap[ANIM_JUMP_LAND_RUN].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_JUMP].m_animID = ANIM_JUMP;
-    s_objectEffectAnimStateMap[ANIM_JUMP].m_stateID = 36;
-    s_objectEffectAnimStateMap[ANIM_JUMP].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_JUMP].m_stateID = OBJECT_EFFECT_STATE_ANIM_JUMP;
+    s_objectEffectAnimStateMap[ANIM_JUMP].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_COMBAT_CRITICAL].m_animID = ANIM_COMBAT_CRITICAL;
-    s_objectEffectAnimStateMap[ANIM_COMBAT_CRITICAL].m_stateID = 39;
-    s_objectEffectAnimStateMap[ANIM_COMBAT_CRITICAL].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_COMBAT_CRITICAL].m_stateID = OBJECT_EFFECT_STATE_ANIM_COMBAT_CRITICAL;
+    s_objectEffectAnimStateMap[ANIM_COMBAT_CRITICAL].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_ATTACK_UNARMED].m_animID = ANIM_ATTACK_UNARMED;
-    s_objectEffectAnimStateMap[ANIM_ATTACK_UNARMED].m_stateID = 40;
-    s_objectEffectAnimStateMap[ANIM_ATTACK_UNARMED].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_ATTACK_UNARMED].m_stateID = OBJECT_EFFECT_STATE_ANIM_ATTACK_UNARMED;
+    s_objectEffectAnimStateMap[ANIM_ATTACK_UNARMED].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SIT_GROUND].m_animID = ANIM_SIT_GROUND;
-    s_objectEffectAnimStateMap[ANIM_SIT_GROUND].m_stateID = 43;
-    s_objectEffectAnimStateMap[ANIM_SIT_GROUND].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SIT_GROUND].m_stateID = OBJECT_EFFECT_STATE_ANIM_SIT_GROUND;
+    s_objectEffectAnimStateMap[ANIM_SIT_GROUND].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SIT_GROUND_UP].m_animID = ANIM_SIT_GROUND_UP;
-    s_objectEffectAnimStateMap[ANIM_SIT_GROUND_UP].m_stateID = 44;
-    s_objectEffectAnimStateMap[ANIM_SIT_GROUND_UP].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SIT_GROUND_UP].m_stateID = OBJECT_EFFECT_STATE_ANIM_SIT_GROUND_UP;
+    s_objectEffectAnimStateMap[ANIM_SIT_GROUND_UP].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SIT_GROUND_DOWN].m_animID = ANIM_SIT_GROUND_DOWN;
-    s_objectEffectAnimStateMap[ANIM_SIT_GROUND_DOWN].m_stateID = 45;
-    s_objectEffectAnimStateMap[ANIM_SIT_GROUND_DOWN].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SIT_GROUND_DOWN].m_stateID = OBJECT_EFFECT_STATE_ANIM_SIT_GROUND_DOWN;
+    s_objectEffectAnimStateMap[ANIM_SIT_GROUND_DOWN].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_HOVER].m_animID = ANIM_HOVER;
-    s_objectEffectAnimStateMap[ANIM_HOVER].m_stateID = 46;
-    s_objectEffectAnimStateMap[ANIM_HOVER].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_HOVER].m_stateID = OBJECT_EFFECT_STATE_ANIM_HOVER;
+    s_objectEffectAnimStateMap[ANIM_HOVER].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_GRAB].m_animID = ANIM_GRAB;
-    s_objectEffectAnimStateMap[ANIM_GRAB].m_stateID = 67;
-    s_objectEffectAnimStateMap[ANIM_GRAB].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_GRAB].m_stateID = OBJECT_EFFECT_STATE_ANIM_GRAB;
+    s_objectEffectAnimStateMap[ANIM_GRAB].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SHIP_START].m_animID = ANIM_SHIP_START;
-    s_objectEffectAnimStateMap[ANIM_SHIP_START].m_stateID = 68;
-    s_objectEffectAnimStateMap[ANIM_SHIP_START].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SHIP_START].m_stateID = OBJECT_EFFECT_STATE_ANIM_SHIP_START;
+    s_objectEffectAnimStateMap[ANIM_SHIP_START].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SHIP_MOVING].m_animID = ANIM_SHIP_MOVING;
-    s_objectEffectAnimStateMap[ANIM_SHIP_MOVING].m_stateID = 69;
-    s_objectEffectAnimStateMap[ANIM_SHIP_MOVING].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SHIP_MOVING].m_stateID = OBJECT_EFFECT_STATE_ANIM_SHIP_MOVING;
+    s_objectEffectAnimStateMap[ANIM_SHIP_MOVING].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_SHIP_STOP].m_animID = ANIM_SHIP_STOP;
-    s_objectEffectAnimStateMap[ANIM_SHIP_STOP].m_stateID = 70;
-    s_objectEffectAnimStateMap[ANIM_SHIP_STOP].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_SHIP_STOP].m_stateID = OBJECT_EFFECT_STATE_ANIM_SHIP_STOP;
+    s_objectEffectAnimStateMap[ANIM_SHIP_STOP].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_OPEN].m_animID = ANIM_OPEN;
-    s_objectEffectAnimStateMap[ANIM_OPEN].m_stateID = 71;
-    s_objectEffectAnimStateMap[ANIM_OPEN].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_OPEN].m_stateID = OBJECT_EFFECT_STATE_ANIM_OPEN;
+    s_objectEffectAnimStateMap[ANIM_OPEN].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_OPENED].m_animID = ANIM_OPENED;
-    s_objectEffectAnimStateMap[ANIM_OPENED].m_stateID = 72;
-    s_objectEffectAnimStateMap[ANIM_OPENED].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_OPENED].m_stateID = OBJECT_EFFECT_STATE_ANIM_OPENED;
+    s_objectEffectAnimStateMap[ANIM_OPENED].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_CLOSE].m_animID = ANIM_CLOSE;
-    s_objectEffectAnimStateMap[ANIM_CLOSE].m_stateID = 73;
-    s_objectEffectAnimStateMap[ANIM_CLOSE].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_CLOSE].m_stateID = OBJECT_EFFECT_STATE_ANIM_CLOSE;
+    s_objectEffectAnimStateMap[ANIM_CLOSE].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_CLOSED].m_animID = ANIM_CLOSED;
-    s_objectEffectAnimStateMap[ANIM_CLOSED].m_stateID = 74;
-    s_objectEffectAnimStateMap[ANIM_CLOSED].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_CLOSED].m_stateID = OBJECT_EFFECT_STATE_ANIM_CLOSED;
+    s_objectEffectAnimStateMap[ANIM_CLOSED].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_DESTROY].m_animID = ANIM_DESTROY;
-    s_objectEffectAnimStateMap[ANIM_DESTROY].m_stateID = 75;
-    s_objectEffectAnimStateMap[ANIM_DESTROY].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_DESTROY].m_stateID = OBJECT_EFFECT_STATE_ANIM_DESTROY;
+    s_objectEffectAnimStateMap[ANIM_DESTROY].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_DESTROYED].m_animID = ANIM_DESTROYED;
-    s_objectEffectAnimStateMap[ANIM_DESTROYED].m_stateID = 76;
-    s_objectEffectAnimStateMap[ANIM_DESTROYED].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_DESTROYED].m_stateID = OBJECT_EFFECT_STATE_ANIM_DESTROYED;
+    s_objectEffectAnimStateMap[ANIM_DESTROYED].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_CUSTOM_0].m_animID = ANIM_CUSTOM_0;
-    s_objectEffectAnimStateMap[ANIM_CUSTOM_0].m_stateID = 77;
-    s_objectEffectAnimStateMap[ANIM_CUSTOM_0].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_CUSTOM_0].m_stateID = OBJECT_EFFECT_STATE_ANIM_CUSTOM0;
+    s_objectEffectAnimStateMap[ANIM_CUSTOM_0].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_CUSTOM_1].m_animID = ANIM_CUSTOM_1;
-    s_objectEffectAnimStateMap[ANIM_CUSTOM_1].m_stateID = 78;
-    s_objectEffectAnimStateMap[ANIM_CUSTOM_1].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_CUSTOM_1].m_stateID = OBJECT_EFFECT_STATE_ANIM_CUSTOM1;
+    s_objectEffectAnimStateMap[ANIM_CUSTOM_1].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_CUSTOM_2].m_animID = ANIM_CUSTOM_2;
-    s_objectEffectAnimStateMap[ANIM_CUSTOM_2].m_stateID = 79;
-    s_objectEffectAnimStateMap[ANIM_CUSTOM_2].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_CUSTOM_2].m_stateID = OBJECT_EFFECT_STATE_ANIM_CUSTOM2;
+    s_objectEffectAnimStateMap[ANIM_CUSTOM_2].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
     s_objectEffectAnimStateMap[ANIM_CUSTOM_3].m_animID = ANIM_CUSTOM_3;
-    s_objectEffectAnimStateMap[ANIM_CUSTOM_3].m_stateID = 80;
-    s_objectEffectAnimStateMap[ANIM_CUSTOM_3].m_altStateID = 0;
+    s_objectEffectAnimStateMap[ANIM_CUSTOM_3].m_stateID = OBJECT_EFFECT_STATE_ANIM_CUSTOM3;
+    s_objectEffectAnimStateMap[ANIM_CUSTOM_3].m_altStateID = OBJECT_EFFECT_STATE_INVALID;
+}
+
+// OFFSET: 0x006F2020
+CObjectEffectDef::~CObjectEffectDef() {
+    if (this->m_modifier) {
+        delete this->m_modifier;
+        this->m_modifier = nullptr;
+    }
+}
+
+// OFFSET: 0x006F3040
+CObjectEffectGroupDef::~CObjectEffectGroupDef() {
+    this->m_enterEffects.Clear();
+    this->m_loopEffects.Clear();
+    this->m_exitEffects.Clear();
+    this->m_eventEffects.Clear();
+}
+
+// OFFSET: 0x006F5830
+CObjectEffectPackageDef::~CObjectEffectPackageDef() {
+    for (OBJ_EFFECT_GROUP_DEF_REF_LIST_LOOKUP* lookup = this->m_stateGroupRefs.m_fulllist.Head(); lookup; lookup = this->m_stateGroupRefs.Next(lookup)) {
+        lookup->m_groupDefRefs.Clear();
+    }
+
+    this->m_stateGroupRefs.Clear();
+
+    for (OBJ_EFFECT_GROUP_DEF_REF_LIST_LOOKUP* lookup = this->m_eventGroupRefs.m_fulllist.Head(); lookup; lookup = this->m_eventGroupRefs.Next(lookup)) {
+        lookup->m_groupDefRefs.Clear();
+    }
+
+    this->m_eventGroupRefs.Clear();
+}
+
+// INLINED
+OBJ_EFFECT_GROUP_LOOKUP::~OBJ_EFFECT_GROUP_LOOKUP() {
+    this->m_effects.Clear();
 }
 
 // VERIFY: 56342ab3 auto
@@ -320,19 +364,19 @@ void ObjectEffectSystem_Initialize() {
         effectRef->m_effectDef = &effectLookup->m_objectEffectDef;
 
         switch (rec->m_triggerType) {
-            case 1:
+            case OBJECT_EFFECT_TRIGGER_ENTER:
                 groupLookup->m_objectEffectGroupDef.m_enterEffects.LinkToTail(effectRef);
                 break;
 
-            case 2:
+            case OBJECT_EFFECT_TRIGGER_LOOP:
                 groupLookup->m_objectEffectGroupDef.m_loopEffects.LinkToTail(effectRef);
                 break;
 
-            case 3:
+            case OBJECT_EFFECT_TRIGGER_EXIT:
                 groupLookup->m_objectEffectGroupDef.m_exitEffects.LinkToTail(effectRef);
                 break;
 
-            case 4:
+            case OBJECT_EFFECT_TRIGGER_EVENT:
                 groupLookup->m_objectEffectGroupDef.m_eventEffects.LinkToTail(effectRef);
                 break;
         }
@@ -379,7 +423,7 @@ C3Vector CObjectEffect::GetWorldPosition() {
     CM2Model* model = object->GetObjectModel();
     C44Matrix transform;
 
-    if (model && model->IsLoaded(0, 0) && (model->m_fFlags & 0x8000)) {
+    if (model && model->IsLoaded(0, 0) && (model->m_runtimeFlags & M2_FLAGS::M2_WORLD_TRANSFORM_VALID)) {
         if (model->HasAttachment(this->m_def->m_attachment)) {
             transform = model->GetAttachmentWorldTransform(this->m_def->m_attachment);
         } else {
@@ -397,7 +441,7 @@ C3Vector CObjectEffect::GetWorldPosition() {
 // VERIFY: 4fb949cb manual
 // OFFSET: 0x006F2AC0
 CObjectEffect::~CObjectEffect() {
-    if (this->m_def->m_effectRecType == 1) {
+    if (this->m_def->m_effectRecType == OBJECT_EFFECT_REC_TYPE_SOUND_KIT) {
         if (this->m_soundKitObject.m_sound.m_internal) {
             SI2::StopSound(&this->m_soundKitObject, 0, -1.0f, 1);
         } else if (this->m_soundKitObject.m_advancedId) {
@@ -463,7 +507,7 @@ void CObjectEffectModifier::Apply(CObjectEffectManager* manager, CObjectEffect* 
 
 // VERIFY: 07e2b193 auto
 // OFFSET: 0x006F17F0
-int32_t FindObjectEffectStateFromAnimID(int32_t animId, int32_t alternate) {
+OBJECT_EFFECT_STATE FindObjectEffectStateFromAnimID(int32_t animId, int32_t alternate) {
     if (alternate == 1) {
         return s_objectEffectAnimStateMap[animId].m_altStateID;
     }
@@ -489,10 +533,10 @@ CObjectEffectRef::CObjectEffectRef() {
 void CObjectEffect::PlayOneShot() {
     C3Vector position = this->GetWorldPosition();
 
-    if (this->m_def->m_effectRecType == 1) {
+    if (this->m_def->m_effectRecType == OBJECT_EFFECT_REC_TYPE_SOUND_KIT) {
         SE2SoundKitProperties properties;
         properties.ResetToDefaults();
-        properties.m_loopMode = 2;
+        properties.m_loopMode = SE2_LOOP_MODE_NONLOOPING;
 
         if (!SI2::IsPlaying(&this->m_soundKitObject)) {
             SI2::PlaySoundKit(this->m_def->m_effectRecID, &position, &this->m_soundKitObject, &properties, 0, nullptr, 0, 0);
@@ -511,15 +555,15 @@ void CObjectEffect::TriggerLoopingEffect() {
 
     C3Vector position = this->GetWorldPosition();
 
-    if (this->m_def->m_effectRecType == 1) {
+    if (this->m_def->m_effectRecType == OBJECT_EFFECT_REC_TYPE_SOUND_KIT) {
         if (!SI2::IsPlaying(&this->m_soundKitObject)) {
-            int32_t usage = SI2::GetSoundKitUsage(this->m_def->m_effectRecID);
+            SI2_SOUND_USAGE usage = SI2::GetSoundKitUsage(this->m_def->m_effectRecID);
 
             SE2SoundKitProperties properties;
             properties.ResetToDefaults();
             properties.m_fadeInTime = 0.7f;
             properties.m_fadeOutTime = 0.7f;
-            properties.m_loopMode = usage != 1;
+            properties.m_loopMode = static_cast<SE2_LOOP_MODE>(usage != SI2_SOUND_USAGE_INTERVAL);
 
             SI2::PlaySoundKit(this->m_def->m_effectRecID, &position, &this->m_soundKitObject, &properties, 0, nullptr, 0, 0);
             this->m_playCount++;
@@ -535,7 +579,7 @@ void CObjectEffect::TriggerLoopingEffect() {
 // VERIFY: 1fcb379b auto
 // OFFSET: 0x006F1FB0
 void CObjectEffect::UpdateLoopingEffect(CObjectEffectManager* manager) {
-    if (this->m_def->m_effectRecType != 1) {
+    if (this->m_def->m_effectRecType != OBJECT_EFFECT_REC_TYPE_SOUND_KIT) {
         return;
     }
 
@@ -582,7 +626,7 @@ void CObjectEffectManager::UpdateAllPlayingEffects() {
     CObjectEffect* effect = this->m_oneShotEffects.Head();
 
     while (effect) {
-        if (effect->m_def->m_effectRecType == 1) {
+        if (effect->m_def->m_effectRecType == OBJECT_EFFECT_REC_TYPE_SOUND_KIT) {
             C3Vector position = effect->GetWorldPosition();
 
             if (SI2::IsPlaying(&effect->m_soundKitObject)) {
@@ -590,7 +634,7 @@ void CObjectEffectManager::UpdateAllPlayingEffects() {
                 effect = this->m_oneShotEffects.Next(effect);
                 continue;
             }
-        } else if (effect->m_def->m_effectRecType == 2) {
+        } else if (effect->m_def->m_effectRecType == OBJECT_EFFECT_REC_TYPE_UNKNOWN_2) {
             effect = this->m_oneShotEffects.Next(effect);
             continue;
         }
@@ -653,7 +697,7 @@ void CObjectEffectManager::PlayOneShotEffect(CObjectEffectDef* def) {
 
 // VERIFY: 4b360386 manual
 // OFFSET: 0x006F61D0
-void CObjectEffectManager::ExitState(uint32_t state, int32_t playExitEffects) {
+void CObjectEffectManager::ExitState(OBJECT_EFFECT_STATE state, int32_t playExitEffects) {
     if (!this->m_states.Get(state)) {
         return;
     }
@@ -692,7 +736,7 @@ void CObjectEffectManager::ExitState(uint32_t state, int32_t playExitEffects) {
             this->m_loopingEffects.UnlinkNode(effect);
             this->m_oneShotEffects.LinkToTail(effect);
 
-            if (effect->m_def->m_effectRecType == 1) {
+            if (effect->m_def->m_effectRecType == OBJECT_EFFECT_REC_TYPE_SOUND_KIT) {
                 if (effect->m_soundKitObject.m_advancedId) {
                     SI2::StopAdvancedSound(effect->m_soundKitObject.m_advancedId, 0, 0.7f);
                 } else {
@@ -726,7 +770,7 @@ void CObjectEffectManager::PlayLoopingEffect(CObjectEffectDef* def, int32_t grou
         effect->m_link.Unlink();
         this->m_loopingEffects.LinkToTail(effect);
 
-        if (effect->m_def->m_effectRecType == 1) {
+        if (effect->m_def->m_effectRecType == OBJECT_EFFECT_REC_TYPE_SOUND_KIT) {
             effect->m_soundKitObject.m_sound.FadeInNow();
             effect->m_refCount++;
         }
@@ -770,7 +814,7 @@ void CObjectEffectManager::PlayLoopingEffect(CObjectEffectDef* def, int32_t grou
 // OFFSET: 0x006F70B0
 void CObjectEffectManager::ShutDown() {
     for (int32_t state = 0; state < NUM_OBJECT_EFFECT_STATES; state++) {
-        this->ExitState(state, 0);
+        this->ExitState(static_cast<OBJECT_EFFECT_STATE>(state), 0);
     }
 
     for (OBJ_EFFECT_REF_LIST_LOOKUP* refList = this->m_refLists.m_fulllist.Head(); refList; refList = this->m_refLists.Next(refList)) {
@@ -800,7 +844,7 @@ void CObjectEffectManager::ShutDown() {
 
 // VERIFY: 6bb11b7f manual
 // OFFSET: 0x006F7270
-void CObjectEffectManager::EnterState(uint32_t state, int32_t playEnterEffects, int32_t refresh) {
+void CObjectEffectManager::EnterState(OBJECT_EFFECT_STATE state, int32_t playEnterEffects, int32_t refresh) {
     if (refresh) {
         if (!this->m_states.Get(state)) {
             return;
@@ -851,7 +895,7 @@ int32_t CObjectEffectManager::Init(int32_t packageId, CGObject_C* owner) {
 
     this->m_packageDef = &lookup->m_objectEffectPackageDef;
     this->m_owner = owner;
-    this->EnterState(1, 1, 0);
-    this->EnterState(38, 1, 0);
+    this->EnterState(OBJECT_EFFECT_STATE_ALWAYS, 1, 0);
+    this->EnterState(OBJECT_EFFECT_STATE_MOVEMENT_NOT_MOVING, 1, 0);
     return 1;
 }

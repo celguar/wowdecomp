@@ -192,7 +192,7 @@ void Rain::InitDrop(RainDropParticle* drop, float time) {
     drop->m_position.z = offset.z - t * drop->m_velocity.z;
     Weather* weather = World::s_weather;
     C3Vector axis(0.0f, 0.0f, 0.0f);
-    CMath::sincos_(weather->m_facing - 1.5707964f, &axis.y, &axis.x);
+    CMath::sincos_(weather->m_facing - HALF_PI, &axis.y, &axis.x);
     float tilt = weather->m_speed * 0.055555556f;
 
     if (tilt < 0.0f) {
@@ -418,7 +418,7 @@ void Rain::RenderPatterPacketsSW() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 5);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod2x);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
@@ -515,7 +515,7 @@ void Rain::RenderDropPacketsSW() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 5);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod2x);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
@@ -620,7 +620,7 @@ void Rain::RenderPatterPackets() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 5);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod2x);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);
@@ -700,7 +700,7 @@ void Rain::RenderDropPackets() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 5);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod2x);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);

@@ -79,7 +79,7 @@ static int32_t FindTransportRotationIndex(int32_t transportId) {
 
 // VERIFY: e9e508da manual
 // OFFSET: 0x00713820
-CGGameObject_C_Type_Transport::CGGameObject_C_Type_Transport(CGGameObject_C* owner) : CGGameObject_C_Type_TransportBase(owner), m_frames(nullptr), m_frameCount(0), m_currentFrame(0), m_rotations(nullptr), m_rotationCount(0), m_currentRotation(0), m_lastSequence(506), m_stateChangeSequenceTime(0) {
+CGGameObject_C_Type_Transport::CGGameObject_C_Type_Transport(CGGameObject_C* owner) : CGGameObject_C_Type_TransportBase(owner), m_frames(nullptr), m_frameCount(0), m_currentFrame(0), m_rotations(nullptr), m_rotationCount(0), m_currentRotation(0), m_lastSequence(ANIM_COUNT), m_stateChangeSequenceTime(0) {
     int32_t index = FindTransportAnimationIndex(owner->m_obj->m_entryID);
 
     if (index != -1) {
@@ -188,7 +188,7 @@ void CGGameObject_C_Type_Transport::PostInitWithStats() {
 // VERIFY: 1347bf69 auto
 // OFFSET: 0x0070B630
 void CGGameObject_C_Type_Transport::PostReenable() {
-    this->m_lastSequence = 506;
+    this->m_lastSequence = ANIM_COUNT;
     this->CreateWorldObj();
 
     if (this->m_worldObject) {
@@ -221,7 +221,7 @@ void CGGameObject_C_Type_Transport::InitializeMovement() {
     this->m_position.z = position.z + offset.z;
     CPassenger& passenger = this->m_owner->m_passenger;
     reinterpret_cast<C4QuaternionCompressed&>(passenger.m_facing) = rotation;
-    passenger.m_passengerFlags |= 0x2;
+    passenger.m_passengerFlags |= CPassenger::PASSENGER_QUATERNION_FACING;
     C44Matrix& matrix = this->m_owner->m_matrix;
     matrix = this->m_owner->GetRotation();
     matrix.d0 = this->m_position.x;
@@ -288,8 +288,8 @@ C3Vector CGGameObject_C_Type_Transport::GetMovement(uint32_t time) {
     }
 
     uint32_t next = this->m_frameCount != this->m_currentFrame + 1 ? this->m_currentFrame + 1 : 0;
-    TransportFrame* current;
-    TransportFrame* following;
+    const TransportFrame* current;
+    const TransportFrame* following;
 
     while (true) {
         following = &this->m_frames[next];
@@ -316,11 +316,11 @@ C3Vector CGGameObject_C_Type_Transport::GetMovement(uint32_t time) {
         }
     }
 
-    C33Matrix rotation(reinterpret_cast<const C4Quaternion&>(this->m_owner->m_gameObject->m_parentRotation));
+    C33Matrix rotation(this->m_owner->m_gameObject->m_parentRotation);
     float inverse = 1.0f - t;
-    float x = t * following->m_pos[0] + current->m_pos[0] * inverse;
-    float y = following->m_pos[1] * t + current->m_pos[1] * inverse;
-    float z = inverse * current->m_pos[2] + following->m_pos[2] * t;
+    float x = t * following->m_pos.x + current->m_pos.x * inverse;
+    float y = following->m_pos.y * t + current->m_pos.y * inverse;
+    float z = inverse * current->m_pos.z + following->m_pos.z * t;
     C3Vector result;
     result.x = rotation.c0 * z + rotation.b0 * y + x * rotation.a0;
     result.y = rotation.c1 * z + rotation.b1 * y + rotation.a1 * x;
@@ -338,8 +338,8 @@ C4Quaternion CGGameObject_C_Type_Transport::GetRotation(uint32_t time) {
     }
 
     uint32_t next = this->m_currentRotation + 1 != count ? this->m_currentRotation + 1 : 0;
-    TransportRotationRec* current = &this->m_rotations[this->m_currentRotation];
-    TransportRotationRec* following = &this->m_rotations[next];
+    const TransportRotationRec* current = &this->m_rotations[this->m_currentRotation];
+    const TransportRotationRec* following = &this->m_rotations[next];
     uint32_t endTime = following->m_timeIndex;
 
     if (!endTime && this->m_frames) {
@@ -360,7 +360,7 @@ C4Quaternion CGGameObject_C_Type_Transport::GetRotation(uint32_t time) {
 
     float t = static_cast<float>(time - current->m_timeIndex) / static_cast<float>(following->m_timeIndex - current->m_timeIndex);
     C4Quaternion rotation = C4Quaternion::Slerp(t, reinterpret_cast<const C4Quaternion&>(current->m_rot), reinterpret_cast<const C4Quaternion&>(following->m_rot));
-    return rotation * reinterpret_cast<const C4Quaternion&>(this->m_owner->m_gameObject->m_parentRotation);
+    return rotation * this->m_owner->m_gameObject->m_parentRotation;
 }
 
 // VERIFY: 007eb5fe auto
@@ -428,7 +428,7 @@ void CGGameObject_C_Type_Transport::UpdateMovement(uint32_t time, uint32_t elaps
         this->Interpolate(this->m_pathTime, &offset, &rotation);
         CPassenger& passenger = this->m_owner->m_passenger;
         reinterpret_cast<C4QuaternionCompressed&>(passenger.m_facing) = rotation;
-        passenger.m_passengerFlags |= 0x2;
+        passenger.m_passengerFlags |= CPassenger::PASSENGER_QUATERNION_FACING;
         C3Vector position = this->m_owner->m_passenger.GetPosition(this->m_owner->m_passenger.m_position);
         step = 250;
         this->m_position.x = position.x + offset.x;
@@ -456,7 +456,7 @@ void CGGameObject_C_Type_Transport::UpdateMovement(uint32_t time, uint32_t elaps
                 C44Matrix& matrix = this->UpdateOwnerMatrix();
 
                 for (CPassenger* passenger = this->m_passengers.Head(); passenger; passenger = this->m_passengers.Next(passenger)) {
-                    if (passenger->m_passengerFlags & 0x1) {
+                    if (passenger->m_passengerFlags & CPassenger::PASSENGER_MOVEMENT) {
                         static_cast<CMovement_C*>(passenger)->CollideWithTransport(time, step, speed, direction, matrix);
                     }
                 }
@@ -467,7 +467,7 @@ void CGGameObject_C_Type_Transport::UpdateMovement(uint32_t time, uint32_t elaps
 
         CPassenger& passenger = this->m_owner->m_passenger;
         reinterpret_cast<C4QuaternionCompressed&>(passenger.m_facing) = rotation;
-        passenger.m_passengerFlags |= 0x2;
+        passenger.m_passengerFlags |= CPassenger::PASSENGER_QUATERNION_FACING;
         C44Matrix& matrix = this->m_owner->m_matrix;
         matrix = this->m_owner->GetRotation();
         matrix.d0 = this->m_position.x;
@@ -479,7 +479,7 @@ void CGGameObject_C_Type_Transport::UpdateMovement(uint32_t time, uint32_t elaps
         this->m_position = position;
         CPassenger& passenger = this->m_owner->m_passenger;
         reinterpret_cast<C4QuaternionCompressed&>(passenger.m_facing) = rotation;
-        passenger.m_passengerFlags |= 0x2;
+        passenger.m_passengerFlags |= CPassenger::PASSENGER_QUATERNION_FACING;
         C44Matrix& matrix = this->m_owner->m_matrix;
         matrix = this->m_owner->GetRotation();
         matrix.d0 = this->m_position.x;

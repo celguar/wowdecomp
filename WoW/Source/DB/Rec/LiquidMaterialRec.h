@@ -6,6 +6,20 @@
 
 class SFileImpl;
 
+// LiquidMaterial.dbc flags tested by the client.
+enum LIQUID_MATERIAL_FLAGS : int32_t {
+    LIQUID_MATERIAL_FLAG_NONE = 0x0,
+    // Copied into Liquid::CMaterialSettings::m_transparent.
+    LIQUID_MATERIAL_FLAG_TRANSPARENT = 0x1,
+};
+
+// LiquidMaterial.dbc IDs, named after the Liquid::CMaterial class CMaterialBank creates for each.
+enum LIQUID_MATERIAL_ID : int32_t {
+    LIQUID_MATERIAL_WATER = 1,
+    LIQUID_MATERIAL_MAGMA = 2,
+    LIQUID_MATERIAL_PROCEDURAL_WATER = 3,
+};
+
 class LiquidMaterialRec {
     public:
     static const int32_t s_numColumns = 3;
@@ -14,7 +28,7 @@ class LiquidMaterialRec {
 
     /* 0000 */ int32_t m_id;
     /* 0004 */ int32_t m_lvf;
-    /* 0008 */ int32_t m_flags;
+    /* 0008 */ int32_t m_flags; // LIQUID_MATERIAL_FLAGS
 
     LiquidMaterialRec();
     ~LiquidMaterialRec();

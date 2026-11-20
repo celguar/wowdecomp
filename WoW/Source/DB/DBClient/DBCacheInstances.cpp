@@ -201,7 +201,7 @@ static int32_t ReceiveInvalidatePlayer(void* param, NETMESSAGE msgId, uint32_t t
     WOWGUID guid;
     msg->Get(guid.m_guid);
 
-    if ((guid.m_guid & 0xF000000000000000ULL) == 0x1000000000000000ULL && (guid.m_guid & 0x0FF0000000000000ULL) == 0x0FF0000000000000ULL) {
+    if (guid.IsGuild()) {
         g_guildInfoCache.Invalidate(static_cast<int32_t>(guid.m_guid));
     } else {
         g_nameDBCache.Invalidate(guid.m_guid);
@@ -277,7 +277,7 @@ static int32_t ReceiveName(void* param, NETMESSAGE msgId, uint32_t time, CDataSt
     msg->Get(result);
 
     switch (result) {
-        case 0: {
+        case NameCache::QUERY_RESULT_OK: {
             msg->GetString(name.m_name, sizeof(name.m_name));
             msg->GetString(name.m_realmName, sizeof(name.m_realmName));
 
@@ -304,18 +304,18 @@ static int32_t ReceiveName(void* param, NETMESSAGE msgId, uint32_t time, CDataSt
 
             g_nameDBCache.AddItem(&name, name.m_guid.m_guid);
 
-            if ((name.m_guid.m_guid & 0xF000000000000000ULL) == 0x1000000000000000ULL && (name.m_guid.m_guid & 0x0FF0000000000000ULL) == 0x0FD0000000000000ULL) {
+            if (name.m_guid.GetGlobalType() == WOWGUID_TYPE_UNKNOWN_1FD) {
                 g_nameDBCache.SetTemporary(name.m_guid.m_guid);
             }
 
             break;
         }
 
-        case 2:
+        case NameCache::QUERY_RESULT_RETRY:
             g_nameDBCache.RetryItem(name.m_guid.m_guid);
             break;
 
-        case 3:
+        case NameCache::QUERY_RESULT_PLACEHOLDER:
             SStrCopy(name.m_name, "?", sizeof(name.m_name));
             memset(name.m_realmName, 0, sizeof(name.m_realmName));
             name.m_race = 0;
@@ -580,7 +580,7 @@ void DBCache<NameCache, uint64_t, CHashKeyGUID>::RemoveReverseEntry(const char* 
     REVERSEENTRY* entry = this->FindReverseEntry(name);
 
     if (!entry) {
-        SErrSetLastError(87);
+        SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return;
     }
 

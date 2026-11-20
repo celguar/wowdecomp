@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/UIUtil/Types.h"
 
@@ -17,6 +18,8 @@ struct lua_State;
 
 struct MOUSELOOKBINDING : public TSHashObject<MOUSELOOKBINDING, HASHKEY_STRI> {
     /* 0018 */ char* m_binding;
+
+    ~MOUSELOOKBINDING();
 };
 
 class CMouseEvent;
@@ -25,6 +28,14 @@ class CFocusEvent;
 
 class CGInputControl {
     public:
+    // Runtime joystick mouse gating; distinct from cursor-mode flags.
+    enum JOYSTICK_MOUSE_FLAGS : int32_t {
+        JOYSTICK_MOUSE_NONE = 0,
+        JOYSTICK_MOUSE_ACTIVE = 0x1,
+        JOYSTICK_MOUSE_ALLOWED = 0x2,
+        JOYSTICK_MOUSE_INITIAL_FLAGS = 3,
+    };
+
     void SetMouselookOverrideBindings();
     void CameraTurnPlayer(uint32_t time, float facing);
     void SetPlayerPitch(CGUnit_C* unit, uint32_t time, float pitch);
@@ -83,7 +94,7 @@ class CGInputControl {
     bool DetectWowMouse();
     void VehicleAimChange(uint32_t time, float delta);
     void UpdateMoveStopped();
-    void UpdatePlayer(uint32_t time, int32_t a2);
+    void UpdatePlayer(uint32_t time, BOOL canControl);
     void ToggleControlBit(uint32_t bit, int32_t enable, uint32_t time, int32_t keepSmoothing);
     int32_t SetControlBit(uint32_t bit, uint32_t time);
     int32_t UnsetControlBit(uint32_t bit, uint32_t time, int32_t keepSmoothing);

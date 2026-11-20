@@ -26,11 +26,21 @@ class CVehicleHeap {
 
 class CVehicle_C {
     public:
+    // Bone animation listener slots (inferred name).
+    static const uint32_t MAX_BONE_ANIM_LISTENERS = 16;
+
     static void EnterWorld();
     struct BoneAnimListener {
         /* 0000 */ WOWGUID m_guid;
         /* 0008 */ uint32_t m_boneId;
         /* 000C */ void (*m_callback)(CGUnit_C* unit, int32_t& a2, TSGrowableArray<CVehiclePassenger_C*>& passengers);
+    };
+
+    // Runtime vehicle state; reconstructed names.
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // PlayBoneAnim started at least one bone animation (m_playingBoneAnims).
+        BONE_ANIMS_PLAYING = 0x1,
     };
 
     static CVehicleHeap* s_vehiclePool;
@@ -42,19 +52,19 @@ class CVehicle_C {
 
     /* 0000 */ uint32_t m_memHandle;
     /* 0004 */ CGUnit_C* m_unit;
-    /* 0008 */ uint32_t m_flags;
+    /* 0008 */ uint32_t m_flags; // FLAGS
     /* 000C */ VehicleRec* m_vehicleRec;
     /* 0010 */ C44Matrix m_worldMatrix;
     /* 0050 */ float m_rawFacing;
     /* 0054 */ float m_largestPassengerBoundsRadius;
     /* 0058 */ uint32_t m_playingBoneAnims [2];
-    /* 0060 */ BoneAnimListener m_boneAnimListeners [16];
+    /* 0060 */ BoneAnimListener m_boneAnimListeners [MAX_BONE_ANIM_LISTENERS];
     /* 0160 */ WOWGUID m_forceFacingGuid;
     /* 0168 */ uint32_t m_forceFacingBone;
     /* 016C */ uint8_t m_mirroringAnimsMask;
     /* 016D */ uint8_t m_freeSeatMask;
     /* 0170 */ TSExplicitList<CPassenger, offsetof(CPassenger, m_link)> m_passengers;
-    /* 017C */ uint32_t unused_017C;
+    /* 017C */ uint32_t unknown_017C;
 
     CVehicle_C();
     VehicleSeatRec* GetVehicleSeatRec(uint8_t seat) const;

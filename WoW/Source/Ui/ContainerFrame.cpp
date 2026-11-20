@@ -137,7 +137,7 @@ bool CGContainerInfo::GetLuaBagAndSlot(lua_State* L, CGBag_C** bag, int32_t* slo
 
     *bag = nullptr;
     *bank = 0;
-    int32_t index = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
+    int32_t index = static_cast<int32_t>(lua_tonumber(L, 1)) - 1; // Lua container ID - 1
     *slot = static_cast<int32_t>(lua_tonumber(L, 2)) - 1;
 
     if (index >= 0) {
@@ -156,10 +156,10 @@ bool CGContainerInfo::GetLuaBagAndSlot(lua_State* L, CGBag_C** bag, int32_t* slo
         *bag = &player->m_bag;
 
         switch (index) {
-            case -5:
+            case CONTAINER_CURRENCY_TOKEN - 1:
                 return false;
 
-            case -3:
+            case KEYRING_CONTAINER - 1:
                 *slot += KEYRING_FIRST;
 
                 if (*slot > KEYRING_LAST) {
@@ -168,7 +168,7 @@ bool CGContainerInfo::GetLuaBagAndSlot(lua_State* L, CGBag_C** bag, int32_t* slo
 
                 break;
 
-            case -2:
+            case BANK_CONTAINER - 1:
                 *slot += BANKGENERIC_FIRST;
 
                 if (*slot > BANKGENERIC_LAST) {
@@ -178,7 +178,7 @@ bool CGContainerInfo::GetLuaBagAndSlot(lua_State* L, CGBag_C** bag, int32_t* slo
                 *bank = 1;
                 break;
 
-            case -1:
+            case BACKPACK_CONTAINER - 1:
                 *slot += BACKPACK_FIRST;
 
                 if (*slot > BACKPACK_LAST) {
@@ -239,10 +239,10 @@ static void TriggerMultiCastBarUpdate(const ItemStats_C* stats) {
         return;
     }
 
-    if (CGTutorial::m_tutorialShown.m_count && !(CGTutorial::m_tutorialShown.m_bits.m_data[1] & 0x4000)) {
-        for (uint32_t i = 0; i < 4; i++) {
+    if (CanTriggerTutorial(TUTORIAL::TUTORIAL_TOTEM_BAR)) {
+        for (uint32_t i = 0; i < MAX_TOTEMS; i++) {
             if (((1 << i) & mask) && CGSpellBook::m_totemSpells[i].Count()) {
-                CGTutorial::TriggerTutorial(46);
+                CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_TOTEM_BAR);
                 break;
             }
         }
@@ -355,7 +355,7 @@ int32_t UpdateInvContents(WOWGUID guid, uint32_t fieldOffset, uint32_t fieldSize
     CGGameUI::m_autoStoreItemID = 0;
     CGContainerInfo::UpdateContents(guid);
 
-    if ((oldItem && oldItem->GetClassID() == 10) || (newItem && newItem->GetClassID() == 10) || slot - CURRENCYTOKEN_FIRST <= CURRENCYTOKEN_LAST - CURRENCYTOKEN_FIRST) {
+    if ((oldItem && oldItem->GetClassID() == ITEM_CLASS::ITEM_CLASS_MONEY) || (newItem && newItem->GetClassID() == ITEM_CLASS::ITEM_CLASS_MONEY) || slot - CURRENCYTOKEN_FIRST <= CURRENCYTOKEN_LAST - CURRENCYTOKEN_FIRST) {
         CGCurrencyTypes::EnterWorld();
     }
 

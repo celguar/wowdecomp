@@ -2,6 +2,7 @@
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Services/SysMessage.h"
 #include "WoW/Source/DB/WowClientDB.h"
+#include "WoW/Source/DB/Rec/LiquidMaterialRec.h"
 #include "WoW/Source/DB/Rec/LiquidTypeRec.h"
 
 // STATIC: 0x00D43B24
@@ -47,8 +48,8 @@ Liquid::IMaterial* Liquid::CMaterialBank::GetMaterial(uint32_t liquidType) {
             break;
         }
 
-        SysMsgPrintf(SYSMSG_ERROR, 2, "Material Bank: Liquid type [%d] not found, defaulting to water!", liquidType);
-        liquidType = 1;
+        SysMsgPrintf(SYSMSG_ERROR, SYSMSG_FILTER_WORLD, "Material Bank: Liquid type [%d] not found, defaulting to water!", liquidType);
+        liquidType = LIQUID_TYPE_WATER;
     }
 
     uint32_t materialId = typeRec->m_materialID;
@@ -57,13 +58,13 @@ Liquid::IMaterial* Liquid::CMaterialBank::GetMaterial(uint32_t liquidType) {
         return Liquid::CMaterialBank::s_materials.m_data[materialId];
     }
 
-    bool vertexShaders = g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Vertex] >= 1;
-    bool shaders = Liquid::s_shadersEnabled && vertexShaders && g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] >= 3;
+    bool vertexShaders = g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Vertex] >= GxShVS_vs_1_1;
+    bool shaders = Liquid::s_shadersEnabled && vertexShaders && g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] >= GxShPS_ps_2_0;
 
     Liquid::IMaterial* material = nullptr;
 
     switch (materialId) {
-        case 1:
+        case LIQUID_MATERIAL_WATER:
             if (shaders) {
                 if (Liquid::s_specularEnabled) {
                     material = Liquid::CMaterialWater::Create();
@@ -75,7 +76,7 @@ Liquid::IMaterial* Liquid::CMaterialBank::GetMaterial(uint32_t liquidType) {
             }
             break;
 
-        case 2:
+        case LIQUID_MATERIAL_MAGMA:
             if (shaders) {
                 material = Liquid::CMaterialMagma::Create();
             } else {
@@ -83,7 +84,7 @@ Liquid::IMaterial* Liquid::CMaterialBank::GetMaterial(uint32_t liquidType) {
             }
             break;
 
-        case 3:
+        case LIQUID_MATERIAL_PROCEDURAL_WATER:
             if (shaders) {
                 material = Liquid::CMaterialProcWater::Create();
             } else {

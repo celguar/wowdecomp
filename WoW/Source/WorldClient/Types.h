@@ -6,6 +6,19 @@
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Storm/H/stpl.h"
 
+// Input to CMap::ObjectCreate, separate from entity static/runtime flags.
+enum MAP_OBJECT_CREATE_FLAGS : uint32_t {
+    MAP_OBJECT_CREATE_FLAG_COLLIDABLE = 0x1,
+    MAP_OBJECT_CREATE_FLAG_NO_BLOB_SHADOW = 0x2,
+    MAP_OBJECT_CREATE_FLAG_ALWAYS_ANIMATE = 0x4,
+    MAP_OBJECT_CREATE_FLAG_LINK_MULTIPLE_WMO_GROUPS = 0x8,
+    MAP_OBJECT_CREATE_FLAG_USE_CHARACTER_AMBIENT = 0x10,
+    MAP_OBJECT_CREATE_FLAG_UNKNOWN_5 = 0x20,
+};
+
+// Keep native allocation-bit extraction in its original shift/AND form.
+constexpr int32_t MAP_OBJECT_CREATE_MULTIPLE_GROUPS_SHIFT = 3;
+
 class CMapChunk;
 class CMapChunkDoodadDefLink;
 class CMapDoodadDef;
@@ -38,6 +51,7 @@ class CMapObjDefMapObjDefGroupLink {
     /* 0014 */ TSLink<CMapObjDefMapObjDefGroupLink> m_ownerLink;
 };
 
+// CWorld::enables. Labels below are retained unless current consumers establish a correction.
 enum Enables : uint32_t {
     Enable_Doodads = 1,
     Enable_Chunks = 2,
@@ -49,18 +63,18 @@ enum Enables : uint32_t {
     Enable_Collision = 128,
     Enable_MapObjs = 0x100,
     Enable_MapObjLight = 0x200,
-    Enable_VertexLight = 0x400,
+    Enable_Footprints = 0x400,
     Enable_MapObjTex = 0x800,
     Enable_Portals = 0x1000,
     Enable_PortalVis = 0x2000,
-    Enable_NoFullAlpha = 0x4000,
-    Enable_NoAnimation = 0x8000,
+    Enable_ObjectFade = 0x4000,
+    Enable_ObjectFadeZFill = 0x8000,
     Enable_DebugBSP = 0x10000,
     Enable_CrappyBatches = 0x20000,
     Enable_ZoneBounds = 0x40000,
     Enable_MapObjBSP = 0x80000,
     Enable_DetailDoodads = 0x100000,
-    Enable_ShowQuery = 0x200000,
+    Enable_CollisionDebug = 0x200000,
     Enable_AABoxes = 0x400000,
     Enable_Trilinear = 0x800000,
     Enable_Water = 0x1000000,
@@ -68,17 +82,21 @@ enum Enables : uint32_t {
     Enable_LowDetail = 0x4000000,
     Enable_Specular = 0x8000000,
     Enable_PixelShaders = 0x10000000,
-    Enable_ShowTris = 0x20000000,
+    Enable_Wireframe = 0x20000000,
     Enable_ShowNormals = 0x40000000,
     Enable_Anisotropic = 0xFFFFFFFF80000000,
+    Enable_InitialMask = 0x7104B73,
 };
 
+// CWorld::enables2 is a separate feature word.
 enum Enables2 {
     Enable_VertexShader = 1,
     Enable_HwPcf = 2,
+    Enable_ProjectedTextures = 4,
 };
 
 enum MapObjFlag {
+    MAPOBJ_FLAG_NONE = 0,
     MAPOBJ_FLAG_UNPLACED = 1,
     MAPOBJ_FLAG_INTERIOR = 2,
     MAPOBJ_FLAG_EXTERIOR = 4,
@@ -93,25 +111,76 @@ enum MapObjFlag {
     MAPOBJ_FLAG_BIODOME = 0x800,
     MAPOBJ_FLAG_PROJ_TEX = 0x1000,
     MAPOBJ_FLAG_NO_MAPOBJ_LINK = 0x2000,
+    MAPOBJ_FLAG_ALL_LOADED = 0x4000,
     MAPOBJ_FLAG_INT_FOG = 0x8000,
     MAPOBJ_FLAG_MAPOBJDEF = 0x10000,
     MAPOBJ_FLAG_SHADOW_20000 = 0x20000,
 };
 
 struct SIffChunk {
-    /* 0000 */ uint32_t m_token;
+    // Chunk tags the client compares; the file stores each tag byte-reversed, so the dword reads as the tag.
+    enum TOKEN : uint32_t {
+        TOKEN_MAHO = 0x4D41484F, // 'MAHO'
+        TOKEN_MCAL = 0x4D43414C, // 'MCAL'
+        TOKEN_MCCV = 0x4D434356, // 'MCCV'
+        TOKEN_MCLQ = 0x4D434C51, // 'MCLQ'
+        TOKEN_MCLY = 0x4D434C59, // 'MCLY'
+        TOKEN_MCNR = 0x4D434E52, // 'MCNR'
+        TOKEN_MCRF = 0x4D435246, // 'MCRF'
+        TOKEN_MCSE = 0x4D435345, // 'MCSE'
+        TOKEN_MCSH = 0x4D435348, // 'MCSH'
+        TOKEN_MCVP = 0x4D435650, // 'MCVP'
+        TOKEN_MCVT = 0x4D435654, // 'MCVT'
+        TOKEN_MWMO = 0x4D574D4F, // 'MWMO'
+    };
+
+    /* 0000 */ uint32_t m_token; // TOKEN
     /* 0004 */ uint32_t m_size;
     /* 0008 */ void* m_data;
 };
 
 struct SMLayer {
+    enum LAYER_FLAGS : int32_t {
+        NONE = 0,
+        ANIMATION_DIRECTION_MASK = 7,
+        ANIMATION_SPEED_INDEX_MASK = 7,
+        ANIMATED = 0x40,
+        OVERBRIGHT = 0x80,
+        USE_ALPHA_MAP = 0x100,
+        ALPHA_MAP_COMPRESSED = 0x200,
+        USE_CUBE_MAP_REFLECTION = 0x400,
+        ANIMATED_OR_OVERBRIGHT = 0xC0,
+        BIG_ALPHA_MERGE_BLOCK_MASK = 0x4C0,
+    };
+
+    enum LAYER_BITS : int32_t {
+        ANIMATION_SPEED_SHIFT = 3,
+    };
+
     /* 0000 */ uint32_t m_textureId;
     /* 0004 */ uint32_t m_flags;
     /* 0008 */ uint32_t m_offsetInMCAL;
-    /* 000C */ uint32_t m_offectId;
+    /* 000C */ uint32_t m_effectId; // GroundEffectTexture ID; remains 32-bit in 3.3.5.
 };
 
 struct SMOPoly {
+    enum FLAGS : uint8_t {
+        F_TRANSITION = 0x01,
+        F_NOCAMCOLLIDE = 0x02,
+        F_DETAIL = 0x04,
+        F_COLLISION = 0x08,
+        F_HINT = 0x10, // 0.5.3 name; no 3.3.5 reader found.
+        F_RENDER = 0x20,
+        UNKNOWN_0x40 = 0x40,
+        F_COLLIDE_HIT = 0x80, // Temporary BSP-query mark, cleared after the query.
+    };
+
+    // Face ignore bits above the flag byte, tested against the face material by the segment BSP queries.
+    enum IGNORE_FLAGS : uint16_t {
+        IGNORE_BLENDED = 0x100,
+        IGNORE_OPAQUE = 0x200,
+    };
+
     /* 0000 */ uint8_t m_flags;
     /* 0001 */ uint8_t m_materialId;
 };

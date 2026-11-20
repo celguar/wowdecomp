@@ -1,4 +1,5 @@
 #include "LootFrame.h"
+#include "WoW/Source/Object/ObjectClient/Player_C.h"
 #include <cstdint>
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
@@ -61,7 +62,7 @@ static int32_t Script_LootSlotIsItem(lua_State* L) {
             index = slot - 2;
         }
 
-        if (index < 18 && CGLootInfo::m_slots[index].m_itemID > 0) {
+        if (index < NUM_LOOT_SLOTS && CGLootInfo::m_slots[index].m_itemID > 0) {
             lua_pushnumber(L, 1.0);
             return 1;
         }
@@ -134,25 +135,25 @@ static int32_t Script_GetLootRollItemInfo(lua_State* L) {
     lua_pushnumber(L, roll->m_count);
     lua_pushnumber(L, static_cast<int32_t>(stats->m_quality));
 
-    if (stats->m_bonding == 1) {
+    if (stats->m_bonding == ITEM_BINDING::ITEM_BINDING_ON_PICKUP) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (roll->m_voteMask & 2) {
+    if (roll->m_voteMask & (1 << LOOT_ROLL_TYPE::LOOT_ROLL_NEED)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (roll->m_voteMask & 4) {
+    if (roll->m_voteMask & (1 << LOOT_ROLL_TYPE::LOOT_ROLL_GREED)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (roll->m_voteMask & 8) {
+    if (roll->m_voteMask & (1 << LOOT_ROLL_TYPE::LOOT_ROLL_DISENCHANT)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -227,7 +228,7 @@ static int32_t Script_GetLootSlotInfo(lua_State* L) {
             index = slot - 1;
         }
 
-        if (index < 18 && CGLootInfo::m_slots[index].m_slotType == 3) {
+        if (index < NUM_LOOT_SLOTS && CGLootInfo::m_slots[index].m_slotType == LOOT_SLOT_TYPE_LOCKED) {
             lua_pushnumber(L, 1.0);
             return 5;
         }

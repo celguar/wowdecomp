@@ -6,6 +6,14 @@
 #include "WoW/Source/Net/Types.h"
 #include "WoW/Source/Object/WGUID.h"
 
+// FrameXML names for the guild bank limits.
+static const int32_t MAX_GUILDBANK_TABS = 6;
+static const int32_t MAX_GUILDBANK_SLOTS_PER_TAB = 98;
+// Inferred names: the money log follows the item tab logs in m_log and
+// m_numLogEntries, and each log holds this many entries.
+static const int32_t GUILDBANK_MONEY_LOG_TAB = MAX_GUILDBANK_TABS;
+static const int32_t MAX_GUILDBANK_LOG_ENTRIES = 25;
+
 class CDataStore;
 struct lua_State;
 
@@ -16,8 +24,23 @@ struct GuildBankTabInfo {
     /* 2140 */ int32_t m_needsFullUpdate;
 };
 
+// SMSG_GUILD_BANK_LOG_QUERY_RESULTS entry type.
+enum GUILD_BANK_LOG_TYPE : uint32_t {
+    GUILD_BANK_LOG_DEPOSIT_ITEM = 1,
+    GUILD_BANK_LOG_WITHDRAW_ITEM = 2,
+    // Item moved from the logged tab to m_otherTab.
+    GUILD_BANK_LOG_MOVE_ITEM = 3,
+    GUILD_BANK_LOG_DEPOSIT_MONEY = 4,
+    GUILD_BANK_LOG_WITHDRAW_MONEY = 5,
+    GUILD_BANK_LOG_REPAIR_MONEY = 6,
+    // Item moved from m_otherTab into the logged tab.
+    GUILD_BANK_LOG_MOVE_ITEM_FROM_TAB = 7,
+    GUILD_BANK_LOG_WITHDRAW_MONEY_FOR_TAB = 8,
+    GUILD_BANK_LOG_BUY_TAB = 9,
+};
+
 struct GuildBankLogEntry {
-    /* 0000 */ uint32_t m_type;
+    /* 0000 */ uint32_t m_type; // GUILD_BANK_LOG_TYPE
     /* 0004 */ uint32_t unused_0004;
     /* 0008 */ WOWGUID m_guid;
     /* 0010 */ int32_t m_itemID;
@@ -56,15 +79,15 @@ class CGGuildBankInfo {
     static WOWGUID m_pendingBanker;
     static void AutoStoreItem(WOWGUID item, WOWGUID container, uint32_t slot);
     static uint8_t m_numTabs;
-    static GuildBankTabInfo m_guildBankTabInfo[6];
+    static GuildBankTabInfo m_guildBankTabInfo[MAX_GUILDBANK_TABS];
     static uint8_t m_currentTab;
     static int32_t m_remainingWithdrawMoney;
     static uint64_t m_money;
-    static int32_t m_numLogEntries[7];
+    static int32_t m_numLogEntries[MAX_GUILDBANK_TABS + 1];
     static uint8_t m_logTab;
-    static GuildBankLogEntry m_log[7][25];
-    static int32_t m_tabContentsDirty[6];
-    static TSGrowableArray<GuildBankSlotInfo> m_tabSlots[6];
+    static GuildBankLogEntry m_log[MAX_GUILDBANK_TABS + 1][MAX_GUILDBANK_LOG_ENTRIES];
+    static int32_t m_tabContentsDirty[MAX_GUILDBANK_TABS];
+    static TSGrowableArray<GuildBankSlotInfo> m_tabSlots[MAX_GUILDBANK_TABS];
 
     static void SetGuildBanker(const WOWGUID& banker);
     static void EnterWorld();

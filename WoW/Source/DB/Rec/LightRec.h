@@ -3,8 +3,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "Engine/Source/Tempest/CRange.h"
 
 class SFileImpl;
+
+// Inferred name: LightParams entries of a Light.dbc record.
+constexpr int32_t NUM_LIGHT_PARAMS = 8;
 
 class LightRec {
     public:
@@ -15,9 +19,8 @@ class LightRec {
     /* 0000 */ int32_t m_id;
     /* 0004 */ int32_t m_continentID;
     /* 0008 */ float m_gameCoords [3];
-    /* 0014 */ float m_gameFalloffStart;
-    /* 0018 */ float m_gameFalloffEnd;
-    /* 001C */ int32_t m_lightParamsID [8];
+    /* 0014 */ CRange m_gameFalloff;
+    /* 001C */ int32_t m_lightParamsID [NUM_LIGHT_PARAMS];
 
     LightRec();
     ~LightRec();

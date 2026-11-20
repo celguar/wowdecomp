@@ -131,7 +131,7 @@ int32_t SI2::HandleWaterSounds(const void* data, void* param) {
     for (uint32_t i = 0; i < results.Count(); i++) {
         LiquidTypeRec* liquidType = g_liquidTypeDB.GetRecord(results[i].m_liquidType);
 
-        if (!(liquidType->m_flags & 0x80) || !entity || !World::QueryObjectInside(entity)) {
+        if (!(liquidType->m_flags & LIQUID_TYPE_FLAG_OUTDOOR_AMBIENCE_ONLY) || !entity || !World::QueryObjectInside(entity)) {
             C3Vector offset = results[i].m_offset;
             _AddNearestWaterSound(offset.x * offset.x + offset.y * offset.y, C3Vector(position.x + offset.x, position.y + offset.y, position.z + offset.z), liquidType);
         }
@@ -192,8 +192,8 @@ int32_t SI2::HandleWaterSounds(const void* data, void* param) {
             SE2SoundKitProperties properties;
             properties.ResetToDefaults();
             properties.m_fadeInTime = FADEINTIME;
-            properties.m_group = 2;
-            properties.m_loopMode = 1;
+            properties.m_group = SI2_SOUND_GROUP_AMBIENCE;
+            properties.m_loopMode = SE2_LOOP_MODE_LOOPING;
             SI2::PlaySoundKit(sound.m_soundKitId, &sound.m_position, &sound.m_object, &properties, 0, nullptr, 1, 0);
         } else if (sound.m_moved) {
             SI2::Set3DPosition(&sound.m_object, &sound.m_position);

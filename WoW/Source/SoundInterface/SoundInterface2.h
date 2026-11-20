@@ -17,21 +17,42 @@ class SE2SoundKitObject;
 class SE2SoundKitProperties;
 class VSOUNDKITDEF;
 
+// Native property overrides for the sound kit's suppressor-check flag.
+enum SE2_SUPPRESSOR_MODE : int32_t {
+    SE2_SUPPRESSOR_MODE_DEFAULT = 0,
+    SE2_SUPPRESSOR_MODE_IGNORE = 1,
+    SE2_SUPPRESSOR_MODE_HONOR = 2,
+};
+
+// Per-kit loop choice; the separate m_forceLoop override still takes precedence.
+enum SE2_LOOP_MODE : int32_t {
+    SE2_LOOP_MODE_DEFAULT = 0,
+    SE2_LOOP_MODE_LOOPING = 1,
+    SE2_LOOP_MODE_NONLOOPING = 2,
+};
+
+// Weight policies used after the explicit file-index and pending-download overrides.
+enum SE2_FILE_SELECT_MODE : int32_t {
+    SE2_FILE_SELECT_SEQUENTIAL = 0, // Refill with unit weights and consume in file order.
+    SE2_FILE_SELECT_WEIGHTED_RANDOM = 1, // Refill from frequencies and clear weights after each draw.
+    SE2_FILE_SELECT_WEIGHTED_CYCLE = 2, // Refill from frequencies and retain remaining weights between draws.
+};
+
 class SE2SoundKitProperties {
     public:
-    /* 0000 */ int32_t m_group;
+    /* 0000 */ SI2_SOUND_GROUP m_group;
     /* 0004 */ float m_volume;
     /* 0008 */ float m_volumeScale;
     /* 000C */ int32_t m_fileIndex;
     /* 0010 */ float m_fadeInTime;
     /* 0014 */ float m_fadeOutTime;
-    /* 0018 */ int32_t m_selectMode;
-    /* 001C */ int32_t m_loopMode;
+    /* 0018 */ SE2_FILE_SELECT_MODE m_selectMode;
+    /* 001C */ SE2_LOOP_MODE m_loopMode;
     /* 0020 */ int32_t m_priority;
-    /* 0024 */ int32_t m_suppressorMode;
+    /* 0024 */ SE2_SUPPRESSOR_MODE m_suppressorMode;
     /* 0028 */ uint32_t m_decodeBufferSize;
     /* 002C */ float m_maxDistance;
-    /* 0030 */ int32_t m_maxAudibleBehavior;
+    /* 0030 */ SE2_MAX_AUDIBLE_BEHAVIOR m_maxAudibleBehavior;
     /* 0034 */ float m_muteFadeSpeed;
     /* 0038 */ bool m_streaming;
     /* 003C */ int32_t m_reverb;
@@ -66,7 +87,7 @@ class SI2SoundUserData : public SESoundUserData {
     /* 0004 */ const char* m_name;
     /* 0008 */ int32_t m_soundKitId;
     /* 000C */ VSOUNDKITDEF* m_def;
-    /* 0010 */ int32_t m_group;
+    /* 0010 */ SI2_SOUND_GROUP m_group;
     /* 0014 */ uint32_t unused_0014;
     /* 0018 */ uint32_t m_advancedId;
 
@@ -78,9 +99,48 @@ class SI2SoundUserData : public SESoundUserData {
 
 class SI2 {
     public:
-    static const char s_channelGroupNames[18][32];
-    static const int32_t s_channelGroupMaxSounds[18];
-    static int32_t s_channelGroupNumSounds[18];
+    // Shared music/ambience source selectors;NUM_SOURCE_SLOTS is an exclusive bound.
+    // Slot4 is unresolved;12/13/14 are delay/default/disabled,not table indices.
+    enum ZONE_SOUND_TYPE : int32_t {
+        SOURCE_AREA = 0,
+        SOURCE_WORLD_STATE = 1,
+        SOURCE_CHUNK_OVERRIDE = 2,
+        SOURCE_AI = 3,
+        SOURCE_UNKNOWN_4 = 4,
+        SOURCE_AREA_INTRO = 5,
+        SOURCE_WORLD_STATE_INTRO = 6,
+        SOURCE_CHUNK_INTRO = 7,
+        SOURCE_WEATHER = 8,
+        SOURCE_UNDERWATER = 9,
+        SOURCE_OVERRIDE = 10,
+        NUM_SOURCE_SLOTS = 11,
+        SOURCE_MUSIC_DELAY = 12,
+        SOURCE_NONE = 13,
+        SOURCE_DISABLED = 14,
+    };
+
+    enum CHAOS_MODE : int32_t {
+        MODE_IDLE = 0,
+        MODE_RANDOM_3D = 1,
+        MODE_STREAMED_AND_NORMAL_3D = 2,
+        MODE_PLAY_STOP_2D_3D = 3,
+        MODE_EXTRA_NULL_POSITION_PLAY_STOP = 4,
+        MODE_BURST_80_2D = 5,
+        MODE_BURST_80_3D = 6,
+        MODE_FILL_80_LOOPS_3D = 7,
+        MODE_ALERT_FILE = 8,
+        MODE_RESTART = 9,
+        MODE_RANDOM_PAIR_3D_AND_RESTART = 10,
+        MODE_RANDOM_2D = 11,
+        MODE_STREAMED_AND_NORMAL_2D = 12,
+        MODE_STREAMED_AND_NORMAL_2D_3D = 13,
+        MODE_REPEATED_KIT_3D_AND_RESTART = 14,
+        MODE_SHARED_OBJECT_SELECTED_KITS = 15,
+    };
+
+    static const char s_channelGroupNames[SI2_SOUND_GROUP_COUNT][32];
+    static const int32_t s_channelGroupMaxSounds[SI2_SOUND_GROUP_COUNT];
+    static int32_t s_channelGroupNumSounds[SI2_SOUND_GROUP_COUNT];
     static TSGrowableArray<uint32_t> s_suppressors;
     static int32_t sm_bPlayerInside;
     static int32_t sm_bCameraIsUnderwater;
@@ -102,7 +162,7 @@ class SI2 {
     static void DestroyVSoundLookup();
     static void Detach(SE2SoundKitObject* object);
     static void DSP_AttachCustomDspChain(FMOD::Channel* channel, char* name);
-    static void DSP_CreateDsp(const char* name, int32_t type, const float* params);
+    static void DSP_CreateDsp(const char* name, SI2_DSP_TYPE type, const float* params);
     static void DSP_Init();
     static void DSP_MakeDSPsExpire(float elapsed);
     static void UpdateTaxiSounds(float elapsed);
@@ -113,9 +173,9 @@ class SI2 {
     static void FreeWorldStateZoneSoundOverrides();
     static void FreeZoneIntros();
     static void FreeZoneSoundOverrides();
-    static float GetChannelGroupVolume(int32_t group);
-    static int32_t GetDesiredAmbienceKitID(int32_t* type);
-    static int32_t GetDesiredMusicKitID(int32_t* type, int32_t* silenceMin, int32_t* silenceMax);
+    static float GetChannelGroupVolume(SI2_SOUND_GROUP group);
+    static int32_t GetDesiredAmbienceKitID(ZONE_SOUND_TYPE* type);
+    static int32_t GetDesiredMusicKitID(ZONE_SOUND_TYPE* type, int32_t* silenceMin, int32_t* silenceMax);
     static bool GetInputDriverName(int32_t index, char* name, int32_t nameLength, int32_t chatSystem);
     static bool GetInputDriverName_Cached(int32_t index, char* name, int32_t nameLength, int32_t chatSystem);
     static int32_t GetListenerPosition(C3Vector* position);
@@ -128,7 +188,7 @@ class SI2 {
     static bool GetOutputDriverName(int32_t index, char* name, int32_t nameLength, int32_t chatSystem);
     static bool GetOutputDriverName_Cached(int32_t index, char* name, int32_t nameLength, int32_t chatSystem);
     static VSOUNDKITDEF* GetSoundKitDef(int32_t soundKitId);
-    static int32_t GetSoundKitUsage(int32_t soundKitId);
+    static SI2_SOUND_USAGE GetSoundKitUsage(int32_t soundKitId);
     static float GetSoundVolume(SESoundUserData* userData);
     static int32_t GetTextEmoteSoundID(uint32_t emotesTextId, uint32_t race, uint32_t sex);
     static int32_t GetTextEmoteSoundIndex(uint32_t emotesTextId, uint32_t race, uint32_t sex);
@@ -150,7 +210,7 @@ class SI2 {
     static void InitZoneSoundOverrides();
     static void InitZoneSoundsHandler();
     static void IntroMusicFinished(SESound* sound, void* param);
-    static int32_t IntroMusicOkToPlay(int32_t soundKitId, int32_t type);
+    static int32_t IntroMusicOkToPlay(int32_t soundKitId, ZONE_SOUND_TYPE type);
     static int32_t IsAdvancedSoundNear(int32_t soundKitId, const C3Vector* position);
     static bool IsLooping(SE2SoundKitObject* object);
     static bool IsPlaying(SE2SoundKitObject* object);
@@ -168,9 +228,9 @@ class SI2 {
     static int32_t PlayMissedSound(bool oneHand, const C3Vector* position, int32_t self);
     static void PlayParrySound(const CGUnitVirtualItem* weapon, const CGUnitVirtualItem* defender, int32_t crit, const C3Vector* position, int32_t self);
     static int32_t PlaySheatheSound(const CGUnitVirtualItem* item, int32_t sheathe, const C3Vector* position, int32_t self);
-    static int32_t PlaySoundFile(const char* filename, int32_t group);
+    static int32_t PlaySoundFile(const char* filename, SI2_SOUND_GROUP group);
     static int32_t PlaySoundKit(const char* name, const C3Vector* position, SE2SoundKitObject* object, SE2SoundKitProperties* properties);
-    static void PlayVocalErrorSound(int32_t error);
+    static void PlayVocalErrorSound(VOCALUISOUNDS error);
     static void PlaySpellFizzleSound(uint32_t spellId, const void* object);
     static void DK_GetPlayerFilterName(CGUnit_C* unit, char* name, uint32_t size);
     static int32_t PlaySoundKit(int32_t soundKitId, const C3Vector* position, SE2SoundKitObject* object, SE2SoundKitProperties* properties, uint32_t advancedId, uint32_t* soundId, int32_t checkDistance, int32_t keepPlaying);
@@ -184,7 +244,7 @@ class SI2 {
     static int32_t ResetSoundKitVariants(const char* name);
     static int32_t Set3DPosition(SE2SoundKitObject* object, const C3Vector* position);
     static void SetAdvancedSoundPosition(uint32_t id, const C3Vector* position);
-    static void SetChannelGroupVolume(int32_t group, float volume);
+    static void SetChannelGroupVolume(SI2_SOUND_GROUP group, float volume);
     static int32_t SetListenerAttributes(const C3Vector* position, const C3Vector* forward, const C3Vector* up, const C3Vector* velocity);
     static void OverrideZoneSounds();
     static void SetOverrideZoneSounds(int32_t soundAmbienceId, int32_t zoneMusicId);
@@ -194,10 +254,10 @@ class SI2 {
     static int32_t SetVolume(SE2SoundKitObject* object, float volume);
     static void SetWeatherKitID(int32_t soundKitId);
     static void ForceUpdateZoneSounds();
-    static void SetZoneAmbienceID(int32_t type, int32_t soundAmbienceId);
-    static void SetZoneIntroMusicID(int32_t type, int32_t zoneIntroMusicId);
-    static void SetZoneMusicID(int32_t type, int32_t zoneMusicId);
-    static void SetZoneReverb(int32_t type, int32_t reverb);
+    static void SetZoneAmbienceID(ZONE_SOUND_TYPE type, int32_t soundAmbienceId);
+    static void SetZoneIntroMusicID(ZONE_SOUND_TYPE type, int32_t zoneIntroMusicId);
+    static void SetZoneMusicID(ZONE_SOUND_TYPE type, int32_t zoneMusicId);
+    static void SetZoneReverb(ZONE_SOUND_TYPE type, int32_t reverb);
     static void SetZoneUnderwaterReverb(int32_t reverb);
     static int32_t ShutDown(int32_t restart);
     static void ShutdownZoneSoundsHandler();
@@ -247,7 +307,7 @@ class SI2 {
     static void VoiceChat_StopPlayingLoopbackSound();
     static void VoiceChat_StopRecordingLoopbackSound();
     static void WaterShutdown();
-    static int32_t ZoneMusicDelayElapsed(int32_t type);
+    static int32_t ZoneMusicDelayElapsed(ZONE_SOUND_TYPE type);
     static void ZoneMusicFinished(SESound* sound, void* param);
     static int32_t ZoneSoundsUpdate(const void* data, void* param);
 };

@@ -6,6 +6,7 @@
 #include "Engine/Source/SoundEngine/fmodex/src/fmod.hpp"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C3Vector.h"
+#include "Engine/Source/Tempest/CRange.h"
 
 class SESound;
 class SESoundInternal;
@@ -31,6 +32,13 @@ enum SECHANNELSTATE {
     SECHANNELSTATE_OTHER = 4,
 };
 
+// Game policy values translated by SetSoundGroupMaxAudibleBehavior.
+enum SE2_MAX_AUDIBLE_BEHAVIOR : int32_t {
+    SE2_MAX_AUDIBLE_MUTE = 0,
+    SE2_MAX_AUDIBLE_STEAL_LOWEST = 1,
+    SE2_MAX_AUDIBLE_FAIL = 2,
+};
+
 struct SEDriverInfo {
     /* 0000 */ char m_name[256];
 };
@@ -44,10 +52,9 @@ struct SEChannelGroup {
 };
 
 struct SEChannelInfo {
-    /* 0000 */ int32_t m_state;
+    /* 0000 */ SECHANNELSTATE m_state;
     /* 0004 */ C3Vector m_position;
-    /* 0010 */ float m_minDistance;
-    /* 0014 */ float m_maxDistance;
+    /* 0010 */ CRange m_distanceRange;
     /* 0018 */ uint8_t m_is3D;
     /* 0019 */ uint8_t m_looping;
     /* 001A */ uint8_t m_fadingIn;
@@ -111,12 +118,11 @@ class SESoundInternal : public TSLinkedNode<SESoundInternal> {
     /* 0031 */ uint8_t m_fadingOut;
     /* 0034 */ uint32_t m_playTime;
     /* 0038 */ int32_t m_cached;
-    /* 003C */ int32_t m_type;
+    /* 003C */ SESOUNDTYPE m_type;
     /* 0040 */ TSLink<SESoundInternal> m_deleteLink;
     /* 0048 */ TSLink<SESoundInternal> m_objectLink;
     /* 0050 */ C3Vector m_position;
-    /* 005C */ float m_minDistance;
-    /* 0060 */ float m_maxDistance;
+    /* 005C */ CRange m_distanceRange;
     /* 0064 */ int32_t m_channelGroup;
     /* 0068 */ FMOD_MODE m_mode;
     /* 006C */ uint8_t m_play;
@@ -302,7 +308,7 @@ class SE2 {
     static void SetMasterVolume(float volume);
     static void SetPrimaryCaptureCallback(SECaptureCallbacks* callbacks);
     static void SetReverb(const FMOD_REVERB_PROPERTIES* properties);
-    static void SetSoundGroupMaxAudibleBehavior(FMOD::SoundGroup* soundGroup, int32_t behavior, float muteFadeSpeed);
+    static void SetSoundGroupMaxAudibleBehavior(FMOD::SoundGroup* soundGroup, SE2_MAX_AUDIBLE_BEHAVIOR behavior, float muteFadeSpeed);
     static void SetUserMonitorDSPCallback(void (*callback)(float*, uint32_t));
     static void ShutDown(int32_t restart);
     static void ShutDownCapture();

@@ -546,7 +546,7 @@ VALIDATE_NAME_RESULT ValidateName(uint32_t language, const uint16_t* allowed, co
         uint32_t count = *length;
 
         if (count < 2) {
-            return static_cast<VALIDATE_NAME_RESULT>((count != 0) + NAME_NO_NAME);
+            return count != 0 ? NAME_TOO_SHORT : NAME_NO_NAME;
         }
 
         if (apostrophe == static_cast<int32_t>(count - 1)) {
@@ -671,7 +671,7 @@ void ValidateNameInitialize(int32_t localeMask, int32_t charsetMask) {
     }
 
     s_charsetCached = true;
-    CVar::Register("forceEnglishNames", nullptr, 0, "0", nullptr, 5, false, nullptr, false);
+    CVar::Register("forceEnglishNames", nullptr, CVAR_FLAGS::CVAR_NONE, "0", nullptr, 5, false, nullptr, false);
     s_cachedLocaleMask = localeMask;
     s_cachedCharsetMask = charsetMask;
 
@@ -1150,7 +1150,7 @@ static void GetNameInfo(const char* name, RussianNameInfo* info, int32_t sex) {
     }
 
     info->m_stemLen = length;
-    info->m_rule = sex == 1 ? 36 : 35;
+    info->m_rule = sex == UNITSEX_FEMALE ? 36 : 35;
     info->m_hasAltStem = 0;
 
     int32_t bestMatch = 0;
@@ -1158,7 +1158,7 @@ static void GetNameInfo(const char* name, RussianNameInfo* info, int32_t sex) {
     for (int32_t r = 0; r < 55; r++) {
         const RussianDeclensionRule* rule = &s_russianDeclensionRules[r];
 
-        if (rule->m_sex != 2 && sex != 2 && sex != rule->m_sex) {
+        if (rule->m_sex != UNITSEX_NONE && sex != UNITSEX_NONE && sex != rule->m_sex) {
             continue;
         }
 
@@ -1271,7 +1271,7 @@ static int32_t FormatCase(char* declensions, uint32_t set, const RussianNameInfo
     uint16_t buffer[1024];
 
     if (id == 71) {
-        for (int32_t i = 0; i < 5; i++) {
+        for (int32_t i = 0; i < NUM_DECLENSIONS; i++) {
             declensions[i * 1024] = '\0';
         }
 
@@ -1293,7 +1293,7 @@ static int32_t FormatCase(char* declensions, uint32_t set, const RussianNameInfo
 
         buffer[length] = 0;
 
-        for (int32_t i = 0; i < 5; i++) {
+        for (int32_t i = 0; i < NUM_DECLENSIONS; i++) {
             SUniConvertUTF16to8(&declensions[i * 1024], 1024, buffer, 1024, nullptr, nullptr);
         }
 

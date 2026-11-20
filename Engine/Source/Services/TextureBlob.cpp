@@ -196,7 +196,7 @@ int32_t CTextureBlob::CreateTexture(CTexture* texture, CTextureBlobTexture* blob
     texture->m_alphaBits = blobTexture->m_texture->m_format >> 4;
 
     if (!texture->m_alphaBits) {
-        texture->m_flags |= 1;
+        texture->m_flags |= CTexture::FLAGS::IS_OPAQUE;
     }
 
     uint32_t width = blobTexture->m_texture->m_width;
@@ -282,7 +282,7 @@ int32_t CTextureBlob::Load(const char* fileName) {
         return 0;
     }
 
-    CTextureBlob* blob = s_textureBlobList.NewNode(2, 0, 0);
+    CTextureBlob* blob = s_textureBlobList.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     SStrCopy(blob->m_filename, fileName, STORM_MAX_STR);
 
     uint32_t size = SFileGetFileSize(file, nullptr);

@@ -6,6 +6,23 @@
 
 class SFileImpl;
 
+// ChatChannels.dbc flags tested by the client; names follow EnumeratedString ChatChannels::Flags.
+enum CHAT_CHANNEL_FLAGS : int32_t {
+    CHAT_CHANNEL_FLAG_NONE               = 0x00000000,
+    // Joined by default and shown in the default chat window.
+    CHAT_CHANNEL_FLAG_AUTO_JOIN          = 0x00000001,
+    // Limited to the zone it was joined in.
+    CHAT_CHANNEL_FLAG_ZONE_BASED         = 0x00000002,
+    // Listed only in AREA_FLAG_ALLOW_TRADE_CHANNEL areas.
+    CHAT_CHANNEL_FLAG_ONLY_IN_CITIES     = 0x00000010,
+    // Named after the AREA_FLAG_LINKED_CHAT_SPECIAL_AREA area in AREA_FLAG_LINKED_CHAT_SET_IN_CITIES areas.
+    CHAT_CHANNEL_FLAG_LINKED_CHANNEL     = 0x00000020,
+    // Receives ZONE_UNDER_ATTACK alerts.
+    CHAT_CHANNEL_FLAG_ZONE_ATTACK_ALERTS = 0x00010000,
+    // Guild recruitment channel, joined and left with the guild recruitment mode.
+    CHAT_CHANNEL_FLAG_GUILD_RECRUITMENT  = 0x00020000,
+};
+
 class ChatChannelsRec {
     public:
     static const int32_t s_numColumns = 37;
@@ -13,7 +30,7 @@ class ChatChannelsRec {
     static const bool s_generatedID = false;
 
     /* 0000 */ int32_t m_id;
-    /* 0004 */ int32_t m_flags;
+    /* 0004 */ CHAT_CHANNEL_FLAGS m_flags;
     /* 0008 */ int32_t m_factionGroup;
     /* 000C */ const char* m_name;
     /* 0010 */ const char* m_shortcut;

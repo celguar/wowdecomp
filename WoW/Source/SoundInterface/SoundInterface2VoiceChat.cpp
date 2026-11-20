@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include "WoW/Source/Client.h"
 #include "WoW/Source/SoundInterface/SoundInterface2VoiceChat.h"
 #include "Engine/Source/Base/CmdLine.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
@@ -182,7 +183,7 @@ static void MonitorCallback(float* data, uint32_t count) {
 // VERIFY: e6a66d96 auto
 // OFFSET: 0x00986700
 void SI2::VoiceChat_InitCapture(float sampleRate) {
-    if (CmdLineGetBool(static_cast<CMDOPT>(26))) {
+    if (CmdLineGetBool(static_cast<CMDOPT>(CMD_NO_SOUND))) {
         return;
     }
 
@@ -382,7 +383,7 @@ void SI2::VoiceChat_PlayLoopbackSound() {
     userData->m_name = "<Voice Chat Loopback Sound>";
     userData->m_soundKitId = 0;
     userData->m_def = nullptr;
-    userData->m_group = 3;
+    userData->m_group = SI2_SOUND_GROUP_CINEMATIC;
 
     s_loopbackSound.m_sound.SetUserData(userData);
     s_loopbackSound.m_sound.SetFinishedCallback(SI2::SoundFinished, nullptr);

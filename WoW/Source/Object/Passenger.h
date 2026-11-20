@@ -13,10 +13,17 @@ class C44Matrix;
 #pragma pack(push, 4)
 class CPassenger {
     public:
+    // Runtime passenger kind and facing representation; raw storage remains a byte.
+    enum : uint8_t {
+        PASSENGER_NONE = 0,
+        PASSENGER_MOVEMENT = 0x1,
+        PASSENGER_QUATERNION_FACING = 0x2,
+    };
+
     /* 0000 */ TSLink<void> m_link;
     /* 0008 */ WOWGUID m_transportGuid;
     /* 0010 */ C3Vector m_position;
-    /* 001C */ uint32_t unused_001C;
+    /* 001C */ uint32_t unknown_001C;
     /* 0020 */ float m_facing;
     /* 0024 */ float m_pitch;
     /* 0028 */ const WOWGUID* m_ownerGuid;

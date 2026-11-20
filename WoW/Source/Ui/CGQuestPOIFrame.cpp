@@ -186,7 +186,7 @@ void CGQuestPOIFrame::RenderCallback(void* param) {
 void CGQuestPOIFrame::OnFrameRender(CRenderBatch* batch, uint32_t layer) {
     CSimpleFrame::OnFrameRender(batch, layer);
 
-    if (layer == 3) {
+    if (layer == DRAWLAYER_ARTWORK_OVERLAY) {
         batch->QueueCallback(CGQuestPOIFrame::RenderCallback, this);
     }
 }
@@ -200,10 +200,9 @@ void CGQuestPOIFrame::UpdateMouseOverPOI(float x, float y) {
     uint32_t count = 0;
     this->m_mouseOverQuestId = 0;
     this->m_mouseOverCount = 0;
-    this->m_mouseOverObjectives[0] = 0;
-    this->m_mouseOverObjectives[1] = 0;
-    this->m_mouseOverObjectives[2] = 0;
-    this->m_mouseOverObjectives[3] = 0;
+    for (uint32_t i = 0; i < sizeof(this->m_mouseOverObjectives) / sizeof(this->m_mouseOverObjectives[0]); i++) {
+        this->m_mouseOverObjectives[i] = 0;
+    }
 
     if (x < 0.0f || y < 0.0f || x > 1.0f || y > 1.0f) {
         return;
@@ -377,14 +376,14 @@ void CGQuestPOIFrame::BuildBlobOutline(QuestPOIBlob* blob, TSGrowableArray<Quest
     C3Spline_CatmullRom spline;
     C3Vector controls[15];
     uint32_t count = blob->m_points.Count();
-    controls[0] = C3Vector(static_cast<float>(blob->m_points.m_data[count - 1].m_x), static_cast<float>(blob->m_points.m_data[count - 1].m_y), 0.0f);
+    controls[0] = C3Vector(static_cast<float>(blob->m_points.m_data[count - 1].m_position.x), static_cast<float>(blob->m_points.m_data[count - 1].m_position.y), 0.0f);
 
     for (uint32_t i = 0; i < count; i++) {
-        controls[i + 1] = C3Vector(static_cast<float>(blob->m_points.m_data[i].m_x), static_cast<float>(blob->m_points.m_data[i].m_y), 0.0f);
+        controls[i + 1] = C3Vector(static_cast<float>(blob->m_points.m_data[i].m_position.x), static_cast<float>(blob->m_points.m_data[i].m_position.y), 0.0f);
     }
 
-    controls[count + 1] = C3Vector(static_cast<float>(blob->m_points.m_data[0].m_x), static_cast<float>(blob->m_points.m_data[0].m_y), 0.0f);
-    controls[count + 2] = C3Vector(static_cast<float>(blob->m_points.m_data[1].m_x), static_cast<float>(blob->m_points.m_data[1].m_y), 0.0f);
+    controls[count + 1] = C3Vector(static_cast<float>(blob->m_points.m_data[0].m_position.x), static_cast<float>(blob->m_points.m_data[0].m_position.y), 0.0f);
+    controls[count + 2] = C3Vector(static_cast<float>(blob->m_points.m_data[1].m_position.x), static_cast<float>(blob->m_points.m_data[1].m_position.y), 0.0f);
     spline.SetPoints(controls, count + 3);
 
     float t = 0.01f;
@@ -397,8 +396,8 @@ void CGQuestPOIFrame::BuildBlobOutline(QuestPOIBlob* blob, TSGrowableArray<Quest
         QuestPOIPoint* point = points->New();
 
         if (point) {
-            point->m_x = x;
-            point->m_y = y;
+            point->m_position.x = x;
+            point->m_position.y = y;
         }
 
         t = 1.0f / this->m_numSplinePoints + t;
@@ -433,16 +432,15 @@ void CGQuestPOIFrame::BuildBlobRenderData(QuestPOIRenderData* data, QuestPOIBlob
     data->m_fillIndices.SetCount(3 * count);
 
     C3Vector center(0.0f, 0.0f, 0.0f);
-    data->m_objectives[0] = 0;
-    data->m_objectives[1] = 0;
-    data->m_objectives[2] = 0;
-    data->m_objectives[3] = 0;
+    for (uint32_t i = 0; i < sizeof(data->m_objectives) / sizeof(data->m_objectives[0]); i++) {
+        data->m_objectives[i] = 0;
+    }
     data->m_objectives[0] = blob->m_objectiveIndex;
     data->m_numObjectives = 1;
     bool failed = false;
 
     for (uint32_t i = 0; i < count; i++) {
-        C3Vector position(static_cast<float>(points.m_data[i].m_x), static_cast<float>(points.m_data[i].m_y), 0.0f);
+        C3Vector position(static_cast<float>(points.m_data[i].m_position.x), static_cast<float>(points.m_data[i].m_position.y), 0.0f);
         float x;
         float y;
         bool outland = false;
@@ -693,12 +691,12 @@ void CGQuestPOIFrame::Render() {
     g_theGxDevicePtr->RsPush();
     GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
-    GxRsSet(GxRs_ColorWrite, 15);
+    GxRsSet(GxRs_ColorWrite, GxColorWrite_All);
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Culling, 0);
     GxRsSet(GxRs_DepthTest, 0);
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Multisample, 0);
     GxRsSet(GxRs_Texture0, fillTexture);

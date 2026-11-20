@@ -45,8 +45,8 @@ CSimpleCamera::CSimpleCamera(float nearZ, float farZ, float fov) {
     this->m_facing.c0 = 0.0f;
     this->m_facing.c1 = 0.0f;
     this->m_facing.c2 = 1.0f;
-    this->m_nearZ = nearZ;
-    this->m_farZ = farZ;
+    this->m_clipRange.m_l = nearZ;
+    this->m_clipRange.m_h = farZ;
     this->m_fov = fov;
     this->m_aspect = 1.0f;
     this->m_facing.FromEulerAnglesZYX(0.0f, 0.0f, 0.0f);
@@ -80,7 +80,7 @@ void CSimpleCamera::SetFacing(float yaw, float pitch, float roll) {
 void CSimpleCamera::SetGxProjectionAndView(const CRect& rect) {
     C44Matrix projection;
     this->m_aspect = (rect.maxX - rect.minX) / (rect.maxY - rect.minY);
-    GxuXformCreateProjection_Exact(this->FOV() * 0.6f, this->m_aspect, this->m_nearZ, this->m_farZ, projection);
+    GxuXformCreateProjection_Exact(this->FOV() * 0.6f, this->m_aspect, this->m_clipRange.m_l, this->m_clipRange.m_h, projection);
     g_theGxDevicePtr->XformSetProjection(projection);
 
     C44Matrix view;
@@ -99,7 +99,7 @@ void CSimpleCamera::SetScreenAspect(const CRect& rect) {
 // OFFSET: 0x00607DF0
 static void FaceDirection(const C3Vector& direction, C3Vector& right, C3Vector& forward, C3Vector& up) {
     if (fabs(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z) < 0.00000023841858f) {
-        SErrSetLastError(87);
+        SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return;
     }
 
@@ -145,7 +145,7 @@ static void BuildBillboardMatrix(C33Matrix& matrix, const C3Vector& direction) {
 // OFFSET: 0x00607F40
 static void FaceDirectionWithRoll(const C3Vector& direction, const C3Vector& upHint, C3Vector& right, C3Vector& forward, C3Vector& up) {
     if (fabs(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z) < 0.00000023841858f) {
-        SErrSetLastError(87);
+        SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return;
     }
 

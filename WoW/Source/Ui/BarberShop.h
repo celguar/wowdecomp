@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "Engine/Source/Storm/H/stpl.h"
+#include "WoW/Source/DB/Rec/BarberShopStyleRec.h"
 #include "WoW/Source/Net/Types.h"
 #include "WoW/Source/Ui/USEABLESTYLE.h"
 
@@ -16,8 +17,18 @@ int32_t Packet_SMSG_BARBER_SHOP_RESULT(void* param, NETMESSAGE msgId, uint32_t t
 
 class CGBarberShop {
     public:
+    // Names describe the client response; distinct causes for1/3 are unproved.
+    // NOT_READ is the existing local sentinel, not an added server result.
+    enum APPLY_RESULT : uint32_t {
+        BARBER_SUCCESS = 0,
+        BARBER_UI_NOT_ENOUGH_MONEY_1 = 1,
+        BARBER_UI_NOT_SITTING = 2,
+        BARBER_UI_NOT_ENOUGH_MONEY_3 = 3,
+        BARBER_RESULT_NOT_READ = 0xFFFFFFFF,
+    };
+
     static void EnterWorld();
-    static STYLEREC* GetStyle(int32_t type, int32_t race, int32_t sex, int32_t data);
+    static STYLEREC* GetStyle(BARBER_SHOP_STYLE_TYPE type, int32_t race, int32_t sex, int32_t data);
     static float GetMinCameraDistance();
     static uint8_t m_barberShopEnabled;
     static uint8_t m_helmHidden;
@@ -32,13 +43,13 @@ class CGBarberShop {
 
     static void AppearanceApplied();
     static void DisableBarberShop();
-    static const BarberShopStyleRec* GetCurrentStyle(int32_t type);
+    static const BarberShopStyleRec* GetCurrentStyle(BARBER_SHOP_STYLE_TYPE type);
     static void ResetAppearance();
-    static bool IsCurrentStyle(int32_t type);
+    static bool IsCurrentStyle(BARBER_SHOP_STYLE_TYPE type);
     static int32_t GetTotalCost();
     static void ApplyAppearanceChange();
     static void Reset();
-    static void SetNextBarberShopStyle(int32_t type, bool backward);
+    static void SetNextBarberShopStyle(BARBER_SHOP_STYLE_TYPE type, bool backward);
     static void InitializeGame();
     static void ShutdownGame();
     static void RegisterScriptFunctions();

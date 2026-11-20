@@ -29,6 +29,15 @@ struct XMLENUMVALUE {
     /* 0004 */ const char* m_name;
 };
 
+// FrameXML_CheckSignature results, named after the GlueXML load warnings
+// ("missing signature", "corrupt signature", "modified or corrupt").
+enum XML_SIGNATURE_RESULT : int32_t {
+    XML_SIGNATURE_MISSING  = 0,
+    XML_SIGNATURE_CORRUPT  = 1,
+    XML_SIGNATURE_MODIFIED = 2,
+    XML_SIGNATURE_VALID    = 3,
+};
+
 const char* BlendModeToString(EGxBlend blend);
 const char* CurveTypeToString(SimpleAnimCurveType curve);
 const char* DrawLayerToString(uint32_t layer);

@@ -1,0 +1,140 @@
+#ifndef WOW_COMMON_ITEMTYPES_H
+#define WOW_COMMON_ITEMTYPES_H
+
+#include <cstdint>
+
+// Number of parallel spell entries in an ItemStats_C cache record.
+constexpr int32_t NUM_ITEM_SPELLS = 5;
+
+// Inferred names: stat and damage entries in an ItemStats_C cache record.
+constexpr int32_t NUM_ITEM_STATS = 10;
+constexpr int32_t NUM_ITEM_DAMAGES = 2;
+
+// Item sockets (FrameXML ItemSocketingFrame.lua MAX_NUM_SOCKETS).
+constexpr int32_t MAX_NUM_SOCKETS = 3;
+
+// 3.3.5 ItemClass.dbc IDs. NONE is the signed no-class/restriction sentinel.
+// DBC selectors use signed32; cache/runtime/packed carriers retain their widths.
+enum ITEM_CLASS : int32_t {
+    ITEM_CLASS_NONE                          = -1,
+    ITEM_CLASS_CONSUMABLE                    = 0,
+    ITEM_CLASS_CONTAINER                     = 1,
+    ITEM_CLASS_WEAPON                        = 2,
+    ITEM_CLASS_GEM                           = 3,
+    ITEM_CLASS_ARMOR                         = 4,
+    ITEM_CLASS_REAGENT                       = 5,
+    ITEM_CLASS_PROJECTILE                    = 6,
+    ITEM_CLASS_TRADE_GOODS                   = 7,
+    ITEM_CLASS_GENERIC                       = 8,
+    ITEM_CLASS_RECIPE                        = 9,
+    ITEM_CLASS_MONEY                         = 10,
+    ITEM_CLASS_QUIVER                        = 11,
+    ITEM_CLASS_QUEST                         = 12,
+    ITEM_CLASS_KEY                           = 13,
+    ITEM_CLASS_PERMANENT                     = 14,
+    ITEM_CLASS_MISCELLANEOUS                 = 15,
+    ITEM_CLASS_GLYPH                         = 16,
+    NUM_ITEM_CLASSES                         = 17,
+};
+
+// Proficiency masks use the selected item class's subclass IDs as bit positions.
+// Zero means that class has no active proficiency filter.
+static const uint32_t ITEM_PROFICIENCY_NO_MASK = 0;
+
+// ItemSubClass.dbc IDs only for ITEM_CLASS_WEAPON. Other item classes use
+// independent subclass domains; subclass masks and sound overrides stay raw.
+enum ITEM_SUBCLASS_WEAPON : int32_t {
+    ITEM_SUBCLASS_WEAPON_AXE                 = 0,
+    ITEM_SUBCLASS_WEAPON_AXE2                = 1,
+    ITEM_SUBCLASS_WEAPON_BOW                 = 2,
+    ITEM_SUBCLASS_WEAPON_GUN                 = 3,
+    ITEM_SUBCLASS_WEAPON_MACE                = 4,
+    ITEM_SUBCLASS_WEAPON_MACE2               = 5,
+    ITEM_SUBCLASS_WEAPON_POLEARM             = 6,
+    ITEM_SUBCLASS_WEAPON_SWORD               = 7,
+    ITEM_SUBCLASS_WEAPON_SWORD2              = 8,
+    ITEM_SUBCLASS_WEAPON_OBSOLETE            = 9,
+    ITEM_SUBCLASS_WEAPON_STAFF               = 10,
+    ITEM_SUBCLASS_WEAPON_EXOTIC              = 11,
+    ITEM_SUBCLASS_WEAPON_EXOTIC2             = 12,
+    ITEM_SUBCLASS_WEAPON_FIST_WEAPON         = 13,
+    ITEM_SUBCLASS_WEAPON_MISCELLANEOUS       = 14,
+    ITEM_SUBCLASS_WEAPON_DAGGER              = 15,
+    ITEM_SUBCLASS_WEAPON_THROWN              = 16,
+    ITEM_SUBCLASS_WEAPON_SPEAR               = 17,
+    ITEM_SUBCLASS_WEAPON_CROSSBOW            = 18,
+    ITEM_SUBCLASS_WEAPON_WAND                = 19,
+    ITEM_SUBCLASS_WEAPON_FISHING_POLE        = 20,
+    NUM_ITEM_WEAPON_SUBCLASSES               = 21,
+};
+
+enum ITEM_SUBCLASS_ARMOR : int32_t {
+  ITEM_SUBCLASS_ARMOR_Miscellaneous = 0,
+  ITEM_SUBCLASS_ARMOR_Cloth = 1,
+  ITEM_SUBCLASS_ARMOR_Leather = 2,
+  ITEM_SUBCLASS_ARMOR_Mail = 3,
+  ITEM_SUBCLASS_ARMOR_Plate = 4,
+  ITEM_SUBCLASS_ARMOR_Buckler_obsolete = 5,
+  ITEM_SUBCLASS_ARMOR_SHIELD = 6,
+  ITEM_SUBCLASS_ARMOR_LIBRAM = 7,
+  ITEM_SUBCLASS_ARMOR_IDOL = 8,
+  ITEM_SUBCLASS_ARMOR_TOTEM = 9,
+  ITEM_SUBCLASS_ARMOR_SIGIL = 10,
+  NUM_ITEM_ARMOR_SUBCLASSES = 11,
+};
+
+// ItemSubClass.dbc IDs for ITEM_CLASS_CONSUMABLE, named after the DBC display names.
+enum ITEM_SUBCLASS_CONSUMABLE : int32_t {
+    ITEM_SUBCLASS_CONSUMABLE_CONSUMABLE       = 0,
+    ITEM_SUBCLASS_CONSUMABLE_POTION           = 1,
+    ITEM_SUBCLASS_CONSUMABLE_ELIXIR           = 2,
+    ITEM_SUBCLASS_CONSUMABLE_FLASK            = 3,
+    ITEM_SUBCLASS_CONSUMABLE_SCROLL           = 4,
+    ITEM_SUBCLASS_CONSUMABLE_FOOD_DRINK       = 5,
+    ITEM_SUBCLASS_CONSUMABLE_ITEM_ENHANCEMENT = 6,
+    ITEM_SUBCLASS_CONSUMABLE_BANDAGE          = 7,
+    ITEM_SUBCLASS_CONSUMABLE_OTHER            = 8,
+    NUM_ITEM_CONSUMABLE_SUBCLASSES            = 9,
+};
+
+// Item quality; names follow the ITEM_QUALITY<n>_DESC strings.
+enum ITEM_QUALITY : uint32_t {
+    ITEM_QUALITY_POOR = 0,
+    ITEM_QUALITY_COMMON = 1,
+    ITEM_QUALITY_UNCOMMON = 2,
+    ITEM_QUALITY_RARE = 3,
+    ITEM_QUALITY_EPIC = 4,
+    ITEM_QUALITY_LEGENDARY = 5,
+    ITEM_QUALITY_ARTIFACT = 6,
+    ITEM_QUALITY_HEIRLOOM = 7,
+    NUM_ITEM_QUALITIES = 8,
+};
+
+// Binding policies recognized by the 3.3.5 client. Packet/cache words remain
+// raw uint32_t; other values retain the existing fallback behavior.
+enum ITEM_BINDING : uint32_t {
+    ITEM_BINDING_NONE                    = 0,
+    ITEM_BINDING_ON_PICKUP               = 1,
+    ITEM_BINDING_ON_EQUIP                = 2,
+    ITEM_BINDING_ON_USE                  = 3,
+    ITEM_BINDING_QUEST                   = 4,
+};
+
+// Item spell-trigger tags interpreted by the 3.3.5 client. Other raw tags
+// (including 3, 4 and 5) retain their existing default handling.
+// Commented entries preserve later ItemEffect::TriggerType reference names;
+// their availability and meaning in 3.3.5 are unverified. TrinityCore labels
+// are separate, non-authoritative guesses where noted.
+enum ITEM_SPELL_TRIGGER : uint32_t {
+    ITEM_SPELL_TRIGGER_ON_USE            = 0,
+    ITEM_SPELL_TRIGGER_ON_EQUIP          = 1,
+    ITEM_SPELL_TRIGGER_ON_PROC           = 2,
+    // ITEM_SPELL_TRIGGER_SUMMONED_BY_SPELL = 3,
+    // ITEM_SPELL_TRIGGER_ON_DEATH         = 4, // TC 3.3.5: ITEM_SPELLTRIGGER_SOULSTONE.
+    // ITEM_SPELL_TRIGGER_ON_PICKUP        = 5, // TC 3.3.5: ITEM_SPELLTRIGGER_ON_NO_DELAY_USE (uncertain).
+    ITEM_SPELL_TRIGGER_LEARN_SPELL       = 6, // Later name: OnLearn.
+    // ITEM_SPELL_TRIGGER_ON_LOOTED        = 7,
+    // ITEM_SPELL_TRIGGER_TEACH_MOUNT      = 8,
+};
+
+#endif

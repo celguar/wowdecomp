@@ -9,7 +9,9 @@
 #include "Engine/Source/Tempest/CAaSphere.h"
 #include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/Gx/CGxVertexPC.h"
+#include "Engine/Source/Gx/CGxVertexPNCT2.h"
 #include "Engine/Source/Storm/H/stpl.h"
+#include "WoW/Source/WorldClient/WorldConstants.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "WoW/Source/WorldClient/CMapBaseObjLink.h"
 #include "WoW/Source/WorldClient/MapLowDetail.h"
@@ -58,34 +60,55 @@ class CMapAreaEntry {
     /* 0004 */ float m_dist;
 };
 
+// WDT MAIN entry, one per map area.
 struct SMAreaInfo {
-    /* 0000 */ uint32_t m_flags;
+    enum FLAGS : uint32_t {
+        F_HAS_ADT = 0x1, // The area has terrain data to load.
+    };
+
+    /* 0000 */ uint32_t m_flags; // FLAGS
     /* 0004 */ uint32_t m_unused;
 };
 
+// ADT MDDF entry.
 struct SMDoodadDef {
+    enum FLAGS : uint16_t {
+        F_BIODOME = 0x1, // Placed with MAPOBJ_FLAG_BIODOME.
+    };
+
     /* 0000 */ uint32_t m_nameId;
     /* 0004 */ uint32_t m_uniqueId;
     /* 0008 */ C3Vector m_position;
     /* 0014 */ C3Vector m_rotation;
     /* 0020 */ uint16_t m_scale;
-    /* 0022 */ uint16_t m_flags;
+    /* 0022 */ uint16_t m_flags; // FLAGS
 };
 
+// ADT MODF entry.
 struct SMMapObjDef {
+    enum FLAGS : uint16_t {
+        F_DESTROYABLE = 0x1, // Destructible building: registered as a CDestructibleProxy instead of a CMapObjDef.
+    };
+
     /* 0000 */ uint32_t m_nameId;
     /* 0004 */ uint32_t m_uniqueId;
     /* 0008 */ C3Vector m_position;
     /* 0014 */ C3Vector m_rotation;
     /* 0020 */ CAaBox m_extents;
-    /* 0038 */ uint16_t m_flags;
+    /* 0038 */ uint16_t m_flags; // FLAGS
     /* 003A */ uint16_t m_doodadSet;
     /* 003C */ uint16_t m_nameSet;
     /* 003E */ uint16_t m_scale;
 };
 
+// WMO MODD entry.
 struct SMODoodadDef {
-    /* 0000 */ uint32_t m_flags;
+    enum FLAGS : uint32_t {
+        NAME_INDEX_MASK = 0x00FFFFFF, // Offset into the MODN doodad name list.
+        F_ACCEPT_PROJ_TEX = 0x01000000, // Placed with MAPOBJ_FLAG_PROJ_TEX.
+    };
+
+    /* 0000 */ uint32_t m_flags; // FLAGS
     /* 0004 */ C3Vector m_position;
     /* 0010 */ C4Quaternion m_orientation;
     /* 0020 */ float m_scale;
@@ -120,7 +143,15 @@ class CMapFootprintTexture {
     CMapFootprintTexture();
 };
 
-typedef int32_t (*MAP_OBJECT_FUNC)(void*, uint32_t, uint64_t, uintptr_t);
+// Frame state passed to a map entity's MAP_OBJECT_FUNC by CWorldScene.
+enum MAP_OBJECT_FUNC_FLAGS : uint32_t {
+    MAP_OBJECT_FUNC_NONE = 0x0,
+    MAP_OBJECT_FUNC_VISIBLE = 0x1, // Passed the frustum and occlusion tests; returning nonzero links it for rendering.
+    MAP_OBJECT_FUNC_NEAR_CAMERA = 0x2, // Culled but within ~33.3 yards of the camera; its model keeps animating.
+    MAP_OBJECT_FUNC_IN_SCENE = 0x4, // Reached the cull pass this frame (m_culled is not CULL_UNTESTED).
+};
+
+typedef int32_t (*MAP_OBJECT_FUNC)(void*, uint32_t, uint64_t, uintptr_t); // flags: MAP_OBJECT_FUNC_FLAGS
 
 struct MapObjIntersectCandidate {
     /* 0000 */ CMapObjDef* def;
@@ -186,10 +217,17 @@ class CMap {
     static int32_t bspRecurseCount;
     static uint32_t s_queryTag;
     static uint32_t cCount;
-    static CMapAreaMed* unk[4096];
-    static CMapArea* m_areaTable[4096];
-    static SMAreaInfo m_areaInfo[4096];
+    static CMapAreaMed* unk[MAP_AREA_COUNT];
+    static CMapArea* m_areaTable[MAP_AREA_COUNT];
+    static SMAreaInfo m_areaInfo[MAP_AREA_COUNT];
     static TSGrowableArray<uint32_t> scCollideList;
+    // Capacity set by CMap::Initialize; the DX/DY walks stop 4 entries early because one step appends up to two cells.
+    static const uint32_t COLLIDE_LIST_SIZE = 2048;
+    // INLINED: appends one (cellX, cellY) pair to the vector query cell list.
+    static void AddCollideCell(uint32_t cellX, uint32_t cellY) {
+        CMap::scCollideList.m_data[CMap::cCount++] = cellX;
+        CMap::scCollideList.m_data[CMap::cCount++] = cellY;
+    }
     static int32_t bActive;
     static int32_t bDungeon;
     static int32_t s_useSSE;
@@ -256,8 +294,8 @@ class CMap {
     static bool QueryAreaId(CMapEntity* entity, uint32_t& areaId);
     static void Unload();
     static void ValidateShaders();
-    static CGxShader* GetPixelShader(bool a1, bool a2, bool a3);
-    static CGxShader* GetTerrainPixelShader(int32_t bigAlpha, int32_t layers, int32_t shadowMode, int32_t a4, int32_t a5);
+    static CGxShader* GetPixelShader(bool bigAlpha, bool baseLayer, bool specular);
+    static CGxShader* GetTerrainPixelShader(int32_t bigAlpha, int32_t layers, int32_t shadowMode, int32_t specular, int32_t unlitLayers);
     static void Load(const char* mapName, int32_t zoneID);
     static void LoadTex();
     static void LoadWdt();
@@ -266,6 +304,19 @@ class CMap {
     static int32_t SafeRead(const char* fileName, SFileImpl* file, void* buffer, uint32_t size);
     static CMapArea* AllocArea();
     static CMapArea* GetLoadedArea(int32_t areaX, int32_t areaY);
+    // INLINED: area table lookups by area, chunk (16 per area) and cell (128 per area) coordinates.
+    static int32_t GetAreaIndex(int32_t areaX, int32_t areaY) {
+        return MAP_AREAS_PER_AXIS * areaY + areaX;
+    }
+    static CMapArea* GetArea(int32_t areaX, int32_t areaY) {
+        return CMap::m_areaTable[CMap::GetAreaIndex(areaX, areaY)];
+    }
+    static CMapArea* GetAreaForChunk(int32_t chunkX, int32_t chunkY) {
+        return CMap::GetArea((chunkX >> MAP_CHUNK_TO_AREA_SHIFT) & MAP_AREA_INDEX_MASK, (chunkY >> MAP_CHUNK_TO_AREA_SHIFT) & MAP_AREA_INDEX_MASK);
+    }
+    static CMapArea* GetAreaForCell(int32_t cellX, int32_t cellY) {
+        return CMap::GetArea((cellX >> MAP_CELL_TO_AREA_SHIFT) & MAP_AREA_INDEX_MASK, (cellY >> MAP_CELL_TO_AREA_SHIFT) & MAP_AREA_INDEX_MASK);
+    }
     static CMapArea* GetAreaAtPosition(const C2Vector* pos);
     static CMapChunk* GetChunkAtPosition(const C2Vector* pos);
     static CMapAreaLow* AllocAreaLow();
@@ -311,7 +362,7 @@ class CMap {
     static CMapObjDef* CreateMapObjDef(char* fileName, SMMapObjDef* mapObjectDef, C3Vector* center, bool cached);
     static CMapDoodadDef* CreateDoodadDef(const char* fileName, SMDoodadDef* doodadDef, C3Vector* center);
     static CMapDoodadDef* CreateDoodadDef(const char* fileName, const C3Vector* position, float facing, int32_t waitForLoad);
-    static CMapLight* CreateLight(uint8_t a1, uint8_t a2);
+    static CMapLight* CreateLight(uint8_t dynamic, uint8_t a2);
     static CMapDoodadDef* CreateDoodadDef(uint32_t doodadRef, SMODoodadDef* doodadDef, char* name, uint32_t key, C44Matrix* mat, uint16_t doodadSet);
     static void FreeBaseObjLinksInBounds(CAaBox* box);
     static void FreeBaseObjLink(CMapBaseObjLink* link);
@@ -333,7 +384,7 @@ class CMap {
     static bool QueryShadow(C3Vector* pos);
     static DepthCoordTable* GetDepthCoordTable(uint32_t liquidType);
     static CChunkLiquid* AllocChunkLiquid();
-    static void CreateWaterRipple(const C3Vector& pos, float a2, float a3, float a4, float a5, float a6, int32_t a7, int32_t a8);
+    static void CreateWaterRipple(const C3Vector& pos, float facing, float size, float duration, float width, float growth, int32_t type, int32_t player);
     static void QueryLiquidSounds(C3Vector* pos, float radius, TSGrowableArray<World::LiquidQueryResult>& results);
     static bool QueryLiquidStatus(C3Vector* pos, int32_t* liquidType, float* height, int32_t* a4, int32_t checkGround);
     static bool QueryLiquidTerrain(const C3Vector* pos, int32_t* liquidType, float* height, int32_t checkGround);
@@ -346,7 +397,7 @@ class CMap {
     static CMapEntity* ObjectCreate(CM2Model* model, MAP_OBJECT_FUNC func, void* funcParam, uint64_t param64, uintptr_t param32, uint32_t flags);
     static CMapEntity* ObjectCreateStatic(CM2Model* model, const C44Matrix& matrix, MAP_OBJECT_FUNC func, void* funcParam, uintptr_t param32);
     static CMapEntity* ObjectCreateStaticEx(CM2Model* model, const C44Matrix& matrix, MAP_OBJECT_FUNC func, void* funcParam, uint64_t param64, uintptr_t param32, const char* file, int32_t line);
-    static void ObjectUpdate(CMapEntity* entity, C44Matrix& mat, CAaBox& box, CAaSphere& sphere, C3Vector& vec, bool a6, uint32_t a7);
+    static void ObjectUpdate(CMapEntity* entity, C44Matrix& mat, CAaBox& box, CAaSphere& sphere, C3Vector& vec, bool skipEntityUpdate, uint32_t splitBodyBone);
     static void PrepareEntitys(int32_t addToScene);
     static void LinkStaticEntityMultiple2(CMapStaticEntity* entity);
     static void LinkStaticEntity(CMapStaticEntity* entity, C3Vector& top, C3Vector& bottom, C3Vector& mid, int32_t& outInterior, int32_t& outHit, MapObjIntersectData* interiorHit, MapObjIntersectData* groundHit);
@@ -388,7 +439,7 @@ class CMap {
     static bool LocateViewerMapObjs(C3Vector& start, C3Vector& end, float dist, CMapObjDef** outDefs, uint32_t* outGroups);
     static void TestQueryAdd(const CFacet& facet, CImVector color, const C44Matrix* mat);
     static bool QueryLiquidStatusMapObjsExt(C3Vector* pos, int32_t* liquidType, float* height);
-    static bool GetFacets(CAaBox* a1, CAaBox* a2, World::FacetData* a3, uint32_t a4, uint32_t* a5);
+    static bool GetFacets(CAaBox* queryBox, CAaBox* box, World::FacetData* facets, uint32_t flags, uint32_t* status);
     static bool GetMapObjFacets(CAaBox* queryBox, CAaBox* box, World::FacetData* facets, uint32_t flags, uint32_t* status);
     static bool QueryFacets(CFrustum* frustum, World::FacetData* facets, uint32_t flags, uint32_t* count);
     static bool GetChunkFacets(int32_t chunkX, int32_t chunkY, CiRect* subRect, CAaBox* queryBox, CAaBox* box, World::FacetData* facets, uint32_t flags);

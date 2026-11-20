@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Frame/CScriptRegion.h"
 #include "Engine/Source/Frame/CRenderBatch.h"
@@ -22,6 +23,7 @@ class CMouseEvent;
 class CSimpleFrame;
 class CStatus;
 class CSimpleTop;
+class CSimpleTitleRegion;
 struct SIMPLEFRAMENODE;
 struct lua_State;
 
@@ -41,6 +43,31 @@ class FrameScriptFunctionRef : public XMLNodeData {
 
 class CSimpleFrame : public CScriptRegion {
     public:
+    enum FrameFlags : uint32_t {
+        // Current client roles; original enum names are unavailable.
+        FRAME_TOPLEVEL = 0x1,
+        FRAME_OCCLUDED = 0x10,
+        FRAME_MOVABLE = 0x100,
+        FRAME_RESIZABLE = 0x200,
+        FRAME_DISABLED = 0x400,
+        FRAME_DEFER_PROTECTION_QUERY = 0x800,
+        FRAME_USER_PLACED = 0x1000,
+        FRAME_BEING_SCROLLED = 0x2000,
+        FRAME_SCROLL_CHILD = 0x4000,
+        FRAME_ALLOW_ATTRIBUTE_CHANGES = 0x8000,
+        // Set by button construction; no broader purpose is claimed.
+        FRAME_BUTTON_CONSTRUCTION_TAG = 0x10000,
+        FRAME_HIDE_SCRIPT_DEPTH = 0x40000,
+        FRAME_DONT_SAVE_POSITION = 0x80000,
+        FRAME_MOVABLE_OR_RESIZABLE_MASK = 0x300,
+    };
+
+    enum INITIALIZED_STATE : uint32_t {
+        // STATE_UNKNOWN = 0,
+        STATE_INITIALIZED = 1,
+        STATE_DELETED = 3,
+    };
+
     static CDataAllocator s_allocator;
     static int32_t s_frameCount;
     static int32_t s_metatable;
@@ -55,8 +82,8 @@ class CSimpleFrame : public CScriptRegion {
 
     /* 00A0 */ CSimpleTop* m_simpleTop;
     /* 00A4 */ CSimpleFrame* m_hoverFrame;
-    /* 00A8 */ CScriptRegion* m_titleRegion;
-    /* 00AC */ uint32_t m_lifecycleState;
+    /* 00A8 */ CSimpleTitleRegion* m_titleRegion;
+    /* 00AC */ INITIALIZED_STATE m_initialized_state;
     /* 00B0 */ int32_t m_id;
     /* 00B4 */ uint32_t m_frameFlags;
     /* 00B8 */ float m_frameScale;
@@ -148,7 +175,7 @@ class CSimpleFrame : public CScriptRegion {
     virtual void OnScreenSizeChanged();
     virtual void OnFrameSizeChanged(float width, float height);
     virtual void OnLayerCursorEnter(int32_t motion);
-    virtual void OnLayerCursorExit(int32_t motion, int32_t a3);
+    virtual void OnLayerCursorExit(int32_t motion, BOOL releaseMouse);
     virtual int32_t OnLayerIme(const CImeEvent& evt);
     virtual int32_t OnLayerKeyDownRepeat(const CKeyEvent& evt);
     virtual int32_t OnLayerChar(const CCharEvent& evt);
@@ -197,7 +224,7 @@ class CSimpleFrame : public CScriptRegion {
     void NotifyDrawLayerChanged(uint32_t drawLayer);
     void NotifyScrollParent();
     void Raise();
-    void RegisterForEvents(int32_t a2);
+    void RegisterForEvents(BOOL reregister);
     void RegisterRegion(CSimpleRegion* region);
     void RemoveFrameRegion(CSimpleRegion* region, uint32_t drawLayer);
     void RunOnAttributeChangedScript(const char* name, int32_t luaRef);
@@ -208,7 +235,7 @@ class CSimpleFrame : public CScriptRegion {
     void RunOnSizeChangedScript(float width, float height);
     void SetAttribute(const char* name, int32_t luaRef);
     void SetBackdrop(CBackdropGenerator* backdrop);
-    void SetBeingScrolled(int32_t scrolled, int32_t a3);
+    void SetBeingScrolled(int32_t scrolled, int32_t scrollChild);
     void SetClampRectInsets(float left, float right, float top, float bottom);
     void SetFrameAlpha(uint8_t alpha);
     bool SetFrameDepth(float depth, bool force);
@@ -219,7 +246,7 @@ class CSimpleFrame : public CScriptRegion {
     void SetHitRectInsets(float left, float right, float top, float bottom);
     int32_t Show();
     int32_t TestHitRect(const C2Vector& pt);
-    void UnregisterForEvents(int32_t a2);
+    void UnregisterForEvents(BOOL reregister);
 };
 
 #endif

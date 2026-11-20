@@ -6,7 +6,7 @@
 // VERIFY: ce0291e3 manual
 // OFFSET: 0x00667FA0
 GameObjectStats::~GameObjectStats() {
-    for (int32_t i = 0; i < 4; i++) {
+    for (int32_t i = 0; i < NUM_NAMES; i++) {
         if (this->m_name[i]) {
             SMemFree(this->m_name[i], __FILE__, __LINE__, 0);
         }
@@ -43,7 +43,7 @@ void GameObjectStats::Pack(CDataStore* msg) {
     msg->Put(this->m_typeID);
     msg->Put(this->m_displayID);
 
-    for (int32_t i = 0; i < 4; i++) {
+    for (int32_t i = 0; i < NUM_NAMES; i++) {
         if (this->m_name[i]) {
             msg->PutString(this->m_name[i]);
         } else {
@@ -55,13 +55,13 @@ void GameObjectStats::Pack(CDataStore* msg) {
     msg->PutString(this->m_castBarCaption);
     msg->PutString(this->m_closeText);
 
-    for (int32_t i = 0; i < 24; i++) {
+    for (int32_t i = 0; i < GameObjectStats::NUM_PROP_VALUES; i++) {
         msg->Put(this->m_propValue[i]);
     }
 
     msg->Put(this->m_scale);
 
-    for (int32_t i = 0; i < 6; i++) {
+    for (int32_t i = 0; i < NUM_QUEST_ITEMS; i++) {
         msg->Put(this->m_questItems[i]);
     }
 }
@@ -74,7 +74,7 @@ void GameObjectStats_C::Unpack(CDataStore* msg) {
     msg->Get(this->m_typeID);
     msg->Get(this->m_displayID);
 
-    for (int32_t i = 0; i < 4; i++) {
+    for (int32_t i = 0; i < NUM_NAMES; i++) {
         msg->GetString(buffer, sizeof(buffer));
 
         if (buffer[0]) {
@@ -91,13 +91,13 @@ void GameObjectStats_C::Unpack(CDataStore* msg) {
     msg->GetString(buffer, sizeof(buffer));
     this->m_closeText = SStrDupA(buffer, __FILE__, __LINE__);
 
-    for (int32_t i = 0; i < 24; i++) {
+    for (int32_t i = 0; i < GameObjectStats::NUM_PROP_VALUES; i++) {
         msg->Get(this->m_propValue[i]);
     }
 
     msg->Get(this->m_scale);
 
-    for (int32_t i = 0; i < 6; i++) {
+    for (int32_t i = 0; i < NUM_QUEST_ITEMS; i++) {
         msg->Get(this->m_questItems[i]);
     }
 }

@@ -331,7 +331,7 @@ void CWorldOccluder::Initialize() {
 // VERIFY: 4db2afc6 manual
 // OFFSET: 0x0078F6A0
 void CWorldOcclusion::UpdateBufferChunk(const C3Vector* verts, const float* heights, const uint32_t* indices, int32_t count, const C3Vector* offset, int32_t holes) {
-    if (!(CWorld::enables & Enable_Culling) || CWorldScene::camVec.z < -0.89999998f || CWorldScene::camVec.z > 0.89999998f) {
+    if (!(CWorld::enables & Enables::Enable_Culling) || CWorldScene::camVec.z < -0.89999998f || CWorldScene::camVec.z > 0.89999998f) {
         return;
     }
 
@@ -416,7 +416,7 @@ void CWorldOcclusion::UpdateBufferChunk(const C3Vector* verts, const float* heig
 // VERIFY: 5b9f55f1 manual
 // OFFSET: 0x0078F900
 void CWorldOcclusion::UpdateBuffer(const C3Vector* points, int32_t count, uint32_t flags) {
-    if (!(CWorld::enables & Enable_Culling) || CWorldScene::camVec.z < -0.89999998f || CWorldScene::camVec.z > 0.89999998f) {
+    if (!(CWorld::enables & Enables::Enable_Culling) || CWorldScene::camVec.z < -0.89999998f || CWorldScene::camVec.z > 0.89999998f) {
         return;
     }
 
@@ -485,7 +485,7 @@ void CWorldOcclusion::UpdateBuffer(const C3Vector* points, int32_t count, uint32
 // VERIFY: a0f63ed4 manual
 // OFFSET: 0x0078FC40
 uint32_t CWorldOcclusion::QueryBuffer(const C3Vector& center, float radius, uint8_t flags) {
-    if (!(CWorld::enables & Enable_Culling) || fabs(radius) < 2.3841858e-07f || CWorldScene::camVec.z < -0.89999998f || CWorldScene::camVec.z > 0.89999998f) {
+    if (!(CWorld::enables & Enables::Enable_Culling) || fabs(radius) < 2.3841858e-07f || CWorldScene::camVec.z < -0.89999998f || CWorldScene::camVec.z > 0.89999998f) {
         return 0;
     }
 
@@ -529,7 +529,7 @@ uint32_t CWorldOcclusion::QueryBuffer(const C3Vector& center, float radius, uint
 // VERIFY: 3ac5bc19 auto
 // OFFSET: 0x0078FDC0
 uint32_t CWorldOcclusion::QueryBuffer(CAaBox* box, uint8_t flags) {
-    if (!(CWorld::enables & Enable_Culling) || CWorldScene::camVec.z < -0.89999998f || CWorldScene::camVec.z > 0.89999998f) {
+    if (!(CWorld::enables & Enables::Enable_Culling) || CWorldScene::camVec.z < -0.89999998f || CWorldScene::camVec.z > 0.89999998f) {
         return 0;
     }
 
@@ -655,7 +655,7 @@ CWorldOccluder* CWorldOccluder::Alloc() {
     CWorldOccluder* occluder = s_occluderFreeList.Head();
 
     if (!occluder) {
-        occluder = s_occluderFreeList.NewNode(2, 0, 0);
+        occluder = s_occluderFreeList.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     }
 
     occluder->m_link.Unlink();
@@ -867,12 +867,12 @@ void CWorldScene::CreateOcclusionVolumes(const C3Vector* eye, const C3Vector* co
     for (uint32_t i = 0; i < 62; i++) {
         OcclusionVolume& volume = s_occlusionVolumes[i];
 
-        if (s_mapId != volume.m_mapID || (onlyFlagged && !(volume.m_flags & 2))) {
+        if (s_mapId != volume.m_mapID || (onlyFlagged && !(volume.m_flags & OcclusionVolume::FLAGS::UNKNOWN_2))) {
             continue;
         }
 
         if (frustum.Cull(volume.m_data.m_bounds)) {
-            CWorldOcclusion::AddVolume(eye, volume.m_data.m_positions, volume.m_data.m_positionCount, !(volume.m_flags & 1));
+            CWorldOcclusion::AddVolume(eye, volume.m_data.m_positions, volume.m_data.m_positionCount, !(volume.m_flags & OcclusionVolume::FLAGS::NO_VIEW_CLIP));
         }
     }
 }
@@ -887,7 +887,7 @@ void CWorldOcclusion::ClearVolumes() {
 // VERIFY: 1ad39c5b manual
 // OFFSET: 0x007CD930
 void CWorldScene::RenderOcclusionVolumes() {
-    if (!(CWorld::enables & Enable_PortalVis)) {
+    if (!(CWorld::enables & Enables::Enable_PortalVis)) {
         return;
     }
 
@@ -917,7 +917,7 @@ void CWorldScene::RenderOcclusionVolumes() {
     g_theGxDevicePtr->XformPushAndSet(GxXform_World, world);
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);

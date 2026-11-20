@@ -28,6 +28,7 @@
 #include "Engine/Source/Gx/CGxMatrixStack.h"
 #include "Engine/Source/ShaderEffect/ShadowCache.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
+#include "WoW/Source/DebugFeatures.h"
 
 // VERIFY: 78b69e1a manual
 // OFFSET: 0x007D5610
@@ -43,7 +44,7 @@ void CWorldScene::RenderCollisionDebug() {
     matrix.Translate(C3Vector(-CWorldScene::s_activeWorldView.x, -CWorldScene::s_activeWorldView.y, -CWorldScene::s_activeWorldView.z));
     g_theGxDevicePtr->XformPushAndSet(GxXform_World, matrix);
 
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_DepthWrite, 0);
@@ -184,10 +185,10 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     CM2Scene* scene = World::s_m2Scene;
 
     if (scene) {
-        scene->m_flags |= 0x1;
+        scene->m_flags |= CM2Scene::SCENE_FLAGS::WORLD_ANIMATION_ACTIVE;
         scene->AdvanceTime(static_cast<uint32_t>(CMath::fint_(time * 1000.0f)));
         scene->Animate(cameraPos);
-        scene->m_flags &= ~0x1;
+        scene->m_flags &= ~CM2Scene::SCENE_FLAGS::WORLD_ANIMATION_ACTIVE;
     }
 
     CGUnit_C::UpdateMissileTrajectoryTargeting();
@@ -222,7 +223,7 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     Liquid::UpdateProceduralTextures();
     CWorldScene::PrepareLiquidInstances();
 
-    if ((CWorld::enables & 0x1000000) && CWorldScene::s_liquidRenderer) {
+    if ((CWorld::enables & Enables::Enable_Water) && CWorldScene::s_liquidRenderer) {
         CWorldScene::s_liquidRenderer->Flush(CWorldScene::s_activeWorldView, 0);
     }
 
@@ -243,10 +244,14 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     g_theGxDevicePtr->RsPop();
     CursorReleaseItemMips();
 
-    if (CWorld::enables & 0x200000) {
+    if (CWorld::enables & Enables::Enable_CollisionDebug) {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+        // Debug feature: drawn at the end of the frame by WorldDebugRenderLate (WorldRender_Debug.cpp).
+#else
         CWorldScene::RenderCollisionDebug();
         CMap::debugVertexArray.SetCount(0);
         CMap::debugIndexArray.m_count = 0;
+#endif
     }
 }
 

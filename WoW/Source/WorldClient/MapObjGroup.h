@@ -33,7 +33,7 @@ class CMapObjDef;
 class CMapObjGroup;
 struct SMOBatch;
 struct SMOLTile;
-union SMOLiquidVert;
+struct SMOLVert;
 struct SMOMaterial;
 struct SMOPoly;
 class VBBList;
@@ -45,27 +45,45 @@ namespace World {
     class TriData;
 }
 
+// Shared BSP/output-pool status: the BSP out-word is merged directly into TriData.
+enum WORLD_TRI_QUERY_STATUS : int32_t {
+    TRI_QUERY_STATUS_NONE = 0,
+    TRI_QUERY_STATUS_OVERFLOW = 1,
+};
+
+// Distinct physical pools; equal counts do not make their capacities interchangeable.
+enum WORLD_TRI_POOL_LIMITS : int32_t {
+    TRI_QUERY_BATCH_CAPACITY = 32,
+    TRI_QUERY_MATRIX_CAPACITY = 32,
+    TRI_QUERY_INDEX_CAPACITY = 0xC000,
+    TRI_QUERY_FACE_INDEX_CAPACITY = 0x4000,
+};
+
 struct BspQuery {
-    static uint16_t testFaces[8192];
-    static uint16_t hitFaces[8192];
+    enum QueryLimits : int32_t {
+        FACE_CAPACITY = 8192,
+    };
+
+    static uint16_t testFaces[BspQuery::FACE_CAPACITY];
+    static uint16_t hitFaces[BspQuery::FACE_CAPACITY];
     static uint32_t testFaceSub;
     static uint32_t hitFaceSub;
 
     /* 0000 */ int32_t* m_overflowFlags;
     /* 0004 */ SMOPoly* m_faces;
-    /* 0008 */ C3Vector* m_vertexList;
+    /* 0008 */ const C3Vector* m_vertexList;
     /* 000C */ uint16_t* m_indices;
 
     ~BspQuery();
 };
 
 struct BspQuery_Segment : public BspQuery {
-    /* 0010 */ float* m_hitT;
-    /* 0014 */ float m_origHitT;
+    /* 0010 */ float* m_hitT; // Caller-owned hit parameter as a segment fraction.
+    /* 0014 */ float m_origHitT; // Initial caller limit before conversion to ray distance.
     /* 0018 */ C3Segment m_seg;
     /* 0030 */ C3Ray m_ray;
-    /* 0048 */ float m_oosegMag;
-    /* 004C */ float m_maxT;
+    /* 0048 */ float m_oosegMag; // Reciprocal segment length; converts normalized-ray hit distance to a segment fraction.
+    /* 004C */ float m_maxT; // Current hit limit in distance units along the normalized ray.
     /* 0050 */ SMOMaterial* m_materials;
     /* 0054 */ int32_t unused_0054;
     /* 0058 */ uint16_t m_faceIgnoreFlags;
@@ -133,6 +151,48 @@ class CMapObjOccluder {
 
 class CMapObjGroup {
     public:
+    // Liquid vertex-cull scratch limit, separate from the BSP face-buffer count.
+    enum LiquidQueryLimits : int32_t {
+        LIQUID_CULL_VERTEX_LIMIT = 0x2000,
+    };
+
+    // Flags copied from the corresponding SMOGroupInfo / MOGP header.
+    // Names are limited to meanings supported by the 3.3.5 group-loading and use sites.
+    // Create() only clears F_USE_SKYBOX when the parent has no skybox; antiportal handling is group-name based.
+    // This build does not test MOGP bit 0x4000000 to create antiportal occluders.
+    enum MOGP_FLAGS : uint32_t {
+        F_HAS_BSP_TREE = 0x1,
+        F_HAS_VERTEX_COLORS = 0x4,
+        F_EXTERIOR = 0x8,
+        F_EXTERIOR_LIT = 0x40,
+        F_UNREACHABLE = 0x80, // Groups with this bit are skipped by the group triangle and liquid facet queries.
+        F_SHOW_EXTERIOR_SKY = 0x100, // Seen in 3.3.5 only within the combined 0x40140 viewer mask.
+        F_HAS_LIGHT_REFS = 0x200,
+        F_UNKNOWN_0x400 = 0x400, // Causes four chunk records to be skipped while parsing optional data.
+        F_HAS_DOODAD_REFS = 0x800,
+        F_HAS_LIQUID = 0x1000,
+        F_UNKNOWN_0x2000 = 0x2000, // Only read to skip groups in CMap::QueryLiquidStatus.
+        F_ALWAYS_DRAW = 0x10000, // Uses the direct exterior callback path; this build's Create() does not clear F_EXTERIOR.
+        F_HAS_MORI_MORB = 0x20000,
+        F_USE_SKYBOX = 0x40000,
+        F_USE_ALTERNATE_LIQUID_TYPE = 0x80000, // Selects liquid type 14 instead of 13 in the legacy slot mapping.
+        F_UNKNOWN_0x400000 = 0x400000,
+        F_HAS_EXTRA_COLOR_VERTICES = 0x1000000,
+        F_HAS_SECOND_TEXTURE_COORDS = 0x2000000,
+
+        F_EXTERIOR_CLASSIFICATION_MASK = F_EXTERIOR | F_EXTERIOR_LIT,
+    };
+
+    // Runtime word at +0x198; separate from the WMO group file flags.
+    // Init clears only the low state nibble; Clear removes only LOADED.
+    enum RUNTIME_FLAGS : uint32_t {
+        LOADED = 1,
+        TRANS_VERTEX_ATTENUATION_HANDLED = 0x2,
+        ALL_BATCHES_OPAQUE = 0x4,
+        EXTENDED_VERTEX_FORMAT = 0x8,
+        RUNTIME_STATE_MASK = 0xF,
+    };
+
     bool QueryLighting(const C3Vector& point, uint16_t face, CImVector* color, uint8_t* flag);
     struct VertArray {
         /* 0000 */ TSLink<VertArray> m_link;
@@ -158,7 +218,7 @@ class CMapObjGroup {
     /* 0018 */ float m_timer;
     /* 001C */ CMapObjGroup::VertArray* m_liquidVertArray;
     /* 0020 */ CGxBatch m_liquidBatch;
-    /* 0030 */ int32_t m_flags;
+    /* 0030 */ uint32_t m_flags;
     /* 0034 */ CAaBox m_bbox;
     /* 004C */ float m_distToCamera;
     /* 0050 */ int32_t m_portalStart;
@@ -168,7 +228,7 @@ class CMapObjGroup {
     /* 005E */ uint16_t m_intBatchCount;
     /* 0060 */ uint16_t m_extBatchCount;
     /* 0062 */ uint8_t unused_0062[2];
-    /* 0064 */ CAaBsp m_cAaBspNodePtr1;
+    /* 0064 */ CAaBsp m_aaBsp;
     /* 00CC */ int32_t m_unkFlags;
     /* 00D0 */ int32_t unused_00D0;
     /* 00D4 */ int32_t m_minimapTag;
@@ -192,7 +252,7 @@ class CMapObjGroup {
     /* 0124 */ C3Vector m_liquidCorner;
     /* 0130 */ uint16_t m_liquidMaterialId;
     /* 0132 */ uint8_t unused_0132[2];
-    /* 0134 */ SMOLiquidVert* m_liquidVertexList;
+    /* 0134 */ SMOLVert* m_liquidVertexList;
     /* 0138 */ SMOLTile* m_liquidTileList;
     /* 013C */ float m_liquidHeight;
     /* 0140 */ float m_liquidMaxHeight;
@@ -250,7 +310,6 @@ class CMapObjGroup {
     bool GetTris(const C3Segment& seg, float* dist, uint32_t flags, uint16_t faceIgnoreFlags, World::TriData* triData, CMapObjDef* mapObjDef);
     bool GetTris(const CAaBox& box, uint32_t flags, uint16_t faceIgnoreFlags, World::TriData* triData, CMapObjDef* mapObjDef);
     void GetTrisFromQuery(World::TriData* triData, BspQuery* query, CMapObjDef* mapObjDef, uint32_t statusFlags);
-    void GetTrisFromQuery(uint32_t a2, BspQuery* a3, CMapObjDef* mapObjDef, uint32_t a5);
     static void SetLighting(CMapObjGroup* group, uint32_t mode);
     bool Intersect(C3Segment& seg, float* dist, uint32_t flags, uint16_t faceIgnoreFlags, int32_t* hitIndex);
     bool GetFacesForLinking(C3Segment& seg, float* t0, int32_t* face0, float* t1, int32_t* face1);
@@ -290,6 +349,16 @@ struct SMOGroupHeader {
 };
 
 struct SMOLTile {
+    enum FLAGS : uint8_t {
+        LIQUID_TYPE_MASK = 0x0F,
+        LIQUID_TYPE_NONE = 0x0F,
+        // SHARED_SHIFT = 0x7, // 0.5.3
+        FISHABLE_MASK = 0x40,
+        SHARED_MASK = 0x80,
+        // FISHABLE_SHIFT = 0x6, // 0.5.3
+        // FATIGUE = 0x80, // server
+    };
+
     /* 0000 */ uint8_t m_flags;
 };
 
@@ -307,9 +376,12 @@ struct SMOWVert {
     /* 0004 */ float m_height;
 };
 
-union SMOLiquidVert {
-    /* 0000 */ SMOWVert m_waterVert;
-    /* 0000 */ SMOMVert m_magmaVert;
+// 0.5.3 symbol name; the two eight-byte views also match the 3.3.5 WMO reader.
+struct SMOLVert {
+    union {
+        /* 0000 */ SMOWVert m_waterVert;
+        /* 0000 */ SMOMVert m_magmaVert;
+    };
 };
 
 class VBBList_Block {
@@ -336,16 +408,16 @@ class VBBList {
 
     void Destroy();
     VBBList_Block* AllocBlock();
-    void AllocVBB(VBBList_Block** a1, uint32_t itemSize, uint32_t itemCount);
+    void AllocVBB(VBBList_Block** slot, uint32_t itemSize, uint32_t itemCount);
     void FreeVBB(VBBList_Block* block);
-    void AssignBlock(VBBList_Block* a1, VBBList_Block** a2, uint32_t itemSize, uint32_t itemCount);
+    void AssignBlock(VBBList_Block* block, VBBList_Block** slot, uint32_t itemSize, uint32_t itemCount);
 };
 
 namespace World {
     class TriData {
         public:
         struct Batch {
-            /* 0000 */ C44Matrix* m_matrix;
+            /* 0000 */ const C44Matrix* m_matrix;
             /* 0004 */ C3Vector* m_vertexList;
             /* 0008 */ C3Vector* m_normalList;
             /* 000C */ float* m_heightList;
@@ -363,10 +435,10 @@ namespace World {
         static uint32_t faceIndexCursor;
         static uint32_t indexCursor;
         static uint32_t matrixPoolCount;
-        static uint16_t faceIndexPool[0x4000];
-        static uint16_t indexPool[0xC000];
-        static Batch batches[32];
-        static C44Matrix matrixPool[32];
+        static uint16_t faceIndexPool[WORLD_TRI_POOL_LIMITS::TRI_QUERY_FACE_INDEX_CAPACITY];
+        static uint16_t indexPool[WORLD_TRI_POOL_LIMITS::TRI_QUERY_INDEX_CAPACITY];
+        static Batch batches[WORLD_TRI_POOL_LIMITS::TRI_QUERY_BATCH_CAPACITY];
+        static C44Matrix matrixPool[WORLD_TRI_POOL_LIMITS::TRI_QUERY_MATRIX_CAPACITY];
 
         static Batch* AllocBatch();
         static Batch* __stdcall AllocBatch(uint32_t indexCount, uint32_t faceCount);
@@ -413,8 +485,8 @@ void CAaBsp_Query_Segment<T>::GetFaceIndices(uint32_t nodeIndex, const C3Segment
     }
 
     uint32_t axis = node->m_flags & CAaBspNode::Flag_AxisMask;
-    const float* segB = &seg.b.x;
-    const float* segT = &seg.t.x;
+    const float* segB = &seg.start.x;
+    const float* segT = &seg.end.x;
     const float* boxB = &box.b.x;
     const float* boxT = &box.t.x;
 
@@ -467,26 +539,26 @@ void CAaBsp_Query_Segment<T>::GetFaceIndices(uint32_t nodeIndex, const C3Segment
 
     if (distB <= 0.0f) {
         if (node->m_negChild != CAaBspNode::Flag_NoChild) {
-            part.b = seg.b;
-            part.t = split;
+            part.start = seg.start;
+            part.end = split;
             this->GetFaceIndices(node->m_negChild, part, negBox);
         }
 
         if (node->m_posChild != CAaBspNode::Flag_NoChild) {
-            part.b = split;
-            part.t = seg.t;
+            part.start = split;
+            part.end = seg.end;
             this->GetFaceIndices(node->m_posChild, part, posBox);
         }
     } else {
         if (node->m_posChild != CAaBspNode::Flag_NoChild) {
-            part.b = seg.b;
-            part.t = split;
+            part.start = seg.start;
+            part.end = split;
             this->GetFaceIndices(node->m_posChild, part, posBox);
         }
 
         if (node->m_negChild != CAaBspNode::Flag_NoChild) {
-            part.b = split;
-            part.t = seg.t;
+            part.start = split;
+            part.end = seg.end;
             this->GetFaceIndices(node->m_negChild, part, negBox);
         }
     }

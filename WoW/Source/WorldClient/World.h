@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Tempest/CBoundingBox.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CAaBox.h"
@@ -46,6 +47,61 @@ struct MINIMAPQUADINFO;
 class CTexture;
 class Particulate;
 class Weather;
+
+// Query flags taken by World::Intersect, World::GetFacets, World::GetTris and
+// World::GetIntersectingDoodadModels. Names are inferred from the 3.3.5 readers;
+// neither the 0.5.3 nor the 4.1.0 symbols name them.
+enum WORLD_QUERY_FLAGS : uint32_t {
+    WORLD_QUERY_NONE                    = 0x00000000u,
+    // M2 doodads without a collision GUID. Each bit selects the CM2Model hit-test mode.
+    WORLD_QUERY_M2_COLLISION            = 0x00000001u, // Collision mesh.
+    WORLD_QUERY_M2_RENDER               = 0x00000002u, // Render batches.
+    WORLD_QUERY_M2_UNKNOWN_0x4          = 0x00000004u, // Same reader behavior as M2_RENDER except in QueryIntersectingModels; set by CGWorldFrame::HitTest.
+    WORLD_QUERY_M2_NON_OPAQUE           = 0x00000008u, // Render batches with a non-opaque blend mode only.
+    // WMO groups, mapped to SMOPoly ignore flags by CMapObj::CreateWmoIgnoreFlags.
+    WORLD_QUERY_WMO_COLLISION           = 0x00000010u,
+    WORLD_QUERY_WMO_RENDER              = 0x00000020u,
+    WORLD_QUERY_WMO_CAMERA              = 0x00000040u, // Skips SMOPoly::F_NOCAMCOLLIDE faces.
+    WORLD_QUERY_WMO_NON_OPAQUE          = 0x00000080u, // Render faces with a blended material only.
+    WORLD_QUERY_TERRAIN                 = 0x00000100u,
+    // Adds the per-area flight ceiling (MFBO) facets to box facet queries; set for flying movers.
+    WORLD_QUERY_FLIGHT_BOUNDS           = 0x00000200u,
+    // Set by CMovement_C for movers this client does not control; no reader found in 3.3.5.
+    WORLD_QUERY_UNKNOWN_0x2000          = 0x00002000u,
+    // World::GetFacets keeps facets with normal z >= cos(50 deg); WMO faces with SMOPoly 0x40 are skipped.
+    WORLD_QUERY_WALKABLE_ONLY           = 0x00004000u,
+    // Ghost movement: CGGameObject_C::IsCollidable rejects doors (gameobject type 0).
+    WORLD_QUERY_IGNORE_DOORS            = 0x00008000u,
+    // Liquids are tested only when the type has LIQUID_TYPE_FLAG_WATER_WALKING, unless WORLD_QUERY_LIQUID is also set.
+    WORLD_QUERY_WATER_WALK_LIQUID       = 0x00010000u,
+    WORLD_QUERY_LIQUID                  = 0x00020000u,
+    // Doodads with a collision GUID and collidable map entities (via World::s_objectCollisionCallback).
+    WORLD_QUERY_OBJECT_COLLISION        = 0x00100000u,
+    WORLD_QUERY_OBJECT_RENDER           = 0x00200000u,
+    WORLD_QUERY_OBJECT_UNKNOWN_0x400000 = 0x00400000u, // Same reader behavior as OBJECT_RENDER; no producer found.
+    WORLD_QUERY_OBJECT_UNKNOWN_0x800000 = 0x00800000u, // Only read as part of WORLD_QUERY_OBJECT_MASK.
+    // Skips culled doodads and entities; M2 and WMO hits are limited to opaque surfaces.
+    WORLD_QUERY_VISIBLE_OPAQUE          = 0x01000000u,
+    // QueryIntersectingModels also matches WMO doodads flagged MAPOBJ_FLAG_PROJ_TEX.
+    WORLD_QUERY_PROJ_TEX_DOODADS        = 0x02000000u,
+    // Enables the model and entity passes; with VISIBLE_OPAQUE only plain render/detail WMO faces remain. No producer found.
+    WORLD_QUERY_UNKNOWN_0x40000000      = 0x40000000u,
+    // Facet queries substitute bounding-box facets for unloaded terrain areas and WMO groups instead of failing.
+    WORLD_QUERY_UNLOADED_AS_BOUNDS      = 0x80000000u,
+
+    WORLD_QUERY_M2_MASK                 = WORLD_QUERY_M2_COLLISION | WORLD_QUERY_M2_RENDER | WORLD_QUERY_M2_UNKNOWN_0x4 | WORLD_QUERY_M2_NON_OPAQUE,
+    WORLD_QUERY_WMO_MASK                = WORLD_QUERY_WMO_COLLISION | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_WMO_CAMERA | WORLD_QUERY_WMO_NON_OPAQUE,
+    WORLD_QUERY_LIQUID_MASK             = WORLD_QUERY_WATER_WALK_LIQUID | WORLD_QUERY_LIQUID,
+    WORLD_QUERY_OBJECT_MASK             = WORLD_QUERY_OBJECT_COLLISION | WORLD_QUERY_OBJECT_RENDER | WORLD_QUERY_OBJECT_UNKNOWN_0x400000 | WORLD_QUERY_OBJECT_UNKNOWN_0x800000,
+    WORLD_QUERY_DOODAD_MASK             = WORLD_QUERY_M2_MASK | WORLD_QUERY_OBJECT_MASK,
+    WORLD_QUERY_ENTITY_MASK             = WORLD_QUERY_OBJECT_MASK | WORLD_QUERY_UNKNOWN_0x40000000,
+    WORLD_QUERY_MODEL_MASK              = WORLD_QUERY_DOODAD_MASK | WORLD_QUERY_UNKNOWN_0x40000000,
+    WORLD_QUERY_COLLISION_MASK          = WORLD_QUERY_M2_COLLISION | WORLD_QUERY_WMO_COLLISION | WORLD_QUERY_TERRAIN | WORLD_QUERY_OBJECT_COLLISION,
+    WORLD_QUERY_RENDER_MASK             = WORLD_QUERY_M2_RENDER | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_OBJECT_RENDER,
+    // Model hits resolved against render geometry (CM2Scene::EndHitTest) rather than the collision world.
+    WORLD_QUERY_RENDER_HIT_TEST_MASK    = WORLD_QUERY_M2_RENDER | WORLD_QUERY_M2_UNKNOWN_0x4 | WORLD_QUERY_M2_NON_OPAQUE | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_WMO_NON_OPAQUE
+                                        | WORLD_QUERY_OBJECT_RENDER | WORLD_QUERY_OBJECT_UNKNOWN_0x400000 | WORLD_QUERY_VISIBLE_OPAQUE,
+};
 
 typedef void (*CALLBACK_FUNC)(float, void*);
 
@@ -104,12 +160,28 @@ struct WorldOccluderData {
 };
 
 struct OcclusionVolume {
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // AddVolume is called with clipToView off.
+        NO_VIEW_CLIP = 0x1,
+        // Kept when CreateOcclusionVolumes runs with onlyFlagged.
+        UNKNOWN_2 = 0x2,
+    };
+
     /* 0000 */ int32_t m_mapID;
-    /* 0004 */ uint32_t m_flags;
+    /* 0004 */ uint32_t m_flags; // FLAGS
     /* 0008 */ OcclusionVolumeData m_data;
 };
 
 struct SPortalExt {
+    enum FLAGS : uint16_t {
+        F_SCREEN_CULLED = 0x1,
+        F_INTERSECT_NEAR = 0x2,
+        F_EXTERIOR_VIEW_HANDLED = 0x4, // Guards repeated exterior portal-view processing.
+        F_INTERIOR_VIEW_HANDLED = 0x8, // Set after interior portal-view processing.
+        F_NO_OCCLUSION = 0x10, // Forwarded to TransformAndClipVerts.
+    };
+
     /* 0000 */ uint16_t m_flags;
     /* 0002 */ uint16_t unused_0002;
     /* 0004 */ CRect m_rect;
@@ -137,6 +209,12 @@ extern TSExplicitList<SWModelFadeout, offsetof(SWModelFadeout, m_link)> s_fadeou
 
 class CWorldScene {
     public:
+    enum CLIP_SIDE : int32_t {
+        SIDE_ON = 0,
+        SIDE_POS = 1,
+        SIDE_NEG = 2,
+    };
+
     static bool IsBeyondFadeDistance(const C3Vector& position, uint32_t fadeLevel);
     static Liquid::CRenderer* s_liquidRenderer;
     static TSExplicitList<CWFrustum, offsetof(CWFrustum, m_link)> frustumFreeList;
@@ -257,7 +335,7 @@ class CWorldScene {
     static void AddDoodadDefs(TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> >* linkList, uint32_t index);
     static void CullDoodadsExterior(TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> >* linkList, uint8_t fadeLevel);
     static void CullMapObjDefGroup();
-    static void CullMapObjDefGroups(CSortEntry* entry, CRect* a2, uint32_t a3);
+    static void CullMapObjDefGroups(CSortEntry* entry, CRect* rect, uint32_t index);
     static void CullEntitys(CSortEntry* entry);
     static void CullThroughPortal(CRect* rect);
     static void CreateInversePortalList();
@@ -339,6 +417,15 @@ namespace World {
     class TriData;
     class HitTestDebug {
         public:
+        // m_type: the kind of map object that was hit (set by CMap::SetHitTestDebug).
+        enum TYPE : int32_t {
+            TYPE_NONE = 0,
+            TYPE_DOODAD = 1, // CMapBaseObj::Type_DoodadDef
+            TYPE_ENTITY = 2, // CMapBaseObj::Type_Entity
+            TYPE_UNKNOWN_3 = 3, // Never set.
+            TYPE_MAP_OBJ_GROUP = 4, // CMapBaseObj::Type_MapObjDefGroup
+        };
+
         struct Model {
             /* 0000 */ const char* m_name;
             /* 0004 */ int32_t m_depth;
@@ -367,7 +454,7 @@ namespace World {
             /* 0008 */ C2iVector m_chunkOffset;
         };
 
-        /* 0000 */ int32_t m_type;
+        /* 0000 */ int32_t m_type; // TYPE
         /* 0004 */ uint32_t m_numModels;
         /* 0008 */ uint32_t m_numParents;
         /* 000C */ Model m_models[16];
@@ -406,7 +493,7 @@ namespace World {
     C3Vector* GetCamPos();
     void SetObjectCollisionCallback(int32_t (*callback)(WOWGUID* guid, uintptr_t param, ObjectCollisionData* data, uint32_t flags));
     void FindOrCreateDestructibleProxy(CDestructibleProxy* proxy);
-    void CreateWaterRipple(const C3Vector& pos, float a2, float a3, float a4, float a5, float a6, int32_t a7, int32_t a8);
+    void CreateWaterRipple(const C3Vector& pos, float facing, float size, float duration, float width, float growth, int32_t type, int32_t player);
     int32_t QueryLiquidSounds(CMapEntity* entity, float radius, TSGrowableArray<World::LiquidQueryResult>& results);
     int32_t QueryLiquidStatus(C3Vector* pos, int32_t* liquidType, float* height);
     int32_t ObjectIsDrawable(CMapBaseObj* object);
@@ -463,7 +550,7 @@ extern int32_t s_waterLOD;
 
 int32_t FrustumCull(const CAaBox& box);
 int32_t ProjectPositionCallback(const C3Vector& position, float& height, void* param);
-void ProjectTextureCallback(const CAaBox& box, const CImVector& color, int32_t index, void* param, int32_t flags);
+void ProjectTextureCallback(const CAaBox& box, const CImVector& color, int32_t index, void* param, int32_t forceProjection);
 bool MapIsDungeon();
 void ObjectDestroy(CMapEntity* entity);
 void ObjectSetUpdateCallback(CMapEntity* entity, int32_t (*func)(void*, uint32_t, uint64_t, uintptr_t), void* param);
@@ -476,10 +563,10 @@ void SetNearClip(float nearClip);
 void SetTexLodBias(float bias);
 float ValidateFarClip(float farClip, int32_t mapID);
     bool NDCClip(C3Vector* verts, uint32_t count, C3Vector*** outVerts, uint32_t* outCount);
-    bool GetFacets(CAaBox* a1, CAaBox* a2, FacetData* a3, uint32_t a4, uint32_t* a5);
+    bool GetFacets(CAaBox* queryBox, CAaBox* box, FacetData* facets, uint32_t flags, uint32_t* status);
     bool NDCXform(CFrustum* frustum, C44Matrix* out, bool includeTranslation);
-    bool IsValidPosition(float x, float y, float z, float a4);
-    bool IsValidPosition(const C3Vector& position, float a4);
+    bool IsValidPosition(float x, float y, float z, float margin);
+    bool IsValidPosition(const C3Vector& position, float margin);
     void AddAaBoxFacets(CAaBox* box, FacetData* facets);
     uint32_t TriDataToFacetData(void* unused, FacetData* facets, WOWGUID guid);
     bool GetFacets(CAaBox* box, FacetData* facets, uint32_t flags, uint32_t* status);
@@ -493,7 +580,7 @@ float ValidateFarClip(float farClip, int32_t mapID);
     void ObjectSetHidden(CMapEntity* entity, int32_t hidden);
     void ObjectEnableCollision(CMapBaseObj* object, int32_t enable);
     void FreeDestructibleProxy(CDestructibleProxy* proxy);
-    void ObjectUpdate(CMapBaseObj* object, const C3Vector* position, float facing, float a4, float a5, int32_t snap);
+    void ObjectUpdate(CMapBaseObj* object, const C3Vector* position, float facing, float pitch, float roll, BOOL snap);
     void ObjectSetAlwaysExterior(CMapBaseObj* object, int32_t enable);
     int32_t ObjectMoveDoodads(CMapBaseObj* source, uint16_t doodadSet, CMapBaseObj* target, uint16_t targetDoodadSet);
     void ObjectSetDoodadEmittersIgnoresDistance(CMapBaseObj* object, int32_t ignore, uint16_t doodadSet);
@@ -565,6 +652,37 @@ class CWorld {
     static void ObjectDestroy(CMapBaseObj* object);
     static CMapBaseObj* ObjectCreate(const char* name, const C3Vector& position, float facing, int32_t waitLoad, int32_t snap, uint64_t guid, uint32_t doodadSetCount, const int16_t* doodadSets, float* radius, uint32_t id);
     static void Update(C3Vector* camPos, C3Vector* camTarget, C3Vector* position);
+
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug features (World_Debug.cpp): 0.5.3 console commands and render modes, stripped from the 3.3.5 release build.
+    static void DebugRegisterConsoleCommands();
+    static int32_t ConsoleCommand_DebugBSP(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_DebugZones(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_DetailDoodadTest(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_EnumTextureGxCache(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_EnumTextures(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_GroupOnly(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_MapObjLightMode(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_PortalVis(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_Proj(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowAABoxes(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowCollision(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowCrappyBatches(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowDoodads(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowMapObjBSP(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowMapObjLight(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowMapObjTex(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowMapObjs(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowNormals(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowPortals(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowQuery(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowTerrain(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowTris(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_WaterMaxLOD(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_WaterShow(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_WaterSpecular(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_WaterWaves(const char* command, const char* arguments);
+#endif
 };
 
 extern float s_viewerLiquidDepth;

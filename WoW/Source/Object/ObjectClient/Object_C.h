@@ -33,8 +33,58 @@ class SpellVisualKitRec;
 class SpellVisualEffectNameRec;
 class SpellVisualKitModelAttachRec;
 class SpellVisualRec;
-enum OUT_OF_RANGE_TYPE : int32_t;
-enum SPELL_VISUAL_KIT_TYPE : int32_t;
+// Why CGObject_C::HandleOutOfRange runs, by caller (inferred names).
+enum OUT_OF_RANGE_TYPE : int32_t {
+    OUT_OF_RANGE_UPDATE = 0,    // SMSG_UPDATE_OBJECT out-of-range block
+    OUT_OF_RANGE_DESTROYED = 1, // SMSG_DESTROY_OBJECT
+    OUT_OF_RANGE_UNLOCKED = 2,  // deferred disable after ClntObjMgrUnlockObject
+};
+// Native ClearEffectKit (0x00744BD0) maps these types to SpellVisualRec fields.
+// Type 3 plays at a supplied position and is not selected by ClearEffectKit.
+enum SPELL_VISUAL_KIT_TYPE : int32_t {
+    SPELL_VISUAL_KIT_CAST = 0,
+    SPELL_VISUAL_KIT_IMPACT = 1,
+    SPELL_VISUAL_KIT_STATE = 2,
+    SPELL_VISUAL_KIT_AT_POSITION = 3,
+    SPELL_VISUAL_KIT_PRECAST = 4,
+    SPELL_VISUAL_KIT_CASTER_IMPACT = 5,
+    SPELL_VISUAL_KIT_TARGET_IMPACT = 6,
+    SPELL_VISUAL_KIT_MISSILE_TARGETING = 7,
+    SPELL_VISUAL_KIT_STATE_DONE = 8,
+};
+
+// Client runtime state: the low 16 bits are a lock count, not independent flags.
+// High-bit names describe verified behavior; unknown bits keep their numeric positions.
+enum OBJECT_MODEL_FLAGS : uint32_t {
+    OBJECT_MODEL_FLAG_NONE                         = 0x00000000u,
+    // SetObjectLocked currently compares the whole word at its count boundaries.
+    // Native 3.3.5 checks the low 16 bits at 0x007433ED; preserve source behavior.
+    OBJECT_MODEL_LOCK_COUNT_MASK                   = 0x0000FFFFu,
+    OBJECT_MODEL_FLAG_DISABLED                     = 0x00010000u,
+    OBJECT_MODEL_FLAG_POST_REENABLE_PENDING        = 0x00020000u,
+    OBJECT_MODEL_FLAG_POST_INITED                  = 0x00040000u,
+    OBJECT_MODEL_FLAG_UNKNOWN_19                   = 0x00080000u,
+    OBJECT_MODEL_FLAG_DISABLE_PENDING              = 0x00100000u,
+    OBJECT_MODEL_FLAG_BOUNDS_DIRTY                 = 0x00200000u,
+    OBJECT_MODEL_FLAG_PASSIVE_HIGHLIGHT            = 0x00400000u,
+    OBJECT_MODEL_FLAG_COLLIDE_MOVEMENT             = 0x00800000u,
+    OBJECT_MODEL_FLAG_HIGHLIGHT_OBJSELECTION       = 0x01000000u,
+    OBJECT_MODEL_FLAG_HIGHLIGHT_MOUSEOVER          = 0x02000000u,
+    // Third highlight bit is tested independently; its purpose is unresolved.
+    OBJECT_MODEL_FLAG_UNKNOWN_26                   = 0x04000000u,
+    OBJECT_MODEL_FLAG_UNKNOWN_27                   = 0x08000000u,
+    OBJECT_MODEL_FLAG_UNKNOWN_28                   = 0x10000000u,
+    OBJECT_MODEL_FLAG_UNKNOWN_29                   = 0x20000000u,
+    OBJECT_MODEL_FLAG_UNKNOWN_30                   = 0x40000000u,
+    OBJECT_MODEL_FLAG_UNKNOWN_31                   = 0x80000000u,
+
+    OBJECT_MODEL_FLAG_HIGHLIGHT_MASK = OBJECT_MODEL_FLAG_HIGHLIGHT_OBJSELECTION
+        | OBJECT_MODEL_FLAG_HIGHLIGHT_MOUSEOVER
+        | OBJECT_MODEL_FLAG_UNKNOWN_26,
+};
+
+// Keep the original signed shift-index arithmetic in Show/HideHighlightType.
+constexpr int32_t OBJECT_MODEL_HIGHLIGHT_TYPE_SHIFT = 24;
 
 class CHashKeyGUID {
     public:
@@ -60,16 +110,69 @@ inline bool CHashKeyGUID::operator==(const CHashKeyGUID& key) {
     return this->m_guid == key.m_guid;
 }
 
+// Current quest-status indices;the older five-slot meanings are not copied.
+// UNKNOWN_1 triggers the unavailable-quest tutorial;2..4 obey trivial tracking.
+// Other variant causes remain unknown;NUMITEMS is the exclusive table bound.
+enum QUEST_GIVER_STATUS : uint32_t {
+    QUEST_GIVER_NONE = 0,
+    QUEST_GIVER_UNKNOWN_1 = 1,
+    QUEST_GIVER_UNKNOWN_2 = 2,
+    QUEST_GIVER_UNKNOWN_3 = 3,
+    QUEST_GIVER_UNKNOWN_4 = 4,
+    QUEST_GIVER_UNKNOWN_5 = 5,
+    QUEST_GIVER_UNKNOWN_6 = 6,
+    QUEST_GIVER_UNKNOWN_7 = 7,
+    QUEST_GIVER_UNKNOWN_8 = 8,
+    QUEST_GIVER_UNKNOWN_9 = 9,
+    QUEST_GIVER_UNKNOWN_10 = 10,
+    QUEST_GIVER_NUMITEMS = 11,
+};
+
+// s_nameMask bits, one per UnitName* CVar registered by PlayerNameRegisterCVars.
+enum OBJECT_NAME_FLAGS : uint32_t {
+    OBJECT_NAME_OWN = 0x1, // UnitNameOwn
+    OBJECT_NAME_NPC = 0x2, // UnitNameNPC
+    OBJECT_NAME_PLAYER_GUILD = 0x4, // UnitNamePlayerGuild
+    OBJECT_NAME_PLAYER_PVP_TITLE = 0x8, // UnitNamePlayerPVPTitle
+    OBJECT_NAME_ENEMY_PLAYER = 0x10, // UnitNameEnemyPlayerName
+    OBJECT_NAME_ENEMY_PET = 0x20, // UnitNameEnemyPetName
+    OBJECT_NAME_ENEMY_TOTEM = 0x40, // UnitNameEnemyTotemName
+    OBJECT_NAME_FRIENDLY_PLAYER = 0x80, // UnitNameFriendlyPlayerName
+    OBJECT_NAME_FRIENDLY_PET = 0x100, // UnitNameFriendlyPetName
+    OBJECT_NAME_FRIENDLY_TOTEM = 0x200, // UnitNameFriendlyTotemName
+    OBJECT_NAME_NON_COMBAT_CREATURE = 0x400, // UnitNameNonCombatCreatureName
+    OBJECT_NAME_UNKNOWN_0x800 = 0x800, // No CVar sets it; CGObject_C::ShouldRenderObjectName reads it.
+    OBJECT_NAME_ENEMY_GUARDIAN = 0x1000, // UnitNameEnemyGuardianName
+    OBJECT_NAME_FRIENDLY_GUARDIAN = 0x2000, // UnitNameFriendlyGuardianName
+};
+
 class CGObject_C : public CGObject, public TSHashObject<CGObject_C, CHashKeyGUID> {
     public:
+    // s_interactIcons indices, named after the Interface\Buttons\TalkToMe*.mdx model each entry loads.
+    enum INTERACT_ICON : uint32_t {
+        INTERACT_ICON_NONE = 0,
+        INTERACT_ICON_TALK_TO_ME = 1,
+        INTERACT_ICON_QUESTION_LTBLUE = 2,
+        INTERACT_ICON_BLUE = 3,
+        INTERACT_ICON_TALK_TO_ME_4 = 4,
+        INTERACT_ICON_QUESTION_GREY = 5,
+        INTERACT_ICON_GREY = 6,
+        INTERACT_ICON_GREEN = 7, // Flight master whose taxi node is not known yet.
+        INTERACT_ICON_UNKNOWN_8 = 8, // No model.
+        INTERACT_ICON_QUESTION_MARK = 9,
+        INTERACT_ICON_QUESTION_LTBLUE_10 = 10,
+        INTERACT_ICON_BLUE_11 = 11,
+        NUM_INTERACT_ICONS = 12,
+    };
+
     struct InteractIcon {
         /* 0000 */ CM2Model* m_model;
         /* 0004 */ float m_scale;
         /* 0008 */ const char* m_fileName;
     };
 
-    static InteractIcon s_interactIcons[12];
-    static const uint32_t s_questStatusIcons[11];
+    static InteractIcon s_interactIcons[NUM_INTERACT_ICONS];
+    static const uint32_t s_questStatusIcons[QUEST_GIVER_STATUS::QUEST_GIVER_NUMITEMS];
     static CTexture* s_selectionTexture;
     static CVar* s_cvObjectSelectionCircle;
 
@@ -92,7 +195,7 @@ class CGObject_C : public CGObject, public TSHashObject<CGObject_C, CHashKeyGUID
     /* 0044 */ TSList<void> m_objMirrorLists [6];
     /* 008C */ CM2Model* m_interactIcon;
     /* 0090 */ uint32_t m_questStatus;
-    /* 0094 */ uint32_t m_interactIconType;
+    /* 0094 */ uint32_t m_interactIconType; // INTERACT_ICON
     /* 0098 */ float m_scale;
     /* 009C */ float m_scaleModifier;
     /* 00A0 */ uint32_t m_scaleChangeTime;
@@ -102,7 +205,7 @@ class CGObject_C : public CGObject, public TSHashObject<CGObject_C, CHashKeyGUID
     /* 00B0 */ PLAYERNAMEDESC* m_nameDesc;
     /* 00B4 */ CM2Model* m_worldModel;
     /* 00B8 */ CMapEntity* m_worldObject;
-    /* 00BC */ uint32_t m_modelFlags;
+    /* 00BC */ uint32_t m_modelFlags; // OBJECT_MODEL_FLAGS and low-16-bit lock count
     /* 00C0 */ uint32_t m_fadeStartTime;
     /* 00C4 */ uint32_t m_fadeDuration;
     /* 00C8 */ uint8_t m_alpha;
@@ -116,7 +219,7 @@ class CGObject_C : public CGObject, public TSHashObject<CGObject_C, CHashKeyGUID
     virtual void Reenable();
     virtual void PostReenable();
     virtual void HandleOutOfRange(OUT_OF_RANGE_TYPE type);
-    virtual void UpdateWorldObject(int32_t a2);
+    virtual void UpdateWorldObject(int32_t skipEntityUpdate);
     virtual int32_t ShouldFadeout();
     virtual void UpdateDisplayInfo(int32_t force);
     virtual C3Vector GetNamePosition() const;
@@ -172,18 +275,18 @@ class CGObject_C : public CGObject, public TSHashObject<CGObject_C, CHashKeyGUID
     virtual float GetBaseAlpha() const;
     virtual bool IsTransport() const;
     virtual int32_t IsPointInside(const C3Vector& point) const;
-    virtual int32_t AddPassenger(CPassenger* passenger, int32_t a2);
+    virtual int32_t AddPassenger(CPassenger* passenger, int32_t reason);
     virtual float GetSpeed() const;
-    virtual void PlaySpellVisualKit_PlayAnims(const SpellRec* spell, const SpellVisualKitRec* kit, SPELL_VISUAL_KIT_TYPE type, const C3Vector* position, int32_t a5, int32_t a6, WOWGUID guid, uint32_t a8, const SpellVisualRec* visual, uint32_t a10, int32_t a11);
-    virtual void PlaySpellVisualKit_HandleWeapons(const SpellRec* spell, const SpellVisualKitRec* kit, const C3Vector* position, WOWGUID guid, uint32_t a5, uint32_t flags, void (*callback)(CM2Model*, uint32_t, uint32_t, int32_t, uint32_t, uint64_t), int32_t* hasEffect);
-    virtual int32_t PlaySpellVisualKit_DelayLightningEffects(const SpellRec* spell, const SpellVisualKitRec* kit, SPELL_VISUAL_KIT_TYPE type, const C3Vector* position, WOWGUID guid, int32_t a6, int32_t a7, int32_t a8, int32_t a9, uint32_t a10, const SpellVisualRec* visual);
+    virtual void PlaySpellVisualKit_PlayAnims(const SpellRec* spell, const SpellVisualKitRec* kit, SPELL_VISUAL_KIT_TYPE type, const C3Vector* position, BOOL playAnim, BOOL harmful, WOWGUID guid, uint32_t effectFadeTime, const SpellVisualRec* visual, uint32_t effectFlags, BOOL hasEffect);
+    virtual void PlaySpellVisualKit_HandleWeapons(const SpellRec* spell, const SpellVisualKitRec* kit, const C3Vector* position, WOWGUID guid, uint32_t fadeTime, uint32_t flags, void (*callback)(CM2Model*, uint32_t, uint32_t, int32_t, uint32_t, uint64_t), BOOL* hasEffect);
+    virtual BOOL PlaySpellVisualKit_DelayLightningEffects(const SpellRec* spell, const SpellVisualKitRec* kit, SPELL_VISUAL_KIT_TYPE type, const C3Vector* position, WOWGUID guid, BOOL playAnim, BOOL harmful, BOOL skipBeamWait, int32_t lightningAttachment, uint32_t unusedFlags, const SpellVisualRec* visual);
 
     CGObject_C();
     CGObject_C(uint32_t time, const CClientObjCreate& create);
     void ClearEffectList(int32_t all);
     void ClearSpellEffect(uint32_t spellId, int32_t all);
     void DoFade(float alpha, uint32_t time);
-    void PlayEffectName(int32_t attachType, uint32_t a3, int32_t spellId, const SpellVisualKitRec* kit, const SpellVisualEffectNameRec* effectName, uint32_t* flags, void (*callback)(CM2Model*, uint32_t, uint32_t, int32_t, uint32_t, uint64_t), const C3Vector* position, WOWGUID target, uint32_t a11, const SpellVisualKitModelAttachRec* attach);
+    void PlayEffectName(int32_t attachType, uint32_t expireTime, int32_t spellId, const SpellVisualKitRec* kit, const SpellVisualEffectNameRec* effectName, uint32_t* flags, void (*callback)(CM2Model*, uint32_t, uint32_t, int32_t, uint32_t, uint64_t), const C3Vector* position, WOWGUID target, uint32_t fadeTime, const SpellVisualKitModelAttachRec* attach);
     C44Matrix GetModelMatrix();
     C3Vector GetModelPosition();
     int32_t GetQuestGiverCursor(int32_t highlighted);
@@ -194,7 +297,7 @@ class CGObject_C : public CGObject, public TSHashObject<CGObject_C, CHashKeyGUID
     int32_t IsObjectModelLoaded();
     int32_t IsReadyToDraw();
     void ModelChanged();
-    void PostInit(uint32_t time, const CClientObjCreate& create, bool a3);
+    void PostInit(uint32_t time, const CClientObjCreate& create, bool reenable);
     void ReleaseModel();
     void RemoveInteractIcon();
     void SetBlock(int32_t index, uint32_t value);
@@ -214,7 +317,7 @@ class CGObject_C : public CGObject, public TSHashObject<CGObject_C, CHashKeyGUID
     void SetModelFinish(CM2Model* model);
     void SetModel(CM2Model* model);
     void PlaySpellVisualKit(const PlaySpellVisuaKitData& data);
-    void ClearEffectKit(int32_t spellId, int32_t kitType, int32_t a4, int32_t a5, int32_t a6);
+    void ClearEffectKit(int32_t spellId, int32_t kitType, int32_t fadeTime, int32_t matchSpell, int32_t matchFadeTime);
 };
 
 struct DBCACHEHASH_NAME : public TSHashObject<DBCACHEHASH_NAME, CHashKeyGUID> {

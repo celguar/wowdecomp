@@ -324,7 +324,7 @@ static int32_t Script_IsZoomOutAvailable(lua_State* L) {
     bool available = true;
     int32_t dungeonMap = CGWorldMap::m_currentOrphanZone == -1 ? -1 : CGWorldMap::m_currentDungeonMap;
 
-    if (!g_dungeonMapDB.GetRecord(dungeonMap) && CGWorldMap::m_currentContinent == -2) {
+    if (!g_dungeonMapDB.GetRecord(dungeonMap) && CGWorldMap::m_currentContinent == WORLDMAP_CONTINENT_COSMIC) {
         WorldMapAreaRec* area = g_worldMapAreaDB.GetRecord(CGWorldMap::GetCurrentAreaID());
 
         if (!area || area->m_defaultDungeonFloor != -1) {
@@ -343,6 +343,10 @@ static int32_t Script_IsZoomOutAvailable(lua_State* L) {
 // VERIFY: 5a3fa27a auto
 // OFFSET: 0x00608560
 static int32_t Script_GetNumMapDebugObjects(lua_State* L) {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // TODO: debug-only, compiled out of the 3.3.5 release build (body folds into the shared push-0 stub).
+    // No 0.5.3 reference.
+#endif
     lua_pushnumber(L, 0.0);
     return 1;
 }
@@ -350,6 +354,10 @@ static int32_t Script_GetNumMapDebugObjects(lua_State* L) {
 // VERIFY: 550ba9da auto
 // OFFSET: 0x008E5250
 static int32_t Script_HasDebugZoneMap(lua_State* L) {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // TODO: debug-only, compiled out of the 3.3.5 release build (body folds into the shared return-0 stub).
+    // No 0.5.3 reference.
+#endif
     return 0;
 }
 
@@ -444,7 +452,7 @@ static int32_t Script_GetMapLandmarkInfo(lua_State* L) {
             if (location) {
                 lua_pushstring(L, location->m_areaName);
                 lua_pushnil(L);
-                lua_pushnumber(L, 6.0);
+                lua_pushnumber(L, WORLDMAP_LANDMARK_TEXTURE_GRAVEYARD);
                 lua_pushnumber(L, landmark->m_x);
                 lua_pushnumber(L, landmark->m_y);
                 lua_pushnil(L);
@@ -458,7 +466,7 @@ static int32_t Script_GetMapLandmarkInfo(lua_State* L) {
                 lua_pushstring(L, poi->m_description);
                 int32_t icon = 0;
 
-                if (landmark->m_isGossip || (poi->m_flags & 0x80) || (CGWorldMap::m_currentZone == -1 && CGWorldMap::m_currentContinent != -2)) {
+                if (landmark->m_isGossip || (poi->m_flags & AREA_POI_FLAG_ALWAYS_DRAW_ICON_WORLDMAP) || (CGWorldMap::m_currentZone == WORLDMAP_ZONE_NONE && CGWorldMap::m_currentContinent != WORLDMAP_CONTINENT_COSMIC)) {
                     uint32_t state = 0;
 
                     if (poi->m_worldStateID) {
@@ -482,7 +490,7 @@ static int32_t Script_GetMapLandmarkInfo(lua_State* L) {
                     lua_pushnil(L);
                 }
 
-                lua_pushboolean(L, poi->m_flags & 0x200);
+                lua_pushboolean(L, poi->m_flags & AREA_POI_FLAG_SHOW_IN_BATTLEMAP);
                 return 7;
             }
         }
@@ -787,7 +795,7 @@ static int32_t Script_SetMapZoom(lua_State* L) {
 
     int32_t continent = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
 
-    if ((continent > 0 && static_cast<uint32_t>(continent) >= CGWorldMap::m_continents.m_count) || continent < -2) {
+    if ((continent > 0 && static_cast<uint32_t>(continent) >= CGWorldMap::m_continents.m_count) || continent < WORLDMAP_CONTINENT_COSMIC) {
         luaL_error(L, "Usage: SetMapZoom(continentIndex [,zoneIndex]) .. requested continent out of bounds");
         return 0;
     }
@@ -947,7 +955,7 @@ static int32_t Script_ZoomOut(lua_State* L) {
     int32_t parent;
 
     if (CGWorldMap::m_currentOrphanZone == -1 || CGWorldMap::m_currentDungeonMap <= 0) {
-        if (CGWorldMap::m_currentContinent != -2) {
+        if (CGWorldMap::m_currentContinent != WORLDMAP_CONTINENT_COSMIC) {
             return 0;
         }
 
@@ -1144,18 +1152,30 @@ static int32_t Script_SetDungeonMapLevel(lua_State* L) {
 // VERIFY: 5c8fe2ff auto
 // OFFSET: 0x008E5250
 static int32_t Script_GetMapDebugObjectInfo(lua_State* L) {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // TODO: debug-only, compiled out of the 3.3.5 release build (body folds into the shared return-0 stub).
+    // No 0.5.3 reference.
+#endif
     return 0;
 }
 
 // VERIFY: 254a479d auto
 // OFFSET: 0x008E5250
 static int32_t Script_TeleportToDebugObject(lua_State* L) {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // TODO: debug-only, compiled out of the 3.3.5 release build (body folds into the shared return-0 stub).
+    // No 0.5.3 reference.
+#endif
     return 0;
 }
 
 // VERIFY: 0d559bc9 auto
 // OFFSET: 0x008E5250
 static int32_t Script_GetDebugZoneMap(lua_State* L) {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // TODO: debug-only, compiled out of the 3.3.5 release build (body folds into the shared return-0 stub).
+    // No 0.5.3 reference.
+#endif
     return 0;
 }
 

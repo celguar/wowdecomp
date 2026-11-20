@@ -60,7 +60,7 @@ void CMapObjDefGroup::SelectLights(CM2Lighting* lighting) {
 
     DayNight::DNInfo* dayNight = DayNight::GetInfo();
 
-    if (this->m_flags & 0x8000) {
+    if (this->m_flags & MAPOBJ_FLAG_INT_FOG) {
         lighting->SetFog(C3Vector(dayNight->m_fogInterior.m_color), dayNight->m_fogInterior.m_start, dayNight->m_fogInterior.m_end, dayNight->m_fogInterior.m_density);
     } else {
         lighting->SetFog(C3Vector(dayNight->m_fog.m_color), dayNight->m_fog.m_start, dayNight->m_fog.m_end, dayNight->m_fog.m_density);
@@ -107,15 +107,15 @@ int32_t CMapObjDef::GetGroundType(uint32_t groupNum, uint16_t faceIndex) {
 
 // VERIFY: 14be0e9a manual
 // OFFSET: 0x007B66E0
-void CMapObjDef::UpdatePos(CMapObjDef* mapObjDef, const C3Vector* position, float facing, float a4, float a5) {
+void CMapObjDef::UpdatePos(CMapObjDef* mapObjDef, const C3Vector* position, float facing, float pitch, float roll) {
     mapObjDef->m_position = *position;
     mapObjDef->m_mat = C44Matrix();
     mapObjDef->m_mat.d0 = position->x;
     mapObjDef->m_mat.d1 = position->y;
     mapObjDef->m_mat.d2 = position->z;
     mapObjDef->m_mat.RotateAroundZ(facing);
-    mapObjDef->m_mat.RotateAroundY(a4);
-    mapObjDef->m_mat.RotateAroundX(a5);
+    mapObjDef->m_mat.RotateAroundY(pitch);
+    mapObjDef->m_mat.RotateAroundX(roll);
     mapObjDef->m_invMat = mapObjDef->m_mat.AffineInverse();
     CMapObjDef::UpdateMoved(mapObjDef);
 }
@@ -131,7 +131,7 @@ void CMapObjDefGroup::SetSequenceFinishedCallback(M2SequenceCallback callback, u
         }
 
         if (doodadDef->m_model && doodadDef->m_doodadSet == doodadSet) {
-            doodadDef->m_model->SetSequenceCallback(reinterpret_cast<void*>(callback), param);
+            doodadDef->m_model->SetSequenceCallback(callback, param);
         }
     }
 }
@@ -166,7 +166,7 @@ void CMapObjDefGroup::SetEventCallback(M2EventCallback callback, uint64_t param,
         }
 
         if (doodadDef->m_model && doodadDef->m_doodadSet == doodadSet) {
-            doodadDef->m_model->SetEventCallback(reinterpret_cast<void*>(callback), param);
+            doodadDef->m_model->SetEventCallback(callback, param);
         }
     }
 }
@@ -181,7 +181,7 @@ bool CMapObjDefGroup::IsAllLoaded() {
     for (CMapBaseObjLink* link = this->m_doodadDefLinkList.Head(); link; link = this->m_doodadDefLinkList.Next(link)) {
         CMapStaticEntity* doodadDef = static_cast<CMapStaticEntity*>(link->m_owner);
 
-        if (doodadDef->m_model && !(doodadDef->m_flags & 0x80)) {
+        if (doodadDef->m_model && !(doodadDef->m_flags & MAPOBJ_FLAG_PREPARED)) {
             if (SFile::IsStreamingMode()) {
                 doodadDef->m_model->LinkToAsyncHead(1);
             }
@@ -208,14 +208,14 @@ bool CMapObjDef::IsAllLoaded() {
         return false;
     }
 
-    if (!(this->m_flags & 0x4000)) {
+    if (!(this->m_flags & MAPOBJ_FLAG_ALL_LOADED)) {
         for (CMapBaseObjLink* link = this->m_mapObjDefGroupLinkList.Head(); link; link = this->m_mapObjDefGroupLinkList.Next(link)) {
             if (!static_cast<CMapObjDefGroup*>(link->m_owner)->IsAllLoaded()) {
                 return false;
             }
         }
 
-        this->m_flags = static_cast<MapObjFlag>(this->m_flags | 0x4000);
+        this->m_flags = static_cast<MapObjFlag>(this->m_flags | MAPOBJ_FLAG_ALL_LOADED);
     }
 
     return true;
@@ -227,7 +227,7 @@ void CMapObjDefGroup::Update(const C44Matrix& matrix) {
     this->m_flags = static_cast<MapObjFlag>(this->m_flags | MAPOBJ_FLAG_UNPLACED);
 
     for (CMapBaseObjLink* link = this->m_doodadDefLinkList.Head(); link; link = this->m_doodadDefLinkList.Next(link)) {
-        static_cast<CMapDoodadDef*>(link->m_owner)->UpdateMatrixOnly(matrix);
+        static_cast<CMapDoodadDef*>(link->m_owner)->Update(matrix);
     }
 
     for (CMapBaseObjLink* link = this->m_entityLinkList.Head(); link; link = this->m_entityLinkList.Next(link)) {
@@ -246,7 +246,7 @@ void CMapObjDefGroup::SetSequence(uint32_t sequence, int32_t a3, uint16_t doodad
         }
 
         if (doodadDef->m_model && doodadDef->m_doodadSet == doodadSet) {
-            doodadDef->m_model->SetBoneSequence(0xFFFFFFFF, sequence, 0xFFFFFFFF, 0, 1.0f, 1, 1);
+            doodadDef->m_model->SetBoneSequence(M2_KEY_BONE_NONE, sequence, M2_RANDOM_VARIATION, 0, 1.0f, 1, 1);
         }
     }
 }
@@ -319,7 +319,7 @@ void CMapObjDef::LinkDoodadDef(CMapDoodadDef* doodadDef, CMapObjDef* mapObjDef, 
     for (CMapBaseObjLink* link = mapObjDef->m_mapObjDefGroupLinkList.Head(); link; link = mapObjDef->m_mapObjDefGroupLinkList.Next(link)) {
         CMapObjDefGroup* group = static_cast<CMapObjDefGroup*>(link->m_owner);
 
-        if (mapObj->GetGroupFlags(group->m_groupNum) & 0x410080) {
+        if (mapObj->GetGroupFlags(group->m_groupNum) & (CMapObjGroup::MOGP_FLAGS::F_ALWAYS_DRAW | CMapObjGroup::MOGP_FLAGS::F_UNKNOWN_0x400000 | CMapObjGroup::MOGP_FLAGS::F_UNREACHABLE)) {
             continue;
         }
 
@@ -392,7 +392,7 @@ void CMapObjDef::SetDoodadEmittersIgnoresDistance(CMapObjDef* mapObjDef, int32_t
             for (uint32_t i = 0;; i++) {
                 CM2Model* model = doodadDef->m_model;
 
-                if (!(model->m_fFlags & 0x1)) {
+                if (!(model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
                     model->WaitForLoad(nullptr);
                 }
 
@@ -402,16 +402,16 @@ void CMapObjDef::SetDoodadEmittersIgnoresDistance(CMapObjDef* mapObjDef, int32_t
 
                 model = doodadDef->m_model;
 
-                if (!(model->m_fFlags & 0x1)) {
+                if (!(model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
                     model->WaitForLoad(nullptr);
                 }
 
                 CParticleEmitter2* emitter = model->m_particleEmitters[i];
 
                 if (ignore) {
-                    emitter->m_flags |= 0x400000;
+                    emitter->m_flags |= CParticleEmitter2::RUNTIME_FLAGS::IGNORE_DISTANCE;
                 } else {
-                    emitter->m_flags &= ~0x400000u;
+                    emitter->m_flags &= ~CParticleEmitter2::RUNTIME_FLAGS::IGNORE_DISTANCE;
                 }
             }
         }
@@ -453,7 +453,7 @@ void CMapObjDef::SetDoodadsEnabled(CMapObjDef* mapObjDef, int32_t enable, uint16
 
             if (enable) {
                 doodadDef->m_flags = static_cast<MapObjFlag>(doodadDef->m_flags & ~(MAPOBJ_FLAG_DISABLED | MAPOBJ_FLAG_NO_HITTEST));
-                doodadDef->m_staticFlags &= ~0xE0u;
+                doodadDef->m_staticFlags &= ~MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_CACHE_MASK;
                 CMap::LinkDoodadDefToMapObjDefs(doodadDef, mapObjDef);
                 continue;
             }

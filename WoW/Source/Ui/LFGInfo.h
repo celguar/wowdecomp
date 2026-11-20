@@ -4,6 +4,7 @@
 #include <cstdint>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Ui/LFGLIST.h"
+#include "WoW/Source/Ui/LFGRoles.h"
 #include "WoW/Source/Object/WGUID.h"
 #include "WoW/Source/Net/Types.h"
 
@@ -95,7 +96,7 @@ struct LFGRewardInfo {
 };
 
 struct LFGProposalMember {
-    /* 0000 */ uint32_t m_roles;
+    /* 0000 */ ROLE_FLAGS m_roles;
     /* 0004 */ uint32_t m_isLocal;
     /* 0008 */ uint32_t m_inDungeon;
     /* 000C */ uint32_t m_inSameGroup;
@@ -148,15 +149,56 @@ struct LFGBootProposal {
 struct LFGRoleCheckMember {
     /* 0000 */ WOWGUID m_guid;
     /* 0008 */ int32_t m_confirmed;
-    /* 000C */ uint32_t m_roles;
+    /* 000C */ ROLE_FLAGS m_roles;
     /* 0010 */ uint8_t m_level;
     /* 0011 */ uint8_t unused_0011[3];
     /* 0014 */ uint32_t unused_0014;
 };
 
+// SMSG_LFG_TELEPORT_DENIED reason. Names follow the error the client shows for each value
+// (inferred); reasons 5 and 7 are silent, 3 and unlisted values show ERR_CLIENT_LOCKED_OUT.
+enum LFG_TELEPORT_DENIED_REASON : uint32_t {
+    LFG_TELEPORT_DENIED_NONE = 0,
+    LFG_TELEPORT_DENIED_PLAYER_DEAD = 1,
+    LFG_TELEPORT_DENIED_FALLING = 2,
+    LFG_TELEPORT_DENIED_UNKNOWN_3 = 3,
+    LFG_TELEPORT_DENIED_FATIGUE = 4,
+    LFG_TELEPORT_DENIED_UNKNOWN_5 = 5,
+    LFG_TELEPORT_DENIED_INVALID_LOCATION = 6,
+    LFG_TELEPORT_DENIED_UNKNOWN_7 = 7,
+};
+
 class LfgDungeonsRec;
 class CGLookingForGroup {
     public:
+    enum DUNGEON_TYPE : int32_t {
+        LFG_TYPE_NONE = 0,
+        LFG_TYPE_DUNGEON = 1,
+        LFG_TYPE_RAID = 2,
+        LFG_TYPE_QUEST = 3,
+        LFG_TYPE_ZONE = 4,
+        LFG_TYPE_HEROIC_DUNGEON = 5,
+        LFG_TYPE_RANDOM_DUNGEON = 6,
+        NUM_LFG_TYPES = 7,
+    };
+
+    // Packed LFG slot: LFGDungeons record ID in the low 24 bits, DUNGEON_TYPE in the high byte.
+    enum SLOT_PACKING : int32_t {
+        SLOT_DUNGEON_ID_MASK = 0x00FFFFFF,
+        SLOT_TYPE_SHIFT = 24,
+    };
+
+    enum SORT_COLUMN : int32_t {
+        ZONE = 0,
+        LEVEL = 1,
+        CLASS = 2,
+        NAME = 3,
+        TANK_ROLE = 4,
+        HEALER_ROLE = 5,
+        DAMAGE_ROLE = 6,
+        NUM_SORT_COLUMNS = 7,
+    };
+
     struct LFGEntryInfo {
         /* 0000 */ int32_t m_id;
         /* 0004 */ int32_t m_order;
@@ -171,7 +213,7 @@ class CGLookingForGroup {
     static LFGLIST m_searchResults;
     static LFGLIST m_prevSearchResults;
     static LFGProposal m_proposal;
-    static CGLookingForGroup::LFGEntryInfo m_unkBEA820[7];
+    static CGLookingForGroup::LFGEntryInfo m_unkBEA820[SORT_COLUMN::NUM_SORT_COLUMNS];
     static LFGBootProposal m_bootProposal;
     static uint8_t m_unkBEAA10;
     static uint8_t m_unkACD660;
@@ -182,7 +224,15 @@ class CGLookingForGroup {
     static LFGPartyLockInfo m_partyLockInfo;
     static LFGRewardInfo m_reward;
     static LFGQueueStatus m_queueStatus;
-    static int32_t m_roleCheckState;
+    // Role check state from SMSG_LFG_ROLE_CHECK_UPDATE (names inferred from the client's reactions).
+    enum ROLE_CHECK_STATE : int32_t {
+        ROLE_CHECK_NONE = 0,
+        ROLE_CHECK_IN_PROGRESS = 2, // GetLFGRoleUpdate reports it as in progress; unconfirmed members get LFG_ROLE_CHECK_SHOW.
+        ROLE_CHECK_ABORTED = 5, // ERR_LFG_ROLE_CHECK_ABORTED.
+        ROLE_CHECK_UNKNOWN_6 = 6, // Plays the same failure sound as ROLE_CHECK_ABORTED, without the error text.
+    };
+
+    static int32_t m_roleCheckState; // ROLE_CHECK_STATE
     static TSGrowableArray<uint32_t> m_roleCheckSlots;
     static TSGrowableArray<LFGRoleCheckMember> m_roleCheckMembers;
     static void EnterWorld();
@@ -198,7 +248,7 @@ class CGLookingForGroup {
     static LFGRewardItem* GetDungeonRewardItem(uint32_t slot, int32_t index);
     static void RequestLFGPlayerInfo();
     static void ClearPartyInfo();
-    static uint8_t GetClassRoles(uint32_t classID);
+    static ROLE_FLAGS_8 GetClassRoles(uint32_t classID);
     static bool HasRaidDungeon(LFGInfo* info);
     static void UpdateLFDEntries();
     static void UpdateLFREntries();
@@ -237,6 +287,6 @@ void LookingForGroupUnregisterScriptFunctions();
 
 void DungeonEncounterCountMatchingRows(int32_t mapId, int32_t difficulty, uint32_t completedMask, uint32_t* total, uint32_t* completed);
 int32_t PushDungeonEncounterInfo(lua_State* L, int32_t mapId, int32_t difficulty, int32_t index, uint32_t completedMask);
-uint32_t FilterRolesByClass(uint8_t roles);
+ROLE_FLAGS FilterRolesByClass(ROLE_FLAGS_8 roles);
 
 #endif

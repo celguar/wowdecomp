@@ -115,7 +115,7 @@ void AsyncFileReadUnloadPostList() {
         object->m_link.Unlink();
 
         if (object->m_userPostUnloadCallback) {
-            reinterpret_cast<void (*)(void*)>(object->m_userPostUnloadCallback)(object->m_userArg);
+            object->m_userPostUnloadCallback(object->m_userArg);
         }
     }
 }
@@ -143,7 +143,7 @@ int32_t AsyncFileReadPollHandler(const void* data, void* param) {
 
         object->m_isProcessed = 1;
         g_queueLock.Leave();
-        reinterpret_cast<void (*)(void*)>(object->m_userPostloadCallback)(object->m_userArg);
+        object->m_userPostloadCallback(object->m_userArg);
         s_progressCount--;
 
         if (OsGetAsyncTimeMs() - start > s_handlerTimeout) {
@@ -221,7 +221,7 @@ int32_t AsyncFile::Cancel(CAsyncObject* object, void (*callback)(CAsyncObject*))
 
     if (object->m_isCurrent) {
         object->m_userArg = object;
-        object->m_userPostUnloadCallback = reinterpret_cast<void*>(callback ? callback : DefaultAsyncObjectCleanupCallback);
+        object->m_userPostUnloadCallback = reinterpret_cast<CAsyncObject::POST_CALLBACK>(callback ? callback : DefaultAsyncObjectCleanupCallback);
         object->m_userPostloadCallback = object->m_userPostUnloadCallback;
         g_queueLock.Leave();
 
@@ -333,7 +333,7 @@ CAsyncObject* AsyncFileReadAllocObject() {
     CAsyncObject* object = AsyncFileRead::s_asyncFileReadFreeList.Head();
 
     if (!object) {
-        object = AsyncFileRead::s_asyncFileReadFreeList.NewNode(1, 0, 0);
+        object = AsyncFileRead::s_asyncFileReadFreeList.NewNode(TSLIST_LINK_AFTER, 0, 0);
     }
 
     object->m_link.Unlink();
@@ -373,7 +373,7 @@ void AsyncFileReadLinkObject(CAsyncObject* object, int32_t urgent) {
 
     for (CAsyncObject* other = object->m_queue->m_readList.Head(); !object->m_queue->m_readList.IsEnd(other); other = object->m_queue->m_readList.RawNext(other)) {
         if (object->m_priority <= other->m_priority && (urgent || object->m_priority != other->m_priority)) {
-            object->m_queue->m_readList.LinkNode(object, 2, other);
+            object->m_queue->m_readList.LinkNode(object, TSLIST_LINK_BEFORE, other);
             object->m_char25 = 0;
             return;
         }
@@ -390,7 +390,7 @@ void AsyncFileReadLinkStaleObject(CAsyncObject* object, int32_t urgent) {
 
     for (CAsyncObject* other = object->m_queue->m_staleList.Head(); !object->m_queue->m_staleList.IsEnd(other); other = object->m_queue->m_staleList.RawNext(other)) {
         if (object->m_priority <= other->m_priority && (urgent || object->m_priority != other->m_priority)) {
-            object->m_queue->m_staleList.LinkNode(object, 2, other);
+            object->m_queue->m_staleList.LinkNode(object, TSLIST_LINK_BEFORE, other);
             object->m_char25 = 1;
             return;
         }
@@ -476,13 +476,13 @@ uint32_t STORMAPI AsyncFileReadThread(void* param) {
 // VERIFY: 1d3b9267 manual
 // OFFSET: 0x004BA8E0
 CAsyncQueue* AsyncFileReadCreateQueue() {
-    return s_asyncQueueList.NewNode(2, 0, 0);
+    return s_asyncQueueList.NewNode(TSLIST_LINK_BEFORE, 0, 0);
 }
 
 // VERIFY: 3de6d82d auto
 // OFFSET: 0x004BA980
 void AsyncFileReadCreateThread(CAsyncQueue* queue, const char* name) {
-    CAsyncThread* thread = s_asyncThreadList.NewNode(2, 0, 0);
+    CAsyncThread* thread = s_asyncThreadList.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     thread->m_queue = queue;
     thread->m_currentObject = nullptr;
     SThread::Create(AsyncFileReadThread, thread, thread->m_thread, const_cast<char*>(name), 0);

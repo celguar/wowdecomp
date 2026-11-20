@@ -35,6 +35,9 @@ class CGxTexCache {
     /* 0004 */ uint32_t m_time;
     /* 0008 */ uint32_t m_size;
     /* 000C */ TSLink<CGxTexCache> m_link;
+
+    CGxTexCache();
+    ~CGxTexCache();
 };
 
 struct HASHKEY_TEXTUREFILE {
@@ -48,6 +51,14 @@ struct HASHKEY_TEXTUREFILE {
 
 class CTexture : public CHandleObject, public TSHashObject<CTexture, HASHKEY_TEXTUREFILE> {
     public:
+    enum FLAGS : int32_t {
+        NONE = 0,
+        IS_OPAQUE = 1,
+        UNKNOWN_2 = 2,
+        USE_ATLAS = 4,
+        STREAMING_ASYNC = 0x20,
+    };
+
     /* 0028 */ uint16_t m_flags;
     /* 002A */ uint8_t m_bestMip;
     /* 002B */ uint8_t m_alphaBits;

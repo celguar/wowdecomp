@@ -3,16 +3,25 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "WoW/Source/Game/Types.h"
 #include "WoW/Source/Object/WGUID.h"
 
 class CDataStore;
 
 class NameCache {
     public:
+    // SMSG_NAME_QUERY_RESPONSE result byte, named after what ReceiveName does with each value.
+    enum QUERY_RESULT : uint8_t {
+        QUERY_RESULT_OK = 0,
+        QUERY_RESULT_UNKNOWN_1 = 1, // Denied like any other unhandled value.
+        QUERY_RESULT_RETRY = 2,
+        QUERY_RESULT_PLACEHOLDER = 3, // Cached temporarily as "?".
+    };
+
     static const uint32_t s_cacheVersion = 4;
 
     struct DeclinedNames {
-        /* 0000 */ char m_names[5][64];
+        /* 0000 */ char m_names[NUM_DECLENSIONS][64];
     };
 
     /* 0000 */ char m_name[48];

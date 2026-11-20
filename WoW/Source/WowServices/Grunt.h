@@ -16,6 +16,35 @@
 bool CanReadNumBytes(CDataStore& msg, uint32_t bytes);
 
 namespace Grunt {
+// Grunt command byte. Server commands are named after the s_authCmds handler strings
+// (ClientLink::CMD_*); SURVEY_RESULT and XFER_ACCEPT/RESUME/CANCEL are inferred from their senders.
+enum GRUNT_COMMAND : uint8_t {
+    CMD_AUTH_LOGON_CHALLENGE = 0x00,
+    CMD_AUTH_LOGON_PROOF = 0x01,
+    CMD_AUTH_RECONNECT_CHALLENGE = 0x02,
+    CMD_AUTH_RECONNECT_PROOF = 0x03,
+    CMD_SURVEY_RESULT = 0x04,
+    CMD_REALM_LIST = 0x10,
+    CMD_XFER_INITIATE = 0x30,
+    CMD_XFER_DATA = 0x31,
+    CMD_XFER_ACCEPT = 0x32,
+    CMD_XFER_RESUME = 0x33,
+    CMD_XFER_CANCEL = 0x34, // Also sent by FileComplete.
+};
+
+// Grunt logon challenge security flags, named after the ClientResponse setter each one enables.
+enum GRUNT_SECURITY_FLAGS : uint8_t {
+    GRUNT_SECURITY_PIN = 0x1,
+    GRUNT_SECURITY_MATRIX = 0x2,
+    GRUNT_SECURITY_TOKEN = 0x4,
+};
+
+// Shared server/hello-info protocol discriminator;unknown words remain raw.
+enum SERVER_LINK_TYPE : uint32_t {
+    SERVER_LINK_GRUNT = 0,
+    SERVER_LINK_BATTLENET = 1,
+};
+
 struct CdKey {
     struct Info {
         /* 0000 */ uint16_t m_keyLength;
@@ -113,6 +142,17 @@ class Timer {
 
 class ClientLink : public WowConnectionResponse, public Grunt::Pending, public Grunt::Timer::Event {
     public:
+    // Reconstructed authentication lifecycle; SetState retains its raw signed32 API.
+    enum CLIENT_STATE : int32_t {
+        STATE_DISCONNECTED = 0,
+        STATE_CONNECTING = 1,
+        STATE_CONNECTED = 2,
+        STATE_AUTH_CHALLENGE_PENDING = 3,
+        STATE_LOGON_VERSION_PROOF_PENDING = 4,
+        STATE_RECONNECT_VERSION_PROOF_PENDING = 5,
+        STATE_ONLINE = 6,
+    };
+
     struct Logon {
         /* 0000 */ const char* m_accountName;
         /* 0004 */ const char* m_password;

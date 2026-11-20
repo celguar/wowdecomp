@@ -3,11 +3,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Frame/CSimpleFrame.h"
 #include "Engine/Source/Gx/CGxTex.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/C2Vector.h"
+#include "Engine/Source/Tempest/C2iVector.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Tempest/CRect.h"
@@ -35,6 +37,17 @@ struct MINIMAPQUAD {
 };
 
 struct MINIMAPTILE {
+    // Runtime tile state; reconstructed names.
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // UpdateQuad built the vertices; required to render.
+        QUAD_BUILT = 0x1,
+        // Claimed by the current tile/quad layout.
+        IN_USE = 0x2,
+        // The texture was created and its GX texture is not ready yet.
+        TEXTURE_PENDING = 0x4,
+    };
+
     /* 0000 */ C3Vector m_vertices[4];
     /* 0030 */ C2Vector m_texCoords[4];
     /* 0050 */ C2Vector m_maskCoords[4];
@@ -42,9 +55,8 @@ struct MINIMAPTILE {
     /* 0088 */ MINIMAPTILE* m_nextSorted;
     /* 008C */ float m_depth;
     /* 0090 */ CTexture* m_texture;
-    /* 0094 */ uint32_t m_flags;
-    /* 0098 */ int32_t m_x;
-    /* 009C */ int32_t m_y;
+    /* 0094 */ uint32_t m_flags; // FLAGS
+    /* 0098 */ C2iVector m_tileCoords; // Signed texture tile/quad indices; LeaveWorld resets both to -1.
     /* 00A0 */ int32_t m_groupId;
 
     void BuildQuad(const CRect& rect, uint32_t index, const C2Vector* center, float scale, const CRect& bounds, float layoutScale, float width);
@@ -67,8 +79,7 @@ struct MINIMAPINDOOR {
 
 struct MINIMAPQUADINFO {
     /* 0000 */ int32_t m_groupId;
-    /* 0004 */ int32_t m_x;
-    /* 0008 */ int32_t m_y;
+    /* 0004 */ C2iVector m_quad; // Integer x/y indices of the WMO group's minimap texture quad.
     /* 000C */ CAaBox m_bounds;
 };
 
@@ -123,8 +134,16 @@ struct MINIMAPMD5NAME : public TSHashObject<MINIMAPMD5NAME, HASHKEY_STRI> {
     /* 0018 */ char m_md5Name[40];
 };
 
+enum TRACKING_TYPE : int32_t {
+    // m_npcFlags is a UNIT_NPC_FLAGS mask.
+    TRACKING_TYPE_NPC_FLAGS = 1,
+    // m_npcFlags is a gameobject type ID.
+    TRACKING_TYPE_GAMEOBJECT = 2,
+    TRACKING_TYPE_TRIVIAL_QUESTS = 3,
+};
+
 struct TrackingTypeInfo {
-    /* 0000 */ int32_t m_type;
+    /* 0000 */ TRACKING_TYPE m_type;
     /* 0004 */ uint32_t m_npcFlags;
     /* 0008 */ const char* m_name;
     /* 000C */ const char* m_texture;
@@ -191,7 +210,7 @@ class CGMinimapFrame : public CSimpleFrame {
     void OnLayerUpdate(float elapsedSec) override;
     int32_t OnLayerTrackUpdate(const CMouseEvent& evt) override;
     void OnFrameRender(CRenderBatch* batch, uint32_t layer) override;
-    void OnLayerCursorExit(int32_t motion, int32_t a3) override;
+    void OnLayerCursorExit(int32_t motion, BOOL releaseMouse) override;
     bool UpdateScale(bool force) override;
 
     CGMinimapFrame(CSimpleFrame* parent);

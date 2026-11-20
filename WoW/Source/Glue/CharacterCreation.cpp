@@ -1,4 +1,5 @@
 #include "CharacterCreation.h"
+#include "WoW/Common/Types.h"
 #include <cstring>
 #include "Engine/Source/Event/Event.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
@@ -29,7 +30,7 @@
 #include "WoW/Source/WowSvcs/WowSvcsClient/Types.h"
 
 // STATIC: 0x00AC4220
-int32_t CCharacterCreation::m_selectedClassID = 1;
+int32_t CCharacterCreation::m_selectedClassID = CLASS_WARRIOR;
 
 // STATIC: 0x00AC4224
 int32_t CCharacterCreation::m_existingCharacterIndex = -1;
@@ -86,7 +87,7 @@ void CCharacterCreation::Initialize() {
         for (int32_t i = 0; i < g_chrRacesDB.m_numRecords; i++) {
             ChrRacesRec* race = i >= 0 && i < g_chrRacesDB.m_numRecords ? &g_chrRacesDB.m_records[i] : nullptr;
 
-            if (race && (race->m_flags & 0x1)) {
+            if (race && (race->m_flags & ChrRacesRec::RACE_FLAGS::NON_PLAYABLE)) {
                 continue;
             }
 
@@ -197,7 +198,7 @@ void CCharacterCreation::SetCharCustomizeModel(const char* modelName) {
     }
 
     if (CCharacterCreation::m_charCustomizeFrame->m_model && CCharacterCreation::m_character->m_data.m_model) {
-        CCharacterCreation::m_character->m_data.m_model->AttachToParent(CCharacterCreation::m_charCustomizeFrame->m_model, 0, nullptr, 0);
+        CCharacterCreation::m_character->m_data.m_model->AttachToParent(CCharacterCreation::m_charCustomizeFrame->m_model, MODEL_ATTACHMENT_ID::ATTACH_SHIELD, nullptr, 0);
     }
 }
 
@@ -341,9 +342,9 @@ void CCharacterCreation::CreateCharacter(const char* name) {
     if (guid && display) {
         uint32_t flags = display->m_characterInfo.m_customizeFlags;
 
-        if (flags & 0x100000) {
+        if (flags & CHARACTER_INFO::CUSTOMIZE_FLAG_RACE_CHANGE) {
             CGlueMgr::RaceChange(guid, &info);
-        } else if (flags & 0x10000) {
+        } else if (flags & CHARACTER_INFO::CUSTOMIZE_FLAG_FACTION_CHANGE) {
             CGlueMgr::FactionChange(guid, &info);
         } else {
             CGlueMgr::CustomizeCharacter(guid, &info);
@@ -420,7 +421,7 @@ void CCharacterCreation::Dress() {
         CharacterSelectionDisplay* display = CCharacterSelection::GetCharacterDisplay(CCharacterCreation::m_existingCharacterIndex);
 
         if (display) {
-            for (uint32_t slot = 0; slot < 23; slot++) {
+            for (uint32_t slot = 0; slot < NUM_INVENTORY_SLOTS; slot++) {
                 int32_t displayID = display->m_characterInfo.m_inventoryItemDisplayID[slot];
                 int32_t itemVisual = display->m_characterInfo.m_inventoryItemVisualID[slot];
 
@@ -428,7 +429,7 @@ void CCharacterCreation::Dress() {
                     continue;
                 }
 
-                if (display->m_characterInfo.m_classID == 3) {
+                if (display->m_characterInfo.m_classID == CLASS_HUNTER) {
                     if (slot == INVSLOT_MAINHAND || slot == INVSLOT_OFFHAND) {
                         continue;
                     }
@@ -436,7 +437,7 @@ void CCharacterCreation::Dress() {
                     continue;
                 }
 
-                if (slot == INVSLOT_HEAD || ((display->m_characterInfo.m_flags & 0x800) && slot == INVSLOT_BACK)) {
+                if (slot == INVSLOT_HEAD || ((display->m_characterInfo.m_flags & CharEnumFlags::CHARACTER_FLAG_HIDE_CLOAK) && slot == INVSLOT_BACK)) {
                     continue;
                 }
 
@@ -450,7 +451,7 @@ void CCharacterCreation::Dress() {
                     CCharacterComponent::AddHandItem(CCharacterCreation::m_character->m_data.m_model, &itemRec, static_cast<INVENTORY_SLOTS>(slot), SHEATHE_NONE, false, display->m_characterInfo.m_inventoryItemType[slot] == INVTYPE_SHIELD, false, visual);
                 }
 
-                if (slot == INVSLOT_TABARD && found && (itemRec.m_flags & 0x1)) {
+                if (slot == INVSLOT_TABARD && found && (itemRec.m_flags & ItemDisplayInfoRec::DISPLAY_FLAGS::GUILD_TABARD)) {
                     int32_t emblemStyle;
                     int32_t emblemColor;
                     int32_t borderStyle;
@@ -483,7 +484,7 @@ void CCharacterCreation::Dress() {
             continue;
         }
 
-        for (int32_t j = 0; j < 24; j++) {
+        for (int32_t j = 0; j < NUM_CHAR_START_OUTFIT_ITEMS; j++) {
             int32_t displayID = outfit->m_displayItemID[j];
             int32_t type = outfit->m_inventoryType[j];
 
@@ -491,7 +492,7 @@ void CCharacterCreation::Dress() {
                 continue;
             }
 
-            if (CCharacterCreation::m_selectedClassID == 3) {
+            if (CCharacterCreation::m_selectedClassID == CLASS_HUNTER) {
                 switch (type) {
                     case INVTYPE_WEAPON:
                     case INVTYPE_2HWEAPON:
@@ -506,7 +507,7 @@ void CCharacterCreation::Dress() {
                         ItemDisplayInfoRec itemRec;
 
                         if (g_itemDisplayInfoDB.GetRecord(displayID, &itemRec)) {
-                            GEOCOMPONENTLINKS link = CCharacterComponent::AddHandItem(CCharacterCreation::m_character->m_data.m_model, &itemRec, INVSLOT_RANGED, SHEATHE_NONE, false, false, mainHand, 0);
+                            MODEL_ATTACHMENT_ID link = CCharacterComponent::AddHandItem(CCharacterCreation::m_character->m_data.m_model, &itemRec, INVSLOT_RANGED, SHEATHE_NONE, false, false, mainHand, 0);
 
                             if (type == INVTYPE_RANGED) {
                                 for (CM2Model* attached = CCharacterCreation::m_character->m_data.m_model->m_attachList; attached; attached = attached->m_attachNext) {
@@ -571,8 +572,8 @@ void CCharacterCreation::InitCharacterComponents(ComponentData* data, bool rando
     CCharacterCreation::m_charCustomizeFrame->m_lightArray2[0].unk_01BC = 1;
     data->m_model->m_lightingCallback = &CCharacterSelection::GenericLightingCallback;
     data->m_model->m_lightingArg = CCharacterCreation::m_charCustomizeFrame->m_lightArray2;
-    data->m_model->SetBoneSequence(0xFFFFFFFF, 0, 0, 0, 1.0f, 1, 1);
-    data->m_flags |= 0x2;
+    data->m_model->SetBoneSequence(M2_KEY_BONE_NONE, ANIM_STAND, 0, 0, 1.0f, 1, 1);
+    data->m_flags |= ComponentData::DATA_FLAGS::HIGH_RESOLUTION;
 
     CCharacterCreation::m_character->Init(data, nullptr);
 
@@ -595,14 +596,14 @@ void CCharacterCreation::InitCharacterComponents(ComponentData* data, bool rando
     CCharacterCreation::m_character->RenderPrep(0);
 
     if (CCharacterCreation::m_charCustomizeFrame->m_model) {
-        CCharacterCreation::m_character->m_data.m_model->AttachToParent(CCharacterCreation::m_charCustomizeFrame->m_model, 0, nullptr, 0);
+        CCharacterCreation::m_character->m_data.m_model->AttachToParent(CCharacterCreation::m_charCustomizeFrame->m_model, MODEL_ATTACHMENT_ID::ATTACH_SHIELD, nullptr, 0);
     }
 }
 
 // VERIFY: 68a365e1 manual
 // OFFSET: 0x004E1540
 void CCharacterCreation::SetSelectedSex(uint32_t sexID) {
-    if (sexID >= 3 || sexID == CCharacterCreation::m_character->m_data.m_preferences.m_sexID) {
+    if (sexID >= UNITSEX_LAST || sexID == CCharacterCreation::m_character->m_data.m_preferences.m_sexID) {
         return;
     }
 
@@ -624,7 +625,7 @@ void CCharacterCreation::SetSelectedSex(uint32_t sexID) {
     if (CCharacterCreation::m_existingCharacterIndex >= 0) {
         CharacterSelectionDisplay* display = CCharacterSelection::GetCharacterDisplay(CCharacterCreation::m_existingCharacterIndex);
 
-        if (display && display->m_characterInfo.m_sexID == sexID && (display->m_characterInfo.m_customizeFlags & 0x1)) {
+        if (display && display->m_characterInfo.m_sexID == sexID && (display->m_characterInfo.m_customizeFlags & CHARACTER_INFO::CUSTOMIZE_FLAG_APPEARANCE)) {
             data.m_preferences.m_raceID = display->m_characterInfo.m_raceID;
             data.m_preferences.m_sexID = display->m_characterInfo.m_sexID;
             data.m_preferences.m_classId = display->m_characterInfo.m_classID;
@@ -740,7 +741,7 @@ void CCharacterCreation::ResetCharCustomizeInfo() {
     CCharacterCreation::m_existingCharacterIndex = -1;
 
     if (CCharacterCreation::m_charCustomizeFrame->m_model) {
-        CCharacterCreation::m_charCustomizeFrame->m_model->DetachAllChildrenById(0);
+        CCharacterCreation::m_charCustomizeFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_SHIELD);
     }
 
     ComponentData data;
@@ -787,7 +788,7 @@ void CCharacterCreation::SetSelectedRace(uint32_t raceIndex) {
         display = CCharacterSelection::GetCharacterDisplay(CCharacterCreation::m_existingCharacterIndex);
     }
 
-    if (display && display->m_characterInfo.m_raceID == CCharacterCreation::m_races.m_data[CCharacterCreation::m_raceIndex] && (display->m_characterInfo.m_customizeFlags & 0x110000)) {
+    if (display && display->m_characterInfo.m_raceID == CCharacterCreation::m_races.m_data[CCharacterCreation::m_raceIndex] && (display->m_characterInfo.m_customizeFlags & CHARACTER_INFO::CUSTOMIZE_RACE_OR_FACTION_MASK)) {
         data.m_preferences.m_raceID = display->m_characterInfo.m_raceID;
         data.m_preferences.m_sexID = display->m_characterInfo.m_sexID;
         data.m_preferences.m_classId = display->m_characterInfo.m_classID;

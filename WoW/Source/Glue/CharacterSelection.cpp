@@ -1,4 +1,6 @@
 #include "CharacterSelection.h"
+#include "WoW/Source/Glue/Types.h"
+#include "WoW/Common/Types.h"
 #include <cstring>
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/Event/Event.h"
@@ -8,6 +10,7 @@
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Model2/M2Scene.h"
 #include "Engine/Source/Model2/M2Shared.h"
+#include "Engine/Source/Frame/CSimpleModel.h"
 #include "Engine/Source/Os/OsFile.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
@@ -36,7 +39,7 @@
 #include "WoW/Source/WowSvcs/WowSvcsClient/ClientServices.h"
 
 // STATIC: 0x009F3CD0
-const int32_t g_scriptSexIndex[3] = { 2, 3, 1 };
+const int32_t g_scriptSexIndex[3] = { GENDER_MALE, GENDER_FEMALE, GENDER_NONE };
 
 // STATIC: 0x00AC441C
 static float s_characterGlow = 0.4f;
@@ -57,7 +60,7 @@ int32_t CCharacterSelection::s_characterCount;
 float CCharacterSelection::s_charFacing;
 
 // STATIC: 0x00B6B208
-uint32_t CCharacterSelection::s_raceRestrictions[10];
+uint32_t CCharacterSelection::s_raceRestrictions[NUM_RACE_RESTRICTIONS];
 
 // STATIC: 0x00B6B238
 TSGrowableArray<CharacterSelectionDisplay> CCharacterSelection::s_characterList;
@@ -88,7 +91,7 @@ void CCharacterSelection::Shutdown() {
             continue;
         }
 
-        if (CCharacterSelection::s_characterList[i].m_characterInfo.m_classID == 3) {
+        if (CCharacterSelection::s_characterList[i].m_characterInfo.m_classID == CLASS_HUNTER) {
             CCharacterComponent::RemoveHandItem(model, INVSLOT_RANGED, SHEATHE_NONE, false);
             CCharacterSelection::s_characterList[i].m_component->RemoveItem(ITEMSLOT_11);
         }
@@ -125,7 +128,7 @@ void CGlueMgr::ProcessAttachment(CM2Model* model, int32_t effectID, uint32_t att
 
     C44Matrix matrix;
     matrix.Scale(effectRec->m_scale);
-    effect->m_fFlags |= 0x8000;
+    effect->m_runtimeFlags |= M2_FLAGS::M2_WORLD_TRANSFORM_VALID;
     effect->m_worldTransform = matrix;
     effect->AttachToParent(model, attachID, nullptr, 0);
     effect->Release();
@@ -140,19 +143,19 @@ void CGlueMgr::AttachCharacterSelectVisuals(CM2Model* model) {
         return;
     }
 
-    CGlueMgr::ProcessAttachment(model, kitRec->m_headEffect, 20);
-    CGlueMgr::ProcessAttachment(model, kitRec->m_chestEffect, 34);
-    CGlueMgr::ProcessAttachment(model, kitRec->m_baseEffect, 19);
-    CGlueMgr::ProcessAttachment(model, kitRec->m_leftHandEffect, 21);
-    CGlueMgr::ProcessAttachment(model, kitRec->m_rightHandEffect, 22);
-    CGlueMgr::ProcessAttachment(model, kitRec->m_breathEffect, 17);
-    CGlueMgr::ProcessAttachment(model, kitRec->m_specialEffect[0], 23);
-    CGlueMgr::ProcessAttachment(model, kitRec->m_specialEffect[1], 24);
-    CGlueMgr::ProcessAttachment(model, kitRec->m_specialEffect[2], 25);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_headEffect, MODEL_ATTACHMENT_ID::ATTACH_UNITEFFECT_HEAD);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_chestEffect, MODEL_ATTACHMENT_ID::ATTACH_TORSOSPELL);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_baseEffect, MODEL_ATTACHMENT_ID::ATTACH_UNITEFFECT_BASE);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_leftHandEffect, MODEL_ATTACHMENT_ID::ATTACH_UNITEFFECT_SPELLLEFTHAND);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_rightHandEffect, MODEL_ATTACHMENT_ID::ATTACH_UNITEFFECT_SPELLRIGHTHAND);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_breathEffect, MODEL_ATTACHMENT_ID::ATTACH_BREATH);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_specialEffect[0], MODEL_ATTACHMENT_ID::ATTACH_UNITEFFECT_SPECIAL1);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_specialEffect[1], MODEL_ATTACHMENT_ID::ATTACH_UNITEFFECT_SPECIAL2);
+    CGlueMgr::ProcessAttachment(model, kitRec->m_specialEffect[2], MODEL_ATTACHMENT_ID::ATTACH_UNITEFFECT_SPECIAL3);
 
-    for (uint32_t i = 0; i < 4; i++) {
+    for (uint32_t i = 0; i < NUM_SPELL_VISUAL_CHAR_PROCS; i++) {
         switch (kitRec->m_charProc[i]) {
-            case 1: {
+            case SPELL_VISUAL_CHAR_PROC_COLOR_TINT: {
                 CImVector color;
                 *reinterpret_cast<uint32_t*>(&color) = static_cast<uint32_t>(kitRec->m_charParamZero[i]) | 0xFF000000;
                 model->m_diffuseTintR = color.r * (1.0f / 255.0f);
@@ -161,7 +164,7 @@ void CGlueMgr::AttachCharacterSelectVisuals(CM2Model* model) {
                 break;
             }
 
-            case 14: {
+            case SPELL_VISUAL_CHAR_PROC_ALPHA: {
                 float alpha = kitRec->m_charParamZero[i];
 
                 if (alpha < 0.0f) {
@@ -183,8 +186,8 @@ void CGlueMgr::AttachCharacterSelectVisuals(CM2Model* model) {
 // VERIFY: 61c6f157 auto
 // OFFSET: 0x004E0110
 void CCharacterSelection::ModelLoadedCallback(CM2Model* model, void* arg) {
-    if (model->HasEvent('TTW$') && model->HasEvent('BTW$')) {
-        model->m_fFlags |= 0x20;
+    if (model->HasEvent(M2_EVENT_ID::WeaponTop_WTT) && model->HasEvent(M2_EVENT_ID::WeaponBottom_WTB)) {
+        model->m_runtimeFlags |= M2_FLAGS::M2_UNKNOWN_20;
         model->m_drawCallback = &CDrawBowString::GlueDrawBowStringCB;
         model->m_drawArg = arg;
     }
@@ -240,8 +243,8 @@ void CCharacterSelection::UpdateCharacterName(WOWGUID guid, const char* name) {
     ClearAddOnEnableState(CCharacterSelection::s_characterList[index].m_characterInfo.m_name);
     LoadAddOnEnableState(name);
     SStrCopy(CCharacterSelection::s_characterList[index].m_characterInfo.m_name, name, sizeof(CCharacterSelection::s_characterList[index].m_characterInfo.m_name));
-    CCharacterSelection::s_characterList[index].m_characterInfo.m_flags &= ~0x4000;
-    CCharacterSelection::s_characterList[index].m_characterInfo.m_flags &= ~0x2000000;
+    CCharacterSelection::s_characterList[index].m_characterInfo.m_flags &= ~CharEnumFlags::CHARACTER_FLAG_RENAME;
+    CCharacterSelection::s_characterList[index].m_characterInfo.m_flags &= ~CharEnumFlags::CHARACTER_FLAG_DECLINED;
     FrameScript_SignalEvent(GLUE_EVENT_CHARACTER_LIST_UPDATE, nullptr);
 }
 
@@ -286,7 +289,7 @@ void CCharacterSelection::UpdateCharacterInfo(WOWGUID guid, const char* name, ui
         info.m_raceID = raceID;
     }
 
-    info.m_customizeFlags &= 0xFFEEFFFE;
+    info.m_customizeFlags &= CHARACTER_INFO::CUSTOMIZE_RETAIN_MASK;
     FrameScript_SignalEvent(GLUE_EVENT_CHARACTER_LIST_UPDATE, nullptr);
 }
 
@@ -295,7 +298,7 @@ void CCharacterSelection::UpdateCharacterInfo(WOWGUID guid, const char* name, ui
 void CCharacterSelection::UpdateCharacterNameDeclension(WOWGUID guid) {
     for (uint32_t index = 0; index < CCharacterSelection::s_characterList.Count(); index++) {
         if (CCharacterSelection::s_characterList[index].m_characterInfo.m_guid == guid) {
-            CCharacterSelection::s_characterList[index].m_characterInfo.m_flags |= 0x2000000;
+            CCharacterSelection::s_characterList[index].m_characterInfo.m_flags |= CharEnumFlags::CHARACTER_FLAG_DECLINED;
             return;
         }
     }
@@ -336,7 +339,7 @@ void CCharacterSelection::GenericLightingCallback(CM2Model* model, CM2Lighting* 
     CM2LightArray* lights = static_cast<CM2LightArray*>(arg);
     CharacterSelectionDisplay* display = CCharacterSelection::s_selectionIndex < 0 || CCharacterSelection::s_selectionIndex >= static_cast<int32_t>(CCharacterSelection::s_characterList.Count()) ? nullptr : &CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex];
 
-    if (!lights->unk_01BC && display && (display->m_characterInfo.m_flags & 0x2000)) {
+    if (!lights->unk_01BC && display && (display->m_characterInfo.m_flags & CharEnumFlags::CHARACTER_FLAG_GHOST)) {
         lights = &lights[1];
 
         if (!lights->m_hasCustomLight) {
@@ -372,7 +375,7 @@ void CCharacterSelection::GenericLightingCallback(CM2Model* model, CM2Lighting* 
     if (lights->unk_01B5) {
         CSimpleModelFFX* frame = lights->m_modelFrame;
 
-        if (frame->m_flags & 0x1) {
+        if (frame->m_flags & CSimpleModel::MODEL_FOGGED) {
             lighting->SetFog(C3Vector(frame->m_fogColor), frame->m_fogNear, frame->m_fogFar);
         }
     }
@@ -420,11 +423,11 @@ void CCharacterSelection::ShowCharacter() {
     ComponentData data;
 
     if (CCharacterSelection::m_modelFrame && CCharacterSelection::m_modelFrame->m_model) {
-        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(0);
+        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_SHIELD);
     }
 
     if (CCharacterSelection::m_modelFrame && CCharacterSelection::m_modelFrame->m_model) {
-        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(1);
+        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_HANDR);
     }
 
     CCharacterSelection::s_charFacing = 0.0f;
@@ -452,7 +455,7 @@ void CCharacterSelection::ShowCharacter() {
         data.m_preferences.m_hairColorId = info.m_hairColorID;
         data.m_preferences.m_facialHairId = info.m_facialHairStyleID;
         data.m_model = CCharacterSelection::m_modelFrame->GetScene()->CreateModel(playerRec->m_modelName, 0);
-        data.m_flags |= 0x2;
+        data.m_flags |= ComponentData::DATA_FLAGS::HIGH_RESOLUTION;
 
         CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->Init(&data, nullptr);
 
@@ -460,9 +463,9 @@ void CCharacterSelection::ShowCharacter() {
         characterModel->m_lightingCallback = &CCharacterSelection::GenericLightingCallback;
         characterModel->m_lightingArg = CCharacterSelection::m_modelFrame->m_lightArray2;
 
-        CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->m_data.m_model->SetBoneSequence(0xFFFFFFFF, 0, 0xFFFFFFFF, 0, 1.0f, 1, 1);
+        CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->m_data.m_model->SetBoneSequence(M2_KEY_BONE_NONE, ANIM_STAND, M2_RANDOM_VARIATION, 0, 1.0f, 1, 1);
 
-        for (uint32_t slot = 0; slot < 23; slot++) {
+        for (uint32_t slot = 0; slot < NUM_INVENTORY_SLOTS; slot++) {
             int32_t displayID = CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_inventoryItemDisplayID[slot];
             int32_t itemVisual = CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_inventoryItemVisualID[slot];
 
@@ -470,7 +473,7 @@ void CCharacterSelection::ShowCharacter() {
                 continue;
             }
 
-            bool hunter = CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_classID == 3;
+            bool hunter = CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_classID == CLASS_HUNTER;
 
             if (hunter) {
                 if (slot == INVSLOT_MAINHAND || slot == INVSLOT_OFFHAND) {
@@ -482,11 +485,11 @@ void CCharacterSelection::ShowCharacter() {
 
             uint32_t flags = CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_flags;
 
-            if ((flags & 0x400) && slot == INVSLOT_HEAD) {
+            if ((flags & CharEnumFlags::CHARACTER_FLAG_HIDE_HELM) && slot == INVSLOT_HEAD) {
                 continue;
             }
 
-            if ((flags & 0x800) && slot == INVSLOT_BACK) {
+            if ((flags & CharEnumFlags::CHARACTER_FLAG_HIDE_CLOAK) && slot == INVSLOT_BACK) {
                 continue;
             }
 
@@ -496,7 +499,7 @@ void CCharacterSelection::ShowCharacter() {
 
             if (slot == INVSLOT_MAINHAND || slot == INVSLOT_OFFHAND || (slot == INVSLOT_RANGED && hunter)) {
                 if (found) {
-                    GEOCOMPONENTLINKS link = CCharacterComponent::AddHandItem(CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->m_data.m_model, &itemRec, static_cast<INVENTORY_SLOTS>(slot), SHEATHE_NONE, false, CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_inventoryItemType[slot] == INVTYPE_SHIELD, false, visual);
+                    MODEL_ATTACHMENT_ID link = CCharacterComponent::AddHandItem(CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->m_data.m_model, &itemRec, static_cast<INVENTORY_SLOTS>(slot), SHEATHE_NONE, false, CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_inventoryItemType[slot] == INVTYPE_SHIELD, false, visual);
 
                     if (slot == INVSLOT_RANGED) {
                         if (CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_inventoryItemType[INVSLOT_RANGED] == INVTYPE_RANGED) {
@@ -519,7 +522,7 @@ void CCharacterSelection::ShowCharacter() {
                 CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->AddItemBySlot(static_cast<INVENTORY_SLOTS>(slot), displayID, visual);
             }
 
-            if (slot == INVSLOT_TABARD && found && (itemRec.m_flags & 0x1)) {
+            if (slot == INVSLOT_TABARD && found && (itemRec.m_flags & ItemDisplayInfoRec::DISPLAY_FLAGS::GUILD_TABARD)) {
                 int32_t emblemStyle;
                 int32_t emblemColor;
                 int32_t borderStyle;
@@ -533,7 +536,7 @@ void CCharacterSelection::ShowCharacter() {
             }
         }
 
-        if (CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_flags & 0x2000) {
+        if (CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_flags & CharEnumFlags::CHARACTER_FLAG_GHOST) {
             CGlueMgr::AttachCharacterSelectVisuals(CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->m_data.m_model);
         }
 
@@ -577,11 +580,11 @@ void CCharacterSelection::ShowCharacter() {
             petModel->m_lightingCallback = &CCharacterSelection::GenericLightingCallback;
             petModel->m_lightingArg = CCharacterSelection::m_modelFrame->m_lightArray3;
 
-            CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petModel->SetBoneSequence(0xFFFFFFFF, 0, 0xFFFFFFFF, 0, 1.0f, 1, 1);
+            CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petModel->SetBoneSequence(M2_KEY_BONE_NONE, ANIM_STAND, M2_RANDOM_VARIATION, 0, 1.0f, 1, 1);
             CCharacterComponent::ReplaceMonsterSkin(CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petModel, displayRec, modelRec);
             C44Matrix matrix(scale);
             CM2Model* scaledModel = CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petModel;
-            scaledModel->m_fFlags |= 0x8000;
+            scaledModel->m_runtimeFlags |= M2_FLAGS::M2_WORLD_TRANSFORM_VALID;
             scaledModel->m_worldTransform = matrix;
             CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petAlpha = displayRec->m_creatureModelAlpha * (1.0f / 255.0f);
             CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petModel->m_fadeAlpha = CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petAlpha;
@@ -592,7 +595,7 @@ void CCharacterSelection::ShowCharacter() {
 
     DayNight::DNInfo* info = DayNight::GetInfo();
 
-    if (CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_flags & 0x2000) {
+    if (CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_characterInfo.m_flags & CharEnumFlags::CHARACTER_FLAG_GHOST) {
         FFX::SetEffect(CGlueMgr::m_deathEffect);
         info->m_bands.m_glow = s_ghostGlow;
     } else {
@@ -601,11 +604,11 @@ void CCharacterSelection::ShowCharacter() {
     }
 
     if (CCharacterSelection::m_modelFrame->m_model) {
-        CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->m_data.m_model->AttachToParent(CCharacterSelection::m_modelFrame->m_model, 0, nullptr, 0);
+        CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_component->m_data.m_model->AttachToParent(CCharacterSelection::m_modelFrame->m_model, MODEL_ATTACHMENT_ID::ATTACH_SHIELD, nullptr, 0);
         CharacterSelectionDisplay::SetCharacterFacing(0.0f);
 
         if (CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petModel) {
-            CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petModel->AttachToParent(CCharacterSelection::m_modelFrame->m_model, 1, nullptr, 0);
+            CCharacterSelection::s_characterList[CCharacterSelection::s_selectionIndex].m_petModel->AttachToParent(CCharacterSelection::m_modelFrame->m_model, MODEL_ATTACHMENT_ID::ATTACH_HANDR, nullptr, 0);
         }
     }
 
@@ -618,16 +621,16 @@ void CCharacterSelection::UpdateCharacterList() {
     ClearAddOnEnableState(nullptr);
     CCharacterSelection::s_characterList.SetCount(0);
 
-    CCharacterSelection::s_raceRestrictions[0] = 0;
-    CCharacterSelection::s_raceRestrictions[1] = 0;
-    CCharacterSelection::s_raceRestrictions[2] = 0;
-    CCharacterSelection::s_raceRestrictions[3] = 0;
-    CCharacterSelection::s_raceRestrictions[4] = 0;
-    CCharacterSelection::s_raceRestrictions[5] = 0;
-    CCharacterSelection::s_raceRestrictions[6] = 0;
-    CCharacterSelection::s_raceRestrictions[7] = 0;
-    CCharacterSelection::s_raceRestrictions[8] = 0;
-    CCharacterSelection::s_raceRestrictions[9] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_HUMAN] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_DWARF] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_GNOME] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_NIGHT_ELF] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_DRAENEI] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_ORC] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_TROLL] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_TAUREN] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_UNDEAD] = 0;
+    CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_BLOOD_ELF] = 0;
 
     ClientServices::Connection()->EnumerateCharacters(&CCharacterSelection::EnumerateCharactersCallback, nullptr);
 
@@ -637,23 +640,23 @@ void CCharacterSelection::UpdateCharacterList() {
         FrameScript_SignalEvent(GLUE_EVENT_UPDATE_SELECTED_CHARACTER, "%d", CCharacterSelection::s_selectionIndex + 1);
 
         if (CCharacterSelection::m_modelFrame && CCharacterSelection::m_modelFrame->m_model) {
-            CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(0);
+            CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_SHIELD);
         }
 
         if (CCharacterSelection::m_modelFrame && CCharacterSelection::m_modelFrame->m_model) {
-            CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(1);
+            CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_HANDR);
         }
     } else {
-        CCharacterSelection::s_raceRestrictions[0] = ClientServices::Connection()->m_restrictHuman;
-        CCharacterSelection::s_raceRestrictions[1] = ClientServices::Connection()->m_restrictDwarf;
-        CCharacterSelection::s_raceRestrictions[2] = ClientServices::Connection()->m_restrictGnome;
-        CCharacterSelection::s_raceRestrictions[3] = ClientServices::Connection()->m_restrictNightElf;
-        CCharacterSelection::s_raceRestrictions[4] = ClientServices::Connection()->m_restrictDraenei;
-        CCharacterSelection::s_raceRestrictions[5] = ClientServices::Connection()->m_restrictOrc;
-        CCharacterSelection::s_raceRestrictions[6] = ClientServices::Connection()->m_restrictTroll;
-        CCharacterSelection::s_raceRestrictions[7] = ClientServices::Connection()->m_restrictTauren;
-        CCharacterSelection::s_raceRestrictions[8] = ClientServices::Connection()->m_restrictUndead;
-        CCharacterSelection::s_raceRestrictions[9] = ClientServices::Connection()->m_restrictBloodElf;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_HUMAN] = ClientServices::Connection()->m_restrictHuman;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_DWARF] = ClientServices::Connection()->m_restrictDwarf;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_GNOME] = ClientServices::Connection()->m_restrictGnome;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_NIGHT_ELF] = ClientServices::Connection()->m_restrictNightElf;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_DRAENEI] = ClientServices::Connection()->m_restrictDraenei;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_ORC] = ClientServices::Connection()->m_restrictOrc;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_TROLL] = ClientServices::Connection()->m_restrictTroll;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_TAUREN] = ClientServices::Connection()->m_restrictTauren;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_UNDEAD] = ClientServices::Connection()->m_restrictUndead;
+        CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_BLOOD_ELF] = ClientServices::Connection()->m_restrictBloodElf;
 
         CRealmList::m_preferredCategory = 0;
 
@@ -677,11 +680,11 @@ void CCharacterSelection::ClearCharacterList() {
     CCharacterSelection::s_characterList.SetCount(0);
 
     if (CCharacterSelection::m_modelFrame && CCharacterSelection::m_modelFrame->m_model) {
-        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(0);
+        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_SHIELD);
     }
 
     if (CCharacterSelection::m_modelFrame && CCharacterSelection::m_modelFrame->m_model) {
-        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(1);
+        CCharacterSelection::m_modelFrame->m_model->DetachAllChildrenById(MODEL_ATTACHMENT_ID::ATTACH_HANDR);
     }
 
     CCharacterSelection::s_selectionIndex = 0;

@@ -234,7 +234,7 @@ void CGTaxiMap::TakeTaxiNode(uint32_t index) {
 
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (player->m_mountDisplayId > 0 && !(player->m_clientFlags & 0x10000000)) {
+    if (player->m_mountDisplayId > 0 && !(player->m_clientFlags & UNIT_CLIENT_FLAGS::UNIT_CLIENT_FLAG_DISMOUNT_PENDING)) {
         CGGameUI::DisplayError(ERR_TAXIPLAYERALREADYMOUNTED);
         return;
     }
@@ -384,14 +384,14 @@ void CGTaxiMap::RecursePath(uint32_t index, uint32_t parent, int32_t cost) {
             int32_t mount0 = node->m_mountCreatureID[0];
             int32_t mount1 = node->m_mountCreatureID[1];
 
-            if (factionTemplate->m_factionGroup == 3) {
+            if (factionTemplate->m_factionGroup == (FACTION_GROUP_MASK_PLAYER | FACTION_GROUP_MASK_ALLIANCE)) {
                 bool hordeMount = mount0 == 2224 || mount0 == 3574 || mount0 == 19917 || mount0 == 34709 || mount1 == 2224 || mount1 == 3574 || mount1 == 19917 || mount1 == 34709;
                 bool allianceMount = mount0 == 3837 || mount0 == 541 || mount0 == 28360 || mount0 == 28361 || mount0 == 31315 || mount1 == 3837 || mount1 == 541 || mount1 == 28360 || mount1 == 28361 || mount1 == 31315;
 
                 if (hordeMount && !allianceMount) {
                     return;
                 }
-            } else if (factionTemplate->m_factionGroup == 5) {
+            } else if (factionTemplate->m_factionGroup == (FACTION_GROUP_MASK_PLAYER | FACTION_GROUP_MASK_HORDE)) {
                 bool allianceMount = mount0 == 3837 || mount0 == 541 || mount0 == 28360 || mount0 == 28361 || mount0 == 31315 || mount1 == 3837 || mount1 == 541 || mount1 == 28360 || mount1 == 28361 || mount1 == 31315;
                 bool hordeMount = mount0 == 2224 || mount0 == 3574 || mount0 == 19917 || mount0 == 34709 || mount1 == 2224 || mount1 == 3574 || mount1 == 19917 || mount1 == 34709;
 
@@ -459,11 +459,9 @@ void CGTaxiMap::GeneratePaths() {
     }
 
     TaxiNodeInfo& node = CGTaxiMap::m_nodes.m_data[start];
-    node.m_costs[0] = 0;
-    node.m_costs[1] = 0;
-    node.m_costs[2] = 0;
-    node.m_costs[3] = 0;
-    node.m_costs[4] = 0;
+    for (uint32_t i = 0; i < sizeof(node.m_costs) / sizeof(node.m_costs[0]); i++) {
+        node.m_costs[i] = 0;
+    }
     node.m_numHops = 1;
     node.m_path = new (__FILE__, __LINE__) uint32_t[1];
     node.m_path[0] = s_currentNode->m_id;
@@ -595,7 +593,7 @@ void CGTaxiMap::SetupMap(const WOWGUID& unit, int32_t currentNode, const uint64_
     }
 
     FrameScript_SignalEvent(SCRIPT_EVENT_TAXIMAP_OPENED, nullptr);
-    CGTutorial::TriggerTutorial(34);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_TRAVEL);
 
     if (CGTaxiMap::m_numNodes <= 1) {
         return;
@@ -607,11 +605,11 @@ void CGTaxiMap::SetupMap(const WOWGUID& unit, int32_t currentNode, const uint64_
         return;
     }
 
-    if (player->GetClientStandState()) {
+    if ((player->GetClientStandState() != UNIT_STANDING)) {
         player->ChangeStandState(UNIT_STANDING);
     }
 
-    if (player->m_mountDisplayId > 0 && !(player->m_clientFlags & 0x10000000)) {
+    if (player->m_mountDisplayId > 0 && !(player->m_clientFlags & UNIT_CLIENT_FLAGS::UNIT_CLIENT_FLAG_DISMOUNT_PENDING)) {
         player->Dismount();
     }
 

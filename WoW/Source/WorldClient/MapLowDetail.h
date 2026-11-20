@@ -9,12 +9,19 @@
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Tempest/CAaSphere.h"
 #include "WoW/Source/WorldClient/FVBBList.h"
+#include "WoW/Source/WorldClient/WorldConstants.h"
 
 class CMapObjDef;
 struct SMMapObjDef;
 
 class CMapAreaLow {
     public:
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // Never set in this client; when set, the shared full-grid index buffer is not used.
+        UNKNOWN_1 = 0x1,
+    };
+
     /* 0000 */ uint32_t m_objectIndex;
     /* 0004 */ CAaBox m_bbox;
     /* 001C */ CAaSphere m_sphere;
@@ -45,7 +52,7 @@ class CMapLowDetail {
     /* 000C */ SMMapObjDef* m_mapObjDefs;
     /* 0010 */ uint32_t m_mapObjDefCount;
     /* 0014 */ uint32_t* m_areaOffsets;
-    /* 0018 */ CMapAreaLow* m_areas [4096];
+    /* 0018 */ CMapAreaLow* m_areas [MAP_AREA_COUNT];
     /* 4018 */ TSGrowableArray<CMapObjDef*> m_mapObjDefList;
 
     CMapLowDetail();

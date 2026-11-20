@@ -8,6 +8,7 @@
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CMath.h"
+#include "Engine/Source/Tempest/CRange.h"
 #include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/Tempest/CMemBlock.h"
 #include "Engine/Source/Storm/H/stpl.h"
@@ -35,6 +36,11 @@ struct DNKeyframe {
 namespace DayNight {
 class CurrentLight {
     public:
+    // Interpolated color slot counts (inferred names).
+    static const uint32_t NUM_SKY_COLORS = 6;
+    static const uint32_t NUM_SUN_CLOUD_COLORS = 5;
+    static const uint32_t NUM_WATER_COLORS = 4;
+
     struct SkyboxBlend {
         /* 0000 */ uint32_t m_id;
         /* 0004 */ float m_weight;
@@ -43,9 +49,9 @@ class CurrentLight {
     /* 0000 */ CImVector m_ambient;
     /* 0004 */ CImVector m_diffuse;
     /* 0008 */ CImVector m_shadowOpacity;
-    /* 000C */ CImVector m_skyColors [6];
-    /* 0024 */ CImVector m_sunCloudColors [5];
-    /* 0038 */ CImVector m_waterColors [4];
+    /* 000C */ CImVector m_skyColors [NUM_SKY_COLORS];
+    /* 0024 */ CImVector m_sunCloudColors [NUM_SUN_CLOUD_COLORS];
+    /* 0038 */ CImVector m_waterColors [NUM_WATER_COLORS];
     /* 0048 */ float m_fogEnd;
     /* 004C */ float m_fogStartMul;
     /* 0050 */ float m_fogRate;
@@ -73,7 +79,7 @@ struct DNOverrideSky : public TSHashObject<DNOverrideSky, HASHKEY_STRI> {
     /* 0018 */ CM2Model* m_model;
     /* 001C */ uint32_t m_animLengthMs;
     /* 0020 */ uint32_t m_lastTimeOfDay;
-    /* 0024 */ uint32_t m_flags;
+    /* 0024 */ uint32_t m_flags; // LIGHT_SKYBOX_FLAGS
 
     DNOverrideSky();
 };
@@ -144,11 +150,9 @@ struct DNGlare {
     /* 005C */ uint32_t unused_005C[4];
     /* 006C */ uint32_t m_occlusionPixels;
     /* 0070 */ DNKeyframe m_alphaCurve [4];
-    /* 0090 */ float m_scaleMin;
-    /* 0094 */ float m_scaleMax;
+    /* 0090 */ CRange m_scaleRange;
     /* 0098 */ float m_minDot;
-    /* 009C */ float m_alphaMin;
-    /* 00A0 */ float m_alphaMax;
+    /* 009C */ CRange m_alphaRange;
     /* 00A4 */ float m_screenGlow;
     /* 00A8 */ DayNight::DNPlanet* m_planet;
 
@@ -285,18 +289,38 @@ namespace DayNight {
 }
 
 struct SMOFog {
+    // 0.5.3 symbol names; the two-entry layout and blend flag match 3.3.5.
+    enum EFogs : int32_t {
+        FOG = 0,
+        UWFOG = 1, // underwater fog
+        NUM_FOGS = 2,
+    };
+
+    enum EFlags : int32_t {
+        F_IEBLEND = 0x1,
+        // The next two are 3.3.5 additions, named after the LiquidType flags they answer.
+        F_ALLOW_SLIME_FOG = 0x10, // Required for LIQUID_TYPE_FLAG_WMO_FOG_CONTROL_SLIME liquids to apply fog.
+        F_ALLOW_UNDERWATER_FOG = 0x100, // Required for LIQUID_TYPE_FLAG_WMO_FOG_CONTROL liquids to use UWFOG.
+    };
+
     struct Fog {
         /* 0000 */ float m_end;
         /* 0004 */ float m_startScalar;
         /* 0008 */ CImVector m_color;
     };
 
+    class Fogs {
+        public:
+        /* 0000 */ Fog m_fog[NUM_FOGS];
+
+        void Blend(const Fogs& fogs, float t);
+    };
+
     /* 0000 */ uint32_t m_flags;
     /* 0004 */ C3Vector m_position;
     /* 0010 */ float m_smallerRadius;
     /* 0014 */ float m_largerRadius;
-    /* 0018 */ Fog m_fog;
-    /* 0024 */ Fog m_underwaterFog;
+    /* 0018 */ Fogs m_fogs;
 };
 
 namespace DayNight {
@@ -305,10 +329,15 @@ namespace DayNight {
 
 namespace DayNight {
 struct AreaLightOverride {
+    enum STATE : int32_t {
+        FADE_IN = 1,
+        FADE_OUT = 2,
+    };
+
     /* 0000 */ uint32_t m_id;
     /* 0004 */ LightRec* m_light;
     /* 0008 */ float m_fade;
-    /* 000C */ int32_t m_state;
+    /* 000C */ STATE m_state;
     /* 0010 */ uint32_t m_lastTime;
     /* 0014 */ uint32_t m_duration;
 };

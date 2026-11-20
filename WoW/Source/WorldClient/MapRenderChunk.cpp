@@ -1,4 +1,5 @@
 #include "MapRenderChunk.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "WoW/Source/WorldClient/WorldConstants.h"
 #include <cmath>
 #include <cstring>
@@ -31,10 +32,10 @@
 #endif
 
 // STATIC: 0x00AEEBF8
-static uint32_t s_maxVertexCount = 145;
+static uint32_t s_maxVertexCount = TERRAIN_CHUNK_VERTEX_COUNT;
 
 // STATIC: 0x00AEEC18
-static uint16_t s_chunkBatchIndexCount = 768;
+static uint16_t s_chunkBatchIndexCount = TERRAIN_INDEX_COUNT_PER_CHUNK;
 
 // STATIC: 0x00A3FFF4
 static const uint32_t s_nibbleMask[2] = { 0x0F, 0xF0 };
@@ -58,10 +59,10 @@ static const uint8_t s_shadowAlpha[2] = { 0xFF, 0x00 };
 static uint16_t s_shadowTexel[2] = { 0x0000, 0xFFFF };
 
 // STATIC: 0x00AF14A0
-static uint16_t s_streamVertexCount = 145;
+static uint16_t s_streamVertexCount = TERRAIN_CHUNK_VERTEX_COUNT;
 
 // STATIC: 0x00AF14C0
-static uint16_t s_streamIndexCount = 768;
+static uint16_t s_streamIndexCount = TERRAIN_INDEX_COUNT_PER_CHUNK;
 
 // STATIC: 0x00AF14F8
 static float s_texAnimRate[8] = { 64.0f, 48.0f, 32.0f, 16.0f, 8.0f, 4.0f, 2.0f, 1.0f };
@@ -253,7 +254,7 @@ void CMapRenderChunk::FreeLayers() {
         CMapRenderChunkLayer& layer = this->m_layers[i];
         layer.m_texture = nullptr;
         layer.m_textureId = -1;
-        layer.m_flags = 0;
+        layer.m_flags = SMLayer::LAYER_FLAGS::NONE;
 
         if (layer.m_layerTexture) {
             HandleClose(reinterpret_cast<HOBJECT>(layer.m_layerTexture));
@@ -283,7 +284,7 @@ void CMapRenderChunk::UpdateLoaded() {
         }
     }
 
-    this->m_unkFlags |= 0x8;
+    this->m_unkFlags |= BATCH_FLAGS::BATCH_LAYER_TEXTURES_LOADED;
 }
 
 // VERIFY: ef5458ef auto
@@ -291,7 +292,7 @@ void CMapRenderChunk::UpdateLoaded() {
 CTexture* CMapRenderChunk::AllocTexture(uint32_t width, uint32_t height, void* userArg, GxTexUserFunc userFunc, EGxTexFormat format, EGxTexFormat dataFormat) {
     EGxTexFormat texFormat;
 
-    if (CMap::header.m_flags & 0x4) {
+    if (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) {
         texFormat = static_cast<EGxTexFormat>((CWorld::terrainAlphaBitDepth != 8) + 2);
     } else {
         texFormat = format;
@@ -364,12 +365,12 @@ void CMapRenderChunk::CreateLayer(CMapArea* area, SMLayer* layer, int32_t checkD
     renderLayer->m_layerTexture = nullptr;
     renderLayer->m_owner = this;
 
-    if (renderLayer->m_flags & 0x80) {
-        this->m_renderFlags |= 0x1;
+    if (renderLayer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
+        this->m_renderFlags |= RENDER_FLAGS::FLAG_UNLIT_LAYERS;
     }
 
-    if (g_theGxDevicePtr->Caps().m_texTarget[1] && g_theGxDevicePtr->Caps().m_shaderTargets[0] && g_theGxDevicePtr->Caps().m_shaderTargets[4] && (renderLayer->m_flags & 0x400)) {
-        this->m_renderFlags |= 0x4;
+    if (g_theGxDevicePtr->Caps().m_texTarget[1] && g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Vertex] && g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] && (renderLayer->m_flags & SMLayer::LAYER_FLAGS::USE_CUBE_MAP_REFLECTION)) {
+        this->m_renderFlags |= RENDER_FLAGS::FLAG_SPECULAR;
     }
 
     this->m_layersCount++;
@@ -378,7 +379,7 @@ void CMapRenderChunk::CreateLayer(CMapArea* area, SMLayer* layer, int32_t checkD
 // VERIFY: 6c5dc3eb manual
 // OFFSET: 0x007B9340
 CMapChunkBuf* CMapRenderChunk::AllocBuf(int32_t flags, CMapRenderChunk* renderChunk) {
-    if (flags & 0x3) {
+    if (flags & BATCH_FLAGS::BATCH_PAIR_MASK) {
         CMapChunkBufBlock* block = CMapRenderChunk::s_chunkBufBlockFreeList.Head();
 
         if (!block) {
@@ -398,8 +399,8 @@ CMapChunkBuf* CMapRenderChunk::AllocBuf(int32_t flags, CMapRenderChunk* renderCh
         }
 
         uint32_t stride = CMapRenderChunk::s_gxBufVertexFormat == GxVBF_PNC ? sizeof(CGxVertexPNC) : sizeof(CGxVertexPN);
-        buf->m_vertexBuf = g_theGxDevicePtr->BufCreate(CMapRenderChunk::s_gxVertexPool, stride, 290, 145 * stride * block->m_vertexCount);
-        buf->m_indexBuf = g_theGxDevicePtr->BufCreate(CMapRenderChunk::s_gxIndexPool, 2, 1536, 1536 * block->m_vertexCount);
+        buf->m_vertexBuf = g_theGxDevicePtr->BufCreate(CMapRenderChunk::s_gxVertexPool, stride, TERRAIN_RENDER_BATCH_VERTEX_COUNT, TERRAIN_CHUNK_VERTEX_COUNT * stride * block->m_vertexCount);
+        buf->m_indexBuf = g_theGxDevicePtr->BufCreate(CMapRenderChunk::s_gxIndexPool, 2, TERRAIN_RENDER_BATCH_INDEX_COUNT, TERRAIN_RENDER_BATCH_INDEX_COUNT * block->m_vertexCount);
         return buf;
     }
 
@@ -434,8 +435,8 @@ CMapChunkBuf* CMapRenderChunk::AllocBuf(int32_t flags, CMapRenderChunk* renderCh
 
     for (int32_t i = 0; i < 2; i++) {
         buf = &block->m_bufs[i];
-        buf->m_vertexBuf = g_theGxDevicePtr->BufCreate(CMapRenderChunk::s_gxVertexPool, stride, 145, 145 * stride * (block->m_vertexCount + i));
-        buf->m_indexBuf = g_theGxDevicePtr->BufCreate(CMapRenderChunk::s_gxIndexPool, 2, 768, 1536 * (block->m_vertexCount + i));
+        buf->m_vertexBuf = g_theGxDevicePtr->BufCreate(CMapRenderChunk::s_gxVertexPool, stride, TERRAIN_CHUNK_VERTEX_COUNT, TERRAIN_CHUNK_VERTEX_COUNT * stride * (block->m_vertexCount + i));
+        buf->m_indexBuf = g_theGxDevicePtr->BufCreate(CMapRenderChunk::s_gxIndexPool, 2, TERRAIN_INDEX_COUNT_PER_CHUNK, TERRAIN_RENDER_BATCH_INDEX_COUNT * (block->m_vertexCount + i));
         buf->m_unkFlags = 0;
         buf->m_renderChunk = nullptr;
 
@@ -494,11 +495,11 @@ CMapRenderChunk::CMapRenderChunk() {
     this->m_batch.m_minIndex = 0;
     this->m_batch.m_maxIndex = 0;
     this->m_lastUpdateTime = 0.0f;
-    this->m_unkFlags = 0;
+    this->m_unkFlags = BATCH_FLAGS::BATCH_NONE;
     this->m_mapChunks[0] = nullptr;
     this->m_mapChunks[1] = nullptr;
     this->m_layersCount = 0;
-    this->m_renderFlags = 0;
+    this->m_renderFlags = RENDER_FLAGS::FLAG_NONE;
     this->m_terrainBlendTexture = nullptr;
     this->m_shadowTexture = nullptr;
     this->m_chunkBuf = nullptr;
@@ -509,7 +510,7 @@ CMapRenderChunk::CMapRenderChunk() {
 void CMapRenderChunk::CreateLayers() {
     int32_t chunkCount = 1;
 
-    if (CMap::header.m_flags & 0x4) {
+    if (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) {
         chunkCount = 2;
     }
 
@@ -535,7 +536,7 @@ void CMapRenderChunk::CreateLayers() {
         }
     }
 
-    this->m_renderFlags |= 0x20;
+    this->m_renderFlags |= RENDER_FLAGS::FLAG_LAYER_TEXTURES_DIRTY;
 }
 
 // VERIFY: eb3e1413 auto
@@ -547,7 +548,7 @@ void CMapRenderChunk::FreeBuf() {
         return;
     }
 
-    if (chunkBuf->m_unkFlags & 0x3) {
+    if (chunkBuf->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_MASK) {
         CMapRenderChunk::s_chunkBufBlockFreeList.LinkToHead(chunkBuf->m_block);
     } else {
         CMapRenderChunk::s_renderChunkBufFreeList.LinkToHead(this->m_chunkBuf);
@@ -594,8 +595,8 @@ void CMapRenderChunk::UpdatePools() {
     int32_t radius = 1 - static_cast<int32_t>(World::s_farClip * -OO_COORD_TO_CHUNK);
     uint32_t count = (2 * radius * radius + 1) & ~1u;
 
-    CMapRenderChunk::s_pnEstimateVertex = 145 * count;
-    CMapRenderChunk::s_pnEstimateIndex = 768 * count;
+    CMapRenderChunk::s_pnEstimateVertex = TERRAIN_CHUNK_VERTEX_COUNT * count;
+    CMapRenderChunk::s_pnEstimateIndex = TERRAIN_INDEX_COUNT_PER_CHUNK * count;
 
     uint32_t stride = CMapRenderChunk::s_gxBufVertexFormat == GxVBF_PNC ? sizeof(CGxVertexPNC) : sizeof(CGxVertexPN);
     CMapRenderChunk::s_gxVertexPool = g_theGxDevicePtr->PoolCreate(GxPoolTarget_Vertex, GxPoolUsage_Dynamic, CMapRenderChunk::s_pnEstimateVertex * stride, GxPoolHintBit_Unk3, "CMapRenderChunk_vtx");
@@ -632,13 +633,13 @@ void CMapRenderChunk::RenderPrepBufs(CGxBuf* vertexBuf, CGxBuf* indexBuf) {
         if (this->m_mapChunks[1]) {
             offset.z = this->m_mapChunks[1]->m_topLeftCoords.z - this->m_mapChunks[0]->m_topLeftCoords.z;
 
-            if (this->m_unkFlags & 0x2) {
+            if (this->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_HORIZONTAL) {
                 offset.y = -33.333332f;
             } else {
                 offset.x = -33.333332f;
             }
 
-            this->m_mapChunks[1]->CreateVertices(vertices, 145, offset);
+            this->m_mapChunks[1]->CreateVertices(vertices, TERRAIN_CHUNK_VERTEX_COUNT, offset);
         }
 
         g_theGxDevicePtr->BufUnlock(vertexBuf, 0);
@@ -674,7 +675,7 @@ void CMapRenderChunk::UseStreamingBufs() {
     uint32_t vertexCount = s_streamVertexCount;
     uint32_t indexCount = s_streamIndexCount;
 
-    if (this->m_unkFlags & 0x3) {
+    if (this->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_MASK) {
         vertexCount *= 2;
         indexCount *= 2;
     }
@@ -725,7 +726,7 @@ void CMapRenderChunk::RenderSolid() {
     C44Matrix tex1;
     GxXformSet(GxXform_Tex1, tex1);
 
-    GxRsSet(GxRs_BlendingMode, 0);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
     CGxTex* gxTex = TextureGetGxTex(CWorldScene::s_defaultTexture, 1, nullptr);
@@ -753,7 +754,7 @@ void CMapRenderChunk::RenderSolidPixelShader() {
 // VERIFY: 90367efa manual
 // OFFSET: 0x007D3240
 void CMapRenderChunk::RenderSolidVertexPixelShader() {
-    GxRsSet(GxRs_BlendingMode, 0);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
     CGxTex* gxTex = TextureGetGxTex(CWorldScene::s_defaultTexture, 1, nullptr);
@@ -772,7 +773,7 @@ void CMapRenderChunk::RenderSolidVertexPixelShader() {
 // OFFSET: 0x007D3F70
 void CMapRenderChunk::RenderPrep() {
     if (!this->m_chunkBuf) {
-        this->m_chunkBuf = CMapRenderChunk::AllocBuf(this->m_unkFlags & 0x3, this);
+        this->m_chunkBuf = CMapRenderChunk::AllocBuf(this->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_MASK, this);
     }
 
     if (this->m_chunkBuf) {
@@ -784,7 +785,7 @@ void CMapRenderChunk::RenderPrep() {
         this->CreateLayers();
     }
 
-    if (!(this->m_unkFlags & 0x8)) {
+    if (!(this->m_unkFlags & BATCH_FLAGS::BATCH_LAYER_TEXTURES_LOADED)) {
         this->UpdateLoaded();
     }
 }
@@ -798,15 +799,15 @@ void CMapRenderChunk::RenderSinglePass() {
     GxRsSet(GxRs_VertexShader, 0);
     GxRsSet(GxRs_PixelShader, 0);
 
-    uint32_t vertexCount = this->m_mapChunks[1] ? 290 : 145;
+    uint32_t vertexCount = this->m_mapChunks[1] ? TERRAIN_RENDER_BATCH_VERTEX_COUNT : TERRAIN_CHUNK_VERTEX_COUNT;
     CGxBuf* vertexBuf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, sizeof(CGxVertexPC), 2 * vertexCount);
     CGxVertexPC* vertices = reinterpret_cast<CGxVertexPC*>(g_theGxDevicePtr->BufLock(vertexBuf));
     CGxBuf* indexBuf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, sizeof(uint16_t), 2 * vertexCount);
     uint16_t* indices = reinterpret_cast<uint16_t*>(g_theGxDevicePtr->BufLock(indexBuf));
-    CGxVertexPN* source = static_cast<CGxVertexPN*>(alloca(sizeof(CGxVertexPN) * 145));
+    CGxVertexPN* source = static_cast<CGxVertexPN*>(alloca(sizeof(CGxVertexPN) * TERRAIN_CHUNK_VERTEX_COUNT));
     uint16_t index = 0;
 
-    for (uint32_t i = 0; i < 2; i++) {
+    for (uint32_t i = 0; i < MAP_CHUNKS_PER_RENDER_BATCH; i++) {
         CMapChunk* chunk = this->m_mapChunks[i];
 
         if (!chunk) {
@@ -815,13 +816,13 @@ void CMapRenderChunk::RenderSinglePass() {
 
         chunk->CreateVerticesWorld(source, C3Vector(0.0f, 0.0f, 0.0f));
 
-        for (uint32_t j = 0; j < 145; j++) {
+        for (uint32_t j = 0; j < TERRAIN_CHUNK_VERTEX_COUNT; j++) {
             vertices[0].p = source[j].m_position;
-            vertices[0].c = CImVector(0x00, 0xFF, 0xFF, 0xFF);
+            vertices[0].c = CImVector(COLOR_YELLOW_BGRA);
             vertices[1].p.x = source[j].m_normal.x * 0.75f + source[j].m_position.x;
             vertices[1].p.y = source[j].m_normal.y * 0.75f + source[j].m_position.y;
             vertices[1].p.z = source[j].m_normal.z * 0.75f + source[j].m_position.z;
-            vertices[1].c = CImVector(0x00, 0xFF, 0xFF, 0xFF);
+            vertices[1].c = CImVector(COLOR_YELLOW_BGRA);
             vertices += 2;
             indices[0] = index;
             indices[1] = index + 1;
@@ -849,7 +850,7 @@ void CMapRenderChunk::RenderSinglePass() {
 
 // INLINED
 CMapRenderChunkLayer::CMapRenderChunkLayer() {
-    this->m_flags = 0;
+    this->m_flags = SMLayer::LAYER_FLAGS::NONE;
     this->m_layerIndex = 0;
     this->m_texture = nullptr;
     this->m_textureId = -1;
@@ -901,7 +902,7 @@ void CMapRenderChunk::SetupAlphaRows(uint8_t** shadowCursor, uint8_t** shadowRow
     for (int32_t i = 0; i < 4; i++) {
         if (!layers[i].m_alphaData) {
             alphaRows[i] = s_defaultAlphaRow;
-        } else if (layers[i].m_flags & 0x200) {
+        } else if (layers[i].m_flags & SMLayer::LAYER_FLAGS::ALPHA_MAP_COMPRESSED) {
             alphaRows[i] = s_alphaRowBuf[i];
             layers[i].m_alphaData = CMapRenderChunk::DecodeAlphaRLE(layers[i].m_alphaData, s_alphaRowBuf[i], size);
         } else {
@@ -1030,7 +1031,7 @@ void CMapRenderChunk::CollectLayerAlphaPtrs(CMapChunk* chunk, SLayerAlpha* layer
         if (this->m_layersCount > i) {
             SMLayer* layer = &chunk->m_layers[i];
 
-            if (layer->m_flags & 0x100) {
+            if (layer->m_flags & SMLayer::LAYER_FLAGS::USE_ALPHA_MAP) {
                 layers[i].m_alphaData = &chunk->m_additionalShadowmap[layer->m_offsetInMCAL];
             }
 
@@ -1322,13 +1323,13 @@ void __stdcall CMapRenderChunk::UnpackAlphaShadowBitsUnfixed4444Mip1(uint16_t* d
 void CMapRenderChunk::UnpackAlphaShadowBits(void* dstBase, int32_t dstOffset, int32_t dstPitch, uint32_t size, SLayerAlpha* cursors, int32_t alphaSlot, uint8_t* shadowMap, int32_t genFormat, int32_t doNotFixAlphaMap) {
     if (doNotFixAlphaMap) {
         if (genFormat == 3) {
-            if (this->m_renderFlags & 0x8) {
+            if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
                 CMapRenderChunk::UnpackAlphaShadowBitsFixed4444Mip1(static_cast<uint16_t*>(dstBase), dstOffset, dstPitch, size, cursors, shadowMap);
             } else {
                 CMapRenderChunk::UnpackAlphaShadowBitsFixed4444Mip0(static_cast<uint16_t*>(dstBase), dstOffset, dstPitch, size, cursors, shadowMap);
             }
         } else {
-            if (this->m_renderFlags & 0x8) {
+            if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
                 CMapRenderChunk::UnpackAlphaShadowBitsFixed8888Mip1(static_cast<CImVector*>(dstBase), dstOffset, dstPitch, size, cursors, alphaSlot, shadowMap);
             } else {
                 CMapRenderChunk::UnpackAlphaShadowBitsFixed8888Mip0(static_cast<CImVector*>(dstBase), dstOffset, dstPitch, size, cursors, alphaSlot, shadowMap);
@@ -1342,7 +1343,7 @@ void CMapRenderChunk::UnpackAlphaShadowBits(void* dstBase, int32_t dstOffset, in
         SErrDisplayAppFatal("CMapChunk::UnpackAlphaShadowBits(): Bad genformat.");
     }
 
-    if (this->m_renderFlags & 0x8) {
+    if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
         CMapRenderChunk::UnpackAlphaShadowBitsUnfixed4444Mip1(static_cast<uint16_t*>(dstBase), dstOffset, dstPitch, size, cursors, shadowMap);
     } else {
         CMapRenderChunk::UnpackAlphaShadowBitsUnfixed4444Mip0(static_cast<uint16_t*>(dstBase), dstOffset, dstPitch, size, cursors, shadowMap);
@@ -1364,7 +1365,7 @@ void __stdcall CMapRenderChunk::RecreateAlphaBitsFixed8888Mip0(CImVector* dst, u
 
         uint8_t* alphaRow;
 
-        if (layer->m_flags & 0x200) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ALPHA_MAP_COMPRESSED) {
             alphaRow = s_alphaRowBuf[0];
             layer->m_alphaData = CMapRenderChunk::DecodeAlphaRLE(layer->m_alphaData, s_alphaRowBuf[0], size);
         } else {
@@ -1405,7 +1406,7 @@ void __stdcall CMapRenderChunk::RecreateAlphaBitsFixed8888Mip1(CImVector* dst, u
 
         uint8_t* alphaRow;
 
-        if (layer->m_flags & 0x200) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ALPHA_MAP_COMPRESSED) {
             alphaRow = s_alphaRowBuf[0];
             layer->m_alphaData = CMapRenderChunk::DecodeAlphaRLE(layer->m_alphaData, s_alphaRowBuf[0], size);
         } else {
@@ -1452,7 +1453,7 @@ void __stdcall CMapRenderChunk::RecreateAlphaBitsFixed8888Mip1(CImVector* dst, u
                 shadowMap += size >> 3;
             }
 
-            if (layer->m_flags & 0x200) {
+            if (layer->m_flags & SMLayer::LAYER_FLAGS::ALPHA_MAP_COMPRESSED) {
                 layer->m_alphaData = CMapRenderChunk::DecodeAlphaRLE(layer->m_alphaData, s_alphaRowBuf[0], size);
             } else {
                 layer->m_alphaData += size;
@@ -1464,7 +1465,7 @@ void __stdcall CMapRenderChunk::RecreateAlphaBitsFixed8888Mip1(CImVector* dst, u
                 shadowMap += size >> 3;
             }
 
-            if (layer->m_flags & 0x200) {
+            if (layer->m_flags & SMLayer::LAYER_FLAGS::ALPHA_MAP_COMPRESSED) {
                 layer->m_alphaData = CMapRenderChunk::DecodeAlphaRLE(layer->m_alphaData, s_alphaRowBuf[0], size);
             } else {
                 layer->m_alphaData += size;
@@ -1562,7 +1563,7 @@ void CMapRenderChunk::UnpackAlphaBitsFixed8888Mip1(CImVector* dst, uint32_t size
 void CMapRenderChunk::UnpackAlphaBits(void* dst, uint32_t size, SLayerAlpha* layerInfo, uint8_t* shadowMap, int32_t layerMode, int32_t bigAlpha) {
     if (bigAlpha) {
         if (layerMode == 3) {
-            if (this->m_renderFlags & 0x8) {
+            if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
                 CMapRenderChunk::UnpackAlphaBitsFixed4444Mip1(static_cast<uint16_t*>(dst), size, layerInfo);
             } else {
                 CMapRenderChunk::UnpackAlphaBitsFixed4444Mip0(static_cast<uint16_t*>(dst), size, layerInfo);
@@ -1573,13 +1574,13 @@ void CMapRenderChunk::UnpackAlphaBits(void* dst, uint32_t size, SLayerAlpha* lay
 
         if (layerMode == 2) {
             if (layerInfo->m_alphaData) {
-                if (this->m_renderFlags & 0x8) {
+                if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
                     CMapRenderChunk::RecreateAlphaBitsFixed8888Mip1(static_cast<CImVector*>(dst), size, layerInfo, shadowMap);
                 } else {
                     CMapRenderChunk::RecreateAlphaBitsFixed8888Mip0(static_cast<CImVector*>(dst), size, layerInfo, shadowMap);
                 }
             } else {
-                if (this->m_renderFlags & 0x8) {
+                if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
                     this->UnpackAlphaBitsFixed8888Mip1(static_cast<CImVector*>(dst), size, shadowMap);
                 } else {
                     this->UnpackAlphaBitsFixed8888Mip0(static_cast<CImVector*>(dst), size, shadowMap);
@@ -1589,7 +1590,7 @@ void CMapRenderChunk::UnpackAlphaBits(void* dst, uint32_t size, SLayerAlpha* lay
             return;
         }
     } else if (layerMode == 3) {
-        if (this->m_renderFlags & 0x8) {
+        if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
             CMapRenderChunk::UnpackAlphaBitsUnfixed4444Mip1(static_cast<uint16_t*>(dst), size, layerInfo);
         } else {
             CMapRenderChunk::UnpackAlphaBitsUnfixed4444Mip0(static_cast<uint16_t*>(dst), size, layerInfo);
@@ -1606,7 +1607,7 @@ void CMapRenderChunk::UnpackAlphaBits(void* dst, uint32_t size, SLayerAlpha* lay
 void CMapRenderChunk::CreateChunkLayerTex(CMapRenderChunkLayer* layer) {
     int32_t genFormat = 3;
 
-    if (CMap::header.m_flags & 0x4) {
+    if (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) {
         genFormat = 2;
     }
 
@@ -1615,14 +1616,14 @@ void CMapRenderChunk::CreateChunkLayerTex(CMapRenderChunkLayer* layer) {
     uint32_t layerFlags = chunkLayer->m_flags;
     uint8_t* alphaData = nullptr;
 
-    if (layerFlags & 0x100) {
+    if (layerFlags & SMLayer::LAYER_FLAGS::USE_ALPHA_MAP) {
         alphaData = &chunk->m_additionalShadowmap[chunkLayer->m_offsetInMCAL];
     }
 
     uint32_t chunkFlags = chunk->m_header->m_flags;
     uint8_t* shadowMap = nullptr;
 
-    if ((chunkFlags & 0x1) && (CWorld::enables & Enable_Shadow)) {
+    if ((chunkFlags & SMChunk::FLAGS::HAS_SHADOW_MAP) && (CWorld::enables & Enables::Enable_Shadow)) {
         shadowMap = chunk->m_shadowMap;
     }
 
@@ -1631,7 +1632,7 @@ void CMapRenderChunk::CreateChunkLayerTex(CMapRenderChunkLayer* layer) {
     layerAlpha.m_alphaData = alphaData;
 
     CMapArea* area = static_cast<CMapArea*>(chunk->m_parentLinkList.Head()->m_ref);
-    this->UnpackAlphaBits(CMapRenderChunk::s_defaultTex, 64 >> area->m_header->m_mampValue, &layerAlpha, shadowMap, genFormat, chunkFlags & 0x8000);
+    this->UnpackAlphaBits(CMapRenderChunk::s_defaultTex, 64 >> area->m_header->m_mampValue, &layerAlpha, shadowMap, genFormat, chunkFlags & SMChunk::FLAGS::DO_NOT_FIX_ALPHA_MAP);
 }
 
 // VERIFY: ffeb78ca manual
@@ -1640,14 +1641,14 @@ void CMapRenderChunk::CreateShadowTex() {
     CMapChunk* chunk = this->m_mapChunks[0];
     uint8_t* shadowMap = nullptr;
 
-    if (chunk->m_header->m_flags & 0x1) {
+    if (chunk->m_header->m_flags & SMChunk::FLAGS::HAS_SHADOW_MAP) {
         shadowMap = chunk->m_shadowMap;
     }
 
     CMapArea* area = static_cast<CMapArea*>(chunk->m_parentLinkList.Head()->m_ref);
     uint32_t size = 64 >> area->m_header->m_mampValue;
 
-    if (this->m_renderFlags & 0x8) {
+    if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
         CMapRenderChunk::ExpandShadowBitsToTexelsMip(reinterpret_cast<uint16_t*>(CMapRenderChunk::s_defaultTex), size, shadowMap);
     } else {
         CMapRenderChunk::ExpandShadowBitsToTexels(reinterpret_cast<uint16_t*>(CMapRenderChunk::s_defaultTex), size, shadowMap);
@@ -1659,7 +1660,7 @@ void CMapRenderChunk::CreateShadowTex() {
 void CMapRenderChunk::CreateShaderTexture() {
     int32_t genFormat = 3;
 
-    if (CMap::header.m_flags & 0x4) {
+    if (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) {
         genFormat = 2;
     }
 
@@ -1675,7 +1676,7 @@ void CMapRenderChunk::CreateShaderTexture() {
     for (uint32_t i = 0; i < layerCount; i++) {
         uint32_t layerFlags = chunk->m_layers[i].m_flags;
 
-        if (layerFlags & 0x100) {
+        if (layerFlags & SMLayer::LAYER_FLAGS::USE_ALPHA_MAP) {
             layers[i].m_alphaData = &chunk->m_additionalShadowmap[chunk->m_layers[i].m_offsetInMCAL];
         }
 
@@ -1684,7 +1685,7 @@ void CMapRenderChunk::CreateShaderTexture() {
 
     uint32_t chunkFlags = chunk->m_header->m_flags;
 
-    if ((chunkFlags & 0x1) && (CWorld::enables & Enable_Shadow)) {
+    if ((chunkFlags & SMChunk::FLAGS::HAS_SHADOW_MAP) && (CWorld::enables & Enables::Enable_Shadow)) {
         shadowMap = chunk->m_shadowMap;
     }
 
@@ -1692,15 +1693,15 @@ void CMapRenderChunk::CreateShaderTexture() {
     int32_t size = 64 >> area->m_header->m_mampValue;
     int32_t pitch = size;
 
-    if (this->m_unkFlags & 0x2) {
+    if (this->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_HORIZONTAL) {
         pitch = size * 2;
     }
 
-    if (this->m_renderFlags & 0x8) {
+    if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
         pitch >>= 1;
     }
 
-    this->UnpackAlphaShadowBits(CMapRenderChunk::s_defaultTex, 0, pitch, size, layers, 0, shadowMap, genFormat, chunkFlags & 0x8000);
+    this->UnpackAlphaShadowBits(CMapRenderChunk::s_defaultTex, 0, pitch, size, layers, 0, shadowMap, genFormat, chunkFlags & SMChunk::FLAGS::DO_NOT_FIX_ALPHA_MAP);
 
     if (!this->m_mapChunks[1]) {
         return;
@@ -1724,7 +1725,7 @@ void CMapRenderChunk::CreateShaderTexture() {
 
             uint32_t layerFlags = chunkLayer->m_flags;
 
-            if (layerFlags & 0x100) {
+            if (layerFlags & SMLayer::LAYER_FLAGS::USE_ALPHA_MAP) {
                 layers[i].m_alphaData = &this->m_mapChunks[1]->m_additionalShadowmap[chunkLayer->m_offsetInMCAL];
             }
 
@@ -1741,27 +1742,27 @@ void CMapRenderChunk::CreateShaderTexture() {
     uint32_t chunk2Flags = header->m_flags;
     uint8_t* shadowMap2 = nullptr;
 
-    if ((chunk2Flags & 0x1) && (CWorld::enables & Enable_Shadow)) {
+    if ((chunk2Flags & SMChunk::FLAGS::HAS_SHADOW_MAP) && (CWorld::enables & Enables::Enable_Shadow)) {
         shadowMap2 = this->m_mapChunks[1]->m_shadowMap;
     }
 
     int32_t offset = 0;
 
-    if (this->m_unkFlags & 0x1) {
+    if (this->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_VERTICAL) {
         offset = size * size;
 
-        if (this->m_renderFlags & 0x8) {
+        if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
             offset >>= 2;
         }
-    } else if (this->m_unkFlags & 0x2) {
+    } else if (this->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_HORIZONTAL) {
         offset = size;
 
-        if (this->m_renderFlags & 0x8) {
+        if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
             offset = size >> 1;
         }
     }
 
-    this->UnpackAlphaShadowBits(CMapRenderChunk::s_defaultTex, offset, pitch, size, layers, alphaSlot, shadowMap2, genFormat, chunk2Flags & 0x8000);
+    this->UnpackAlphaShadowBits(CMapRenderChunk::s_defaultTex, offset, pitch, size, layers, alphaSlot, shadowMap2, genFormat, chunk2Flags & SMChunk::FLAGS::DO_NOT_FIX_ALPHA_MAP);
 }
 
 // VERIFY: ee6e5438 manual
@@ -1776,7 +1777,7 @@ void CMapRenderChunk::UpdateLayerGxTexture(EGxTexCommand cmd, uint32_t w, uint32
 
     uint32_t stride = 4 * w;
 
-    if (!(CMap::header.m_flags & 0x4)) {
+    if (!(CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA)) {
         stride = 2 * w;
     }
 
@@ -1808,7 +1809,7 @@ void CMapRenderChunk::UpdateShaderGxTexture(EGxTexCommand cmd, uint32_t w, uint3
 
     uint32_t stride = 4 * w;
 
-    if (!(CMap::header.m_flags & 0x4)) {
+    if (!(CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA)) {
         stride = 2 * w;
     }
 
@@ -1824,10 +1825,10 @@ void CMapRenderChunk::AllocLayerTexture(CMapRenderChunkLayer* layer) {
 
     layer->m_layerTexture = nullptr;
 
-    uint32_t bigAlpha = (CMap::header.m_flags >> 2) & 1;
+    uint32_t bigAlpha = (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) != 0;
     int32_t baseLayer = bigAlpha && layer->m_layerIndex == 0;
 
-    if (!(layer->m_flags & 0x100) && !baseLayer) {
+    if (!(layer->m_flags & SMLayer::LAYER_FLAGS::USE_ALPHA_MAP) && !baseLayer) {
         return;
     }
 
@@ -1835,7 +1836,7 @@ void CMapRenderChunk::AllocLayerTexture(CMapRenderChunkLayer* layer) {
     int32_t width = 64 >> static_cast<CMapArea*>(chunk->m_parentLinkList.Head()->m_ref)->m_header->m_mampValue;
     int32_t height = 64 >> static_cast<CMapArea*>(chunk->m_parentLinkList.Head()->m_ref)->m_header->m_mampValue;
 
-    if (this->m_renderFlags & 0x8) {
+    if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
         width /= 2;
         height /= 2;
     }
@@ -1861,20 +1862,20 @@ void CMapRenderChunk::AllocShadowTexture() {
 
     this->m_shadowTexture = nullptr;
 
-    if (!(CWorld::enables & Enable_Shadow)) {
+    if (!(CWorld::enables & Enables::Enable_Shadow)) {
         return;
     }
 
     CMapChunk* chunk = this->m_mapChunks[0];
 
-    if (!(chunk->m_header->m_flags & 0x1)) {
+    if (!(chunk->m_header->m_flags & SMChunk::FLAGS::HAS_SHADOW_MAP)) {
         return;
     }
 
     int32_t width = 64 >> static_cast<CMapArea*>(chunk->m_parentLinkList.Head()->m_ref)->m_header->m_mampValue;
     int32_t height = width;
 
-    if (this->m_renderFlags & 0x8) {
+    if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
         width /= 2;
         height = width;
     }
@@ -1896,20 +1897,20 @@ void CMapRenderChunk::AllocShaderTexture() {
     int32_t width = 64 >> static_cast<CMapArea*>(this->m_mapChunks[0]->m_parentLinkList.Head()->m_ref)->m_header->m_mampValue;
     int32_t height = width;
 
-    if (this->m_renderFlags & 0x8) {
+    if (this->m_renderFlags & RENDER_FLAGS::FLAG_BLEND_MIP1) {
         width /= 2;
         height = width;
     }
 
-    if (this->m_unkFlags & 0x1) {
+    if (this->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_VERTICAL) {
         height *= 2;
-    } else if (this->m_unkFlags & 0x2) {
+    } else if (this->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_HORIZONTAL) {
         width *= 2;
     }
 
     CTexture* texture;
 
-    if (CMap::header.m_flags & 0x4) {
+    if (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) {
         texture = CMapRenderChunk::AllocTexture(width, height, this, CMapRenderChunk::UpdateShaderGxTexture, GxTex_Argb8888, GxTex_Argb8888);
     } else {
         texture = CMapRenderChunk::AllocTexture(width, height, this, CMapRenderChunk::UpdateShaderGxTexture, GxTex_Argb4444, GxTex_Argb4444);
@@ -1924,14 +1925,14 @@ void CMapRenderChunk::AllocShaderTexture() {
 void CMapRenderChunk::AllocLayerTextures() {
     if (this->m_layersCount) {
         int16_t flags = this->m_renderFlags;
-        int32_t wantMip = (flags & 0x10) != 0;
-        int32_t haveMip = (flags & 0x8) != 0;
+        int32_t wantMip = (flags & RENDER_FLAGS::FLAG_REQUEST_BLEND_MIP1) != 0;
+        int32_t haveMip = (flags & RENDER_FLAGS::FLAG_BLEND_MIP1) != 0;
 
-        if ((flags & 0x20) || wantMip != haveMip) {
-            this->m_renderFlags = flags & ~0x8;
+        if ((flags & RENDER_FLAGS::FLAG_LAYER_TEXTURES_DIRTY) || wantMip != haveMip) {
+            this->m_renderFlags = flags & ~RENDER_FLAGS::FLAG_BLEND_MIP1;
 
-            if (this->m_renderFlags & 0x10) {
-                this->m_renderFlags |= 0x8;
+            if (this->m_renderFlags & RENDER_FLAGS::FLAG_REQUEST_BLEND_MIP1) {
+                this->m_renderFlags |= RENDER_FLAGS::FLAG_BLEND_MIP1;
             }
 
             if (CMap::gTerrainPixelShadersValid || CMap::enableSpecularTerrain) {
@@ -1941,14 +1942,14 @@ void CMapRenderChunk::AllocLayerTextures() {
                     this->AllocLayerTexture(&this->m_layers[i]);
                 }
 
-                if (!(CMap::header.m_flags & 0x4)) {
+                if (!(CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA)) {
                     this->AllocShadowTexture();
                 }
             }
         }
     }
 
-    this->m_renderFlags &= ~0x30;
+    this->m_renderFlags &= ~RENDER_FLAGS::FLAG_TEXTURE_UPDATE_REQUESTS;
 }
 
 // VERIFY: 7488cd14 manual
@@ -2094,9 +2095,9 @@ void CMapRenderChunk::SetVertexShader(CMapRenderChunk* renderChunk, int32_t laye
     alphaScale.z = 0.0f;
     alphaScale.w = 0.0f;
 
-    if (renderChunk->m_unkFlags & 0x1) {
+    if (renderChunk->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_VERTICAL) {
         alphaScale.x = CMapChunk::s_geoToTex * -0.0625f;
-    } else if (renderChunk->m_unkFlags & 0x2) {
+    } else if (renderChunk->m_unkFlags & BATCH_FLAGS::BATCH_PAIR_HORIZONTAL) {
         alphaScale.y = CMapChunk::s_geoToTex * -0.0625f;
     }
 
@@ -2156,7 +2157,7 @@ void CMapRenderChunk::RenderMultiPassAdditive(CMapRenderChunk* renderChunk) {
     GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
-    int32_t specular = (renderChunk->m_renderFlags & 0x4) != 0;
+    int32_t specular = (renderChunk->m_renderFlags & RENDER_FLAGS::FLAG_SPECULAR) != 0;
 
     for (int32_t i = 0; i < renderChunk->m_layersCount; i++) {
         CMapRenderChunkLayer* layer = &renderChunk->m_layers[i];
@@ -2169,13 +2170,13 @@ void CMapRenderChunk::RenderMultiPassAdditive(CMapRenderChunk* renderChunk) {
             GxRsSet(GxRs_TextureShader0, 0);
         }
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxRsSet(GxRs_Lighting, 0);
         }
 
-        if (layer->m_flags & 0x40) {
-            C3Vector move(World::texVect[layer->m_flags & 7]);
-            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> 3) & 7];
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
+            C3Vector move(World::texVect[layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATION_DIRECTION_MASK]);
+            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> SMLayer::LAYER_BITS::ANIMATION_SPEED_SHIFT) & SMLayer::LAYER_FLAGS::ANIMATION_SPEED_INDEX_MASK];
             move.x *= moveScale;
             move.y *= moveScale;
             move.z *= moveScale;
@@ -2207,11 +2208,11 @@ void CMapRenderChunk::RenderMultiPassAdditive(CMapRenderChunk* renderChunk) {
             GxRsSet(GxRs_TextureShader0, 1);
         }
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxRsSet(GxRs_Lighting, 1);
         }
 
-        if (layer->m_flags & 0x40) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
             GxXformSet(GxXform_Tex0, layerMatrix);
         }
     }
@@ -2234,7 +2235,7 @@ void CMapRenderChunk::RenderMultiPassAlpha(CMapRenderChunk* renderChunk) {
     GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
-    int32_t specular = (renderChunk->m_renderFlags & 0x4) != 0;
+    int32_t specular = (renderChunk->m_renderFlags & RENDER_FLAGS::FLAG_SPECULAR) != 0;
 
     for (int32_t i = 0; i < renderChunk->m_layersCount; i++) {
         CMapRenderChunkLayer* layer = &renderChunk->m_layers[i];
@@ -2247,13 +2248,13 @@ void CMapRenderChunk::RenderMultiPassAlpha(CMapRenderChunk* renderChunk) {
             GxRsSet(GxRs_TextureShader0, 0);
         }
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxRsSet(GxRs_Lighting, 0);
         }
 
-        if (layer->m_flags & 0x40) {
-            C3Vector move(World::texVect[layer->m_flags & 7]);
-            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> 3) & 7];
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
+            C3Vector move(World::texVect[layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATION_DIRECTION_MASK]);
+            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> SMLayer::LAYER_BITS::ANIMATION_SPEED_SHIFT) & SMLayer::LAYER_FLAGS::ANIMATION_SPEED_INDEX_MASK];
             move.x *= moveScale;
             move.y *= moveScale;
             move.z *= moveScale;
@@ -2278,16 +2279,16 @@ void CMapRenderChunk::RenderMultiPassAlpha(CMapRenderChunk* renderChunk) {
             GxRsSet(GxRs_TextureShader0, 1);
         }
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxRsSet(GxRs_Lighting, 1);
         }
 
-        if (layer->m_flags & 0x40) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
             GxXformSet(GxXform_Tex0, layerMatrix);
         }
     }
 
-    if (renderChunk->m_shadowTexture && (CWorld::enables & Enable_Shadow)) {
+    if (renderChunk->m_shadowTexture && (CWorld::enables & Enables::Enable_Shadow)) {
         GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
         GxUpdateAlphaRef(GxRs_AlphaRef);
         g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(CWorld::shadowModTexture, 1, nullptr));
@@ -2314,7 +2315,7 @@ void CMapRenderChunk::RenderMultiPassPixelShaderBigAlpha(CMapRenderChunk* render
 
     g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(renderChunk->m_terrainBlendTexture, 1, nullptr));
 
-    int32_t specular = (renderChunk->m_renderFlags & 0x4) != 0;
+    int32_t specular = (renderChunk->m_renderFlags & RENDER_FLAGS::FLAG_SPECULAR) != 0;
     g_theGxDevicePtr->RsSet(GxRs_PixelShader, CMapRenderChunk::s_pixelShader[1]);
 
     for (int32_t i = 0; i < renderChunk->m_layersCount; i++) {
@@ -2328,13 +2329,13 @@ void CMapRenderChunk::RenderMultiPassPixelShaderBigAlpha(CMapRenderChunk* render
             GxRsSet(GxRs_TextureShader0, 0);
         }
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxRsSet(GxRs_Lighting, 0);
         }
 
-        if (layer->m_flags & 0x40) {
-            C3Vector move(World::texVect[layer->m_flags & 7]);
-            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> 3) & 7];
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
+            C3Vector move(World::texVect[layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATION_DIRECTION_MASK]);
+            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> SMLayer::LAYER_BITS::ANIMATION_SPEED_SHIFT) & SMLayer::LAYER_FLAGS::ANIMATION_SPEED_INDEX_MASK];
             move.x *= moveScale;
             move.y *= moveScale;
             move.z *= moveScale;
@@ -2372,11 +2373,11 @@ void CMapRenderChunk::RenderMultiPassPixelShaderBigAlpha(CMapRenderChunk* render
             GxRsSet(GxRs_TextureShader0, 1);
         }
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxRsSet(GxRs_Lighting, 1);
         }
 
-        if (layer->m_flags & 0x40) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
             GxXformSet(GxXform_Tex0, layerMatrix);
         }
     }
@@ -2409,7 +2410,7 @@ void CMapRenderChunk::RenderMultiPassPixelShader(CMapRenderChunk* renderChunk) {
 
     g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(renderChunk->m_terrainBlendTexture, 1, nullptr));
 
-    int32_t specular = (renderChunk->m_renderFlags & 0x4) != 0;
+    int32_t specular = (renderChunk->m_renderFlags & RENDER_FLAGS::FLAG_SPECULAR) != 0;
     g_theGxDevicePtr->RsSet(GxRs_PixelShader, CMapRenderChunk::s_pixelShader[1]);
 
     for (int32_t i = 0; i < renderChunk->m_layersCount; i++) {
@@ -2423,13 +2424,13 @@ void CMapRenderChunk::RenderMultiPassPixelShader(CMapRenderChunk* renderChunk) {
             GxRsSet(GxRs_TextureShader0, 0);
         }
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxRsSet(GxRs_Lighting, 0);
         }
 
-        if (layer->m_flags & 0x40) {
-            C3Vector move(World::texVect[layer->m_flags & 7]);
-            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> 3) & 7];
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
+            C3Vector move(World::texVect[layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATION_DIRECTION_MASK]);
+            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> SMLayer::LAYER_BITS::ANIMATION_SPEED_SHIFT) & SMLayer::LAYER_FLAGS::ANIMATION_SPEED_INDEX_MASK];
             move.x *= moveScale;
             move.y *= moveScale;
             move.z *= moveScale;
@@ -2450,11 +2451,11 @@ void CMapRenderChunk::RenderMultiPassPixelShader(CMapRenderChunk* renderChunk) {
             GxRsSet(GxRs_TextureShader0, 1);
         }
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxRsSet(GxRs_Lighting, 1);
         }
 
-        if (layer->m_flags & 0x40) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
             GxXformSet(GxXform_Tex0, layerMatrix);
         }
     }
@@ -2481,7 +2482,7 @@ void CMapRenderChunk::RenderMultiPassVertexPixelShaderBigAlpha(CMapRenderChunk* 
     g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(renderChunk->m_terrainBlendTexture, 1, nullptr));
 
     CGxShader* pixelShader = CMapRenderChunk::s_pixelShader[1];
-    int32_t specular = (renderChunk->m_renderFlags & 0x4) != 0;
+    int32_t specular = (renderChunk->m_renderFlags & RENDER_FLAGS::FLAG_SPECULAR) != 0;
     CMapRenderChunk::SetVertexShader(renderChunk, 2, specular);
     g_theGxDevicePtr->RsSet(GxRs_PixelShader, pixelShader);
 
@@ -2491,13 +2492,13 @@ void CMapRenderChunk::RenderMultiPassVertexPixelShaderBigAlpha(CMapRenderChunk* 
         g_theGxDevicePtr->RsSet(GxRs_Texture0, gxTex);
         GxTexSetWrap(gxTex, GxTex_Wrap, GxTex_Wrap);
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxShaderConstantsSet(GxSh_Vertex, 25, &white.x, 1);
         }
 
-        if (layer->m_flags & 0x40) {
-            C4Vector dir = World::texVect[layer->m_flags & 7];
-            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> 3) & 7];
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
+            C4Vector dir = World::texVect[layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATION_DIRECTION_MASK];
+            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> SMLayer::LAYER_BITS::ANIMATION_SPEED_SHIFT) & SMLayer::LAYER_FLAGS::ANIMATION_SPEED_INDEX_MASK];
             consts.m_texOffset[0].x = -(dir.x * moveScale * 0.125f);
             consts.m_texOffset[0].y = -(dir.y * moveScale * 0.125f);
             GxShaderConstantsSet(GxSh_Vertex, 13, &consts.m_texOffset[0].x, 1);
@@ -2533,11 +2534,11 @@ void CMapRenderChunk::RenderMultiPassVertexPixelShaderBigAlpha(CMapRenderChunk* 
         GxShaderConstantsSet(GxSh_Pixel, 0, s_layerChannel[i], 1);
         g_theGxDevicePtr->Draw(&renderChunk->m_batch, 1);
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxShaderConstantsSet(GxSh_Vertex, 25, &consts.m_sunAmbient.x, 1);
         }
 
-        if (layer->m_flags & 0x40) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
             consts.m_texOffset[0].x = 0.0f;
             consts.m_texOffset[0].y = 0.0f;
             GxShaderConstantsSet(GxSh_Vertex, 13, &consts.m_texOffset[0].x, 1);
@@ -2573,7 +2574,7 @@ void CMapRenderChunk::RenderMultiPassVertexPixelShader(CMapRenderChunk* renderCh
     g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(renderChunk->m_terrainBlendTexture, 1, nullptr));
 
     CGxShader* pixelShader = CMapRenderChunk::s_pixelShader[1];
-    int32_t specular = (renderChunk->m_renderFlags & 0x4) != 0;
+    int32_t specular = (renderChunk->m_renderFlags & RENDER_FLAGS::FLAG_SPECULAR) != 0;
     CMapRenderChunk::SetVertexShader(renderChunk, 2, specular);
     g_theGxDevicePtr->RsSet(GxRs_PixelShader, pixelShader);
 
@@ -2583,13 +2584,13 @@ void CMapRenderChunk::RenderMultiPassVertexPixelShader(CMapRenderChunk* renderCh
         g_theGxDevicePtr->RsSet(GxRs_Texture0, gxTex);
         GxTexSetWrap(gxTex, GxTex_Wrap, GxTex_Wrap);
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxShaderConstantsSet(GxSh_Vertex, 25, &white.x, 1);
         }
 
-        if (layer->m_flags & 0x40) {
-            C4Vector dir = World::texVect[layer->m_flags & 7];
-            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> 3) & 7];
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
+            C4Vector dir = World::texVect[layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATION_DIRECTION_MASK];
+            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> SMLayer::LAYER_BITS::ANIMATION_SPEED_SHIFT) & SMLayer::LAYER_FLAGS::ANIMATION_SPEED_INDEX_MASK];
             consts.m_texOffset[0].x = -(dir.x * moveScale * 0.125f);
             consts.m_texOffset[0].y = -(dir.y * moveScale * 0.125f);
             GxShaderConstantsSet(GxSh_Vertex, 13, &consts.m_texOffset[0].x, 1);
@@ -2608,11 +2609,11 @@ void CMapRenderChunk::RenderMultiPassVertexPixelShader(CMapRenderChunk* renderCh
         GxShaderConstantsSet(GxSh_Pixel, 0, s_layerChannel[i], 1);
         g_theGxDevicePtr->Draw(&renderChunk->m_batch, 1);
 
-        if (layer->m_flags & 0x80) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
             GxShaderConstantsSet(GxSh_Vertex, 25, &consts.m_sunAmbient.x, 1);
         }
 
-        if (layer->m_flags & 0x40) {
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
             consts.m_texOffset[0].x = 0.0f;
             consts.m_texOffset[0].y = 0.0f;
             GxShaderConstantsSet(GxSh_Vertex, 13, &consts.m_texOffset[0].x, 1);
@@ -2636,11 +2637,11 @@ void CMapRenderChunk::RenderSinglePassPixelShader() {
     C3Vector offset = CWorldScene::s_activeWorldView - this->m_vec1;
     CMapRenderChunk::ComputeTexMatrices(layerMatrix, alphaMatrix, offset, -CMapChunk::s_geoToTex);
 
-    if (this->m_renderFlags & 0x1) {
+    if (this->m_renderFlags & RENDER_FLAGS::FLAG_UNLIT_LAYERS) {
         float lighting[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
         for (uint32_t i = 0; i < this->m_layersCount; i++) {
-            if (this->m_layers[i].m_flags & 0x80) {
+            if (this->m_layers[i].m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
                 lighting[i] = 0.0f;
             }
         }
@@ -2648,7 +2649,7 @@ void CMapRenderChunk::RenderSinglePassPixelShader() {
         GxShaderConstantsSet(GxSh_Pixel, 1, lighting, 1);
     }
 
-    int32_t specular = (this->m_renderFlags & 0x4) != 0;
+    int32_t specular = (this->m_renderFlags & RENDER_FLAGS::FLAG_SPECULAR) != 0;
     int32_t i = 0;
 
     for (; i < this->m_layersCount; i++) {
@@ -2663,9 +2664,9 @@ void CMapRenderChunk::RenderSinglePassPixelShader() {
         } else {
             GxXformSet(static_cast<EGxXform>(GxXform_Tex0 + i), layerMatrix);
 
-            if (layer->m_flags & 0x40) {
-                C4Vector move = World::texVect[layer->m_flags & 7];
-                float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> 3) & 7];
+            if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
+                C4Vector move = World::texVect[layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATION_DIRECTION_MASK];
+                float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> SMLayer::LAYER_BITS::ANIMATION_SPEED_SHIFT) & SMLayer::LAYER_FLAGS::ANIMATION_SPEED_INDEX_MASK];
                 move.x *= moveScale;
                 move.y *= moveScale;
                 move.z *= moveScale;
@@ -2692,11 +2693,11 @@ void CMapRenderChunk::RenderSinglePassVertexPixelShader() {
     GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
-    if (this->m_renderFlags & 0x1) {
+    if (this->m_renderFlags & RENDER_FLAGS::FLAG_UNLIT_LAYERS) {
         float lighting[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
         for (uint32_t i = 0; i < this->m_layersCount; i++) {
-            if (this->m_layers[i].m_flags & 0x80) {
+            if (this->m_layers[i].m_flags & SMLayer::LAYER_FLAGS::OVERBRIGHT) {
                 lighting[i] = 0.0f;
             }
         }
@@ -2704,7 +2705,7 @@ void CMapRenderChunk::RenderSinglePassVertexPixelShader() {
         GxShaderConstantsSet(GxSh_Pixel, 1, lighting, 1);
     }
 
-    int32_t specular = (this->m_renderFlags & 0x4) != 0;
+    int32_t specular = (this->m_renderFlags & RENDER_FLAGS::FLAG_SPECULAR) != 0;
     int32_t i = 0;
 
     for (; i < this->m_layersCount; i++) {
@@ -2713,9 +2714,9 @@ void CMapRenderChunk::RenderSinglePassVertexPixelShader() {
         g_theGxDevicePtr->RsSet(static_cast<EGxRenderState>(GxRs_Texture0 + i), gxTex);
         GxTexSetWrap(gxTex, GxTex_Wrap, GxTex_Wrap);
 
-        if (layer->m_flags & 0x40) {
-            C4Vector dir = World::texVect[layer->m_flags & 7];
-            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> 3) & 7];
+        if (layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
+            C4Vector dir = World::texVect[layer->m_flags & SMLayer::LAYER_FLAGS::ANIMATION_DIRECTION_MASK];
+            float moveScale = 1.0f / CMapChunk::s_geoToTex / s_texAnimRate[(layer->m_flags >> SMLayer::LAYER_BITS::ANIMATION_SPEED_SHIFT) & SMLayer::LAYER_FLAGS::ANIMATION_SPEED_INDEX_MASK];
             consts.m_texOffset[i].x = -(dir.x * moveScale * 0.125f);
             consts.m_texOffset[i].y = -(dir.y * moveScale * 0.125f);
         }
@@ -2728,7 +2729,7 @@ void CMapRenderChunk::RenderSinglePassVertexPixelShader() {
     g_theGxDevicePtr->Draw(&this->m_batch, 1);
 
     for (uint32_t j = 0; j < this->m_layersCount; j++) {
-        if (this->m_layers[j].m_flags & 0x40) {
+        if (this->m_layers[j].m_flags & SMLayer::LAYER_FLAGS::ANIMATED) {
             consts.m_texOffset[j].x = 0.0f;
             consts.m_texOffset[j].y = 0.0f;
             GxShaderConstantsSet(GxSh_Vertex, 13 + j, &consts.m_texOffset[j].x, 1);
@@ -2742,20 +2743,18 @@ void CMapRenderChunk::RenderSinglePassVertexPixelShader() {
 
 // VERIFY: 1f2ad08e manual
 // OFFSET: 0x007D3E10
-void CMapRenderChunk::SetShaders(int32_t a1, int32_t a2) {
+void CMapRenderChunk::SetShaders(int32_t specular, int32_t unlitLayers) {
     CMapRenderChunk::s_pixelShader[1] = nullptr;
     CMapRenderChunk::s_pixelShader[0] = nullptr;
-    CMapRenderChunk::s_currentShaderX[0] = nullptr;
-    CMapRenderChunk::s_currentShaderX[1] = nullptr;
-    CMapRenderChunk::s_currentShaderX[2] = nullptr;
-    CMapRenderChunk::s_currentShaderX[3] = nullptr;
-    CMapRenderChunk::s_currentShader[0] = nullptr;
-    CMapRenderChunk::s_currentShader[1] = nullptr;
-    CMapRenderChunk::s_currentShader[2] = nullptr;
-    CMapRenderChunk::s_currentShader[3] = nullptr;
+    for (uint32_t i = 0; i < sizeof(CMapRenderChunk::s_currentShaderX) / sizeof(CMapRenderChunk::s_currentShaderX[0]); i++) {
+        CMapRenderChunk::s_currentShaderX[i] = nullptr;
+    }
+    for (uint32_t i = 0; i < sizeof(CMapRenderChunk::s_currentShader) / sizeof(CMapRenderChunk::s_currentShader[0]); i++) {
+        CMapRenderChunk::s_currentShader[i] = nullptr;
+    }
 
     if (!CMap::gTerrainPixelShadersValid) {
-        if (CMap::header.m_flags & 0x4) {
+        if (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) {
             CMapRenderChunk::s_renderLayersFunc = CMapRenderChunk::RenderMultiPassAdditive;
         } else {
             CMapRenderChunk::s_renderLayersFunc = CMapRenderChunk::RenderMultiPassAlpha;
@@ -2764,20 +2763,20 @@ void CMapRenderChunk::SetShaders(int32_t a1, int32_t a2) {
         return;
     }
 
-    int32_t bigAlpha = (CMap::header.m_flags >> 2) & 1;
+    int32_t bigAlpha = (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) != 0;
     int32_t shadowMode = CShadowCache::GetShadowValue();
-    CMapRenderChunk::s_pixelShader[1] = CMap::GetPixelShader(bigAlpha, true, a1);
-    CMapRenderChunk::s_pixelShader[0] = CMap::GetPixelShader(bigAlpha, false, a1);
+    CMapRenderChunk::s_pixelShader[1] = CMap::GetPixelShader(bigAlpha, true, specular);
+    CMapRenderChunk::s_pixelShader[0] = CMap::GetPixelShader(bigAlpha, false, specular);
 
     for (int32_t layers = 1; layers <= 4; layers++) {
-        CGxShader* shader = CMap::GetTerrainPixelShader(bigAlpha, layers, shadowMode, a1, a2);
+        CGxShader* shader = CMap::GetTerrainPixelShader(bigAlpha, layers, shadowMode, specular, unlitLayers);
 
         if (layers <= g_theGxDevicePtr->Caps().m_numTmus && shader && shader->Valid()) {
             CMapRenderChunk::s_currentShaderX[layers - 1] = shader;
         }
     }
 
-    if (CMap::header.m_flags & 0x4) {
+    if (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) {
         if (CMap::enableTerrainShaderVertex) {
             CMapRenderChunk::s_renderLayersFunc = CMapRenderChunk::RenderMultiPassVertexPixelShaderBigAlpha;
         } else {
@@ -2795,4 +2794,8 @@ void CMapRenderChunk::SetShaders(int32_t a1, int32_t a2) {
 // VERIFY: dba386e8 manual
 // OFFSET: 0x005EEB70
 void CMapRenderChunk::RenderZoneDebug() {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // TODO: debug-only, compiled out of the 3.3.5 release build (body folds into the shared empty stub).
+    // No 0.5.3 reference.
+#endif
 }

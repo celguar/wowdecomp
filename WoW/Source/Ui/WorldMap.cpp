@@ -52,10 +52,10 @@ CSimpleModel* CGWorldMap::m_playerArrowEffectFrame;
 CSimpleModel* CGWorldMap::m_playerMiniArrowEffectFrame;
 
 // STATIC: 0x00ACCF04
-int32_t CGWorldMap::m_currentContinent = -1;
+int32_t CGWorldMap::m_currentContinent = WORLDMAP_CONTINENT_WORLD;
 
 // STATIC: 0x00ACCF08
-int32_t CGWorldMap::m_currentZone = -1;
+int32_t CGWorldMap::m_currentZone = WORLDMAP_ZONE_NONE;
 
 // STATIC: 0x00ACCF0C
 int32_t CGWorldMap::m_currentDungeonMap = -1;
@@ -469,8 +469,8 @@ bool CGWorldMap::GetWorldPosition(const C3Vector& position, int32_t mapID, float
     CGWorldMap::TransformPosition(mapID, position.x, position.y, &newMapID, &transformed.x, &transformed.y, &transformedDungeonMap);
     WorldMapContinentRec* continentRec = CGWorldMap::GetContinentRec(newMapID);
 
-    if (continentRec && CGWorldMap::m_currentContinent == -1) {
-        if (outland && newMapID == 530) {
+    if (continentRec && CGWorldMap::m_currentContinent == WORLDMAP_CONTINENT_WORLD) {
+        if (outland && newMapID == MAP_EXPANSION01) {
             *outland = true;
         }
 
@@ -528,14 +528,14 @@ bool CGWorldMap::GetWorldPosition(const C3Vector& position, int32_t mapID, float
         dungeonRec = nullptr;
     }
 
-    float maxX = dungeonRec ? dungeonRec->m_maxX : area->m_locLeft;
-    float minX = dungeonRec ? dungeonRec->m_minX : area->m_locRight;
+    float maxX = dungeonRec ? dungeonRec->m_boundsX.m_h : area->m_locLeft;
+    float minX = dungeonRec ? dungeonRec->m_boundsX.m_l : area->m_locRight;
     double rangeX = maxX - minX;
     double offsetX = pos.y - minX;
     *x = 0.0 == offsetX || 0.0 == rangeX ? 0.0 : 1.0 - offsetX / rangeX;
 
-    float maxY = dungeonRec ? dungeonRec->m_maxY : area->m_locTop;
-    float minY = dungeonRec ? dungeonRec->m_minY : area->m_locBottom;
+    float maxY = dungeonRec ? dungeonRec->m_boundsY.m_h : area->m_locTop;
+    float minY = dungeonRec ? dungeonRec->m_boundsY.m_l : area->m_locBottom;
     double rangeY = maxY - minY;
     double offsetY = pos.x - minY;
     *y = 0.0 == offsetY || 0.0 == rangeY ? 0.0 : 1.0 - offsetY / rangeY;
@@ -558,19 +558,19 @@ void CGWorldMap::GetPOIPosition(const AreaPOIRec* poi, float* x, float* y) {
         return;
     }
 
-    if (((CGWorldMap::m_currentContinent >= 0 && CGWorldMap::m_currentZone >= 0) || CGWorldMap::m_currentContinent == -2) && !(poi->m_flags & 0x4)) {
+    if (((CGWorldMap::m_currentContinent >= 0 && CGWorldMap::m_currentZone >= 0) || CGWorldMap::m_currentContinent == WORLDMAP_CONTINENT_COSMIC) && !(poi->m_flags & AREA_POI_FLAG_WORLDMAP_ZONE_ZOOM)) {
         return;
     }
 
-    if (CGWorldMap::m_currentContinent == -1 && !(poi->m_flags & 0x10)) {
+    if (CGWorldMap::m_currentContinent == WORLDMAP_CONTINENT_WORLD && !(poi->m_flags & AREA_POI_FLAG_WORLDMAP_WORLD_ZOOM)) {
         return;
     }
 
-    if (CGWorldMap::m_currentZone < 0 && CGWorldMap::m_currentOrphanZone < 0 && !(poi->m_flags & 0x8)) {
+    if (CGWorldMap::m_currentZone < 0 && CGWorldMap::m_currentOrphanZone < 0 && !(poi->m_flags & AREA_POI_FLAG_WORLDMAP_CONTINENT_ZOOM)) {
         return;
     }
 
-    if (poi->m_flags & 0x400) {
+    if (poi->m_flags & AREA_POI_FLAG_ONLY_SHOW_IN_CURRENT_AREA) {
         WorldMapAreaRec* area = g_worldMapAreaDB.GetRecord(CGWorldMap::GetZoneID(CGWorldMap::m_currentContinent, CGWorldMap::m_currentZone));
 
         if (!area || area->m_areaID != poi->m_areaID || area->m_mapID != poi->m_continentID) {
@@ -593,7 +593,7 @@ void CGWorldMap::GetPOIPosition(const AreaPOIRec* poi, float* x, float* y) {
 void CGWorldMap::SetMap(uint32_t continent, uint32_t zone, int32_t dungeonMap) {
     if (continent < CGWorldMap::m_continents.m_count) {
         CGWorldMap::m_currentContinent = continent;
-        CGWorldMap::m_currentZone = zone < CGWorldMap::m_continents.m_data[continent].m_zones.m_count ? zone : -1;
+        CGWorldMap::m_currentZone = zone < CGWorldMap::m_continents.m_data[continent].m_zones.m_count ? zone : WORLDMAP_ZONE_NONE;
         CGWorldMap::m_currentOrphanZone = -1;
         CGWorldMap::m_currentDungeonMap = -1;
         WorldMapAreaRec* area = g_worldMapAreaDB.GetRecord(CGWorldMap::GetZoneID(continent, zone));
@@ -604,8 +604,8 @@ void CGWorldMap::SetMap(uint32_t continent, uint32_t zone, int32_t dungeonMap) {
         }
     } else {
         CGWorldMap::m_currentContinent = continent;
-        CGWorldMap::m_currentZone = -1;
-        CGWorldMap::m_currentOrphanZone = continent == static_cast<uint32_t>(-2) ? zone : -1;
+        CGWorldMap::m_currentZone = WORLDMAP_ZONE_NONE;
+        CGWorldMap::m_currentOrphanZone = continent == static_cast<uint32_t>(WORLDMAP_CONTINENT_COSMIC) ? zone : -1;
         CGWorldMap::m_currentDungeonMap = dungeonMap;
     }
 
@@ -687,7 +687,7 @@ void CGWorldMap::SetMap(uint32_t continent, uint32_t zone, int32_t dungeonMap) {
                 continue;
             }
 
-            for (uint32_t j = 0; j < 4; j++) {
+            for (uint32_t j = 0; j < NUM_WORLD_MAP_OVERLAY_AREAS; j++) {
                 AreaTableRec* area = overlay->m_areaID[j] ? g_areaTableDB.GetRecord(overlay->m_areaID[j]) : nullptr;
 
                 if (!area || (area->m_explorationLevel >= 0 && !player->HasZoneExplored(area->m_areaBit))) {
@@ -778,7 +778,7 @@ void CGWorldMap::SetMapToCurrentZone(int32_t debug) {
             }
 
             SStrPrintf(text, sizeof(text) - 1, "%s, Dungeon Map Info:  WMOGroupID = %d  DMapID = %d  WorldMapAreaRecID = %d  MapID = %d", text, CGGameUI::m_wmoGroupID, dungeonMap, area->m_id, area->m_mapID);
-            CGChat::AddChatMessage(text, 0, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
+            CGChat::AddChatMessage(text, CHAT_MSG_SYSTEM, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
             ConsolePrintf("%s\n", text);
             return;
         }
@@ -803,7 +803,7 @@ void CGWorldMap::SetMapToCurrentZone(int32_t debug) {
             }
 
             SStrPrintf(text, sizeof(text) - 1, "%s, True Orphan:  Continent = -1", text);
-            CGChat::AddChatMessage(text, 0, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
+            CGChat::AddChatMessage(text, CHAT_MSG_SYSTEM, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
             ConsolePrintf("%s\n", text);
             return;
         }
@@ -827,7 +827,7 @@ void CGWorldMap::SetMapToCurrentZone(int32_t debug) {
                 }
 
                 SStrPrintf(text, sizeof(text) - 1, "%s Inside Instance:  Continent = %02d  MapID = %03d", text, continent, i);
-                CGChat::AddChatMessage(text, 0, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
+                CGChat::AddChatMessage(text, CHAT_MSG_SYSTEM, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
                 ConsolePrintf("%s\n", text);
                 return;
             }
@@ -858,7 +858,7 @@ void CGWorldMap::SetMapToCurrentZone(int32_t debug) {
             }
 
             SStrPrintf(text, sizeof(text) - 1, "%s, Dungeon Map Info (continent):  WMOID = %d  DMapID = %d  DMapRec = %d  z = %5.2f", text, CGGameUI::m_wmoGroupID, dungeonMap, area->m_id, player->GetPosition().z);
-            CGChat::AddChatMessage(text, 0, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
+            CGChat::AddChatMessage(text, CHAT_MSG_SYSTEM, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
             ConsolePrintf("%s\n", text);
             return;
         }
@@ -879,7 +879,7 @@ void CGWorldMap::SetMapToCurrentZone(int32_t debug) {
     }
 
     SStrPrintf(text, sizeof(text) - 1, "%s, Normal Map:  Continent = %02d  MapID = %03d", text, continent, zone);
-    CGChat::AddChatMessage(text, 0, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
+    CGChat::AddChatMessage(text, CHAT_MSG_SYSTEM, nullptr, 0, nullptr, nullptr, nullptr, WOWGUID(), 0, WOWGUID(), 0, false, nullptr);
     ConsolePrintf("%s\n", text);
 }
 
@@ -1054,9 +1054,9 @@ int32_t CGWorldMap::GetCurrentMapHeight() {
     double height;
 
     if (dungeonRec) {
-        width = dungeonRec->m_maxX - dungeonRec->m_minX;
-        height = dungeonRec->m_maxY - dungeonRec->m_minY;
-    } else if (CGWorldMap::m_currentZone == -1) {
+        width = dungeonRec->m_boundsX.m_h - dungeonRec->m_boundsX.m_l;
+        height = dungeonRec->m_boundsY.m_h - dungeonRec->m_boundsY.m_l;
+    } else if (CGWorldMap::m_currentZone == WORLDMAP_ZONE_NONE) {
         WorldMapContinentRec* continentRec = nullptr;
 
         for (int32_t i = 0; i < g_worldMapContinentDB.m_numRecords; i++) {
@@ -1101,7 +1101,7 @@ bool CGWorldMap::GetPlayerPosition(WOWGUID guid, float* x, float* y) {
     } else {
         CGPartyMemberState* state = CGPartyMemberStateRepository::GetState(guid);
 
-        if (!state || (state->m_flags & 0x20)) {
+        if (!state || (state->m_flags & CGPartyMemberState::MEMBER_FLAG_UNKNOWN_5)) {
             return false;
         }
 
@@ -1128,7 +1128,7 @@ bool CGWorldMap::GetPlayerPosition(WOWGUID guid, float* x, float* y) {
 int32_t CGWorldMap::GetMapAreaFromPos(float x, float y) {
     int32_t areaID = CGWorldMap::GetCurrentAreaID();
 
-    if (areaID == -1 || CGWorldMap::m_currentContinent == -2) {
+    if (areaID == -1 || CGWorldMap::m_currentContinent == WORLDMAP_CONTINENT_COSMIC) {
         return 0;
     }
 
@@ -1171,11 +1171,11 @@ int32_t CGWorldMap::GetMapAreaFromPos(float x, float y) {
 int32_t CGWorldMap::GetMapHighlight(float x, float y) {
     int32_t continent = CGWorldMap::m_currentContinent;
 
-    if (continent == -2) {
+    if (continent == WORLDMAP_CONTINENT_COSMIC) {
         return 0;
     }
 
-    if (continent != -1) {
+    if (continent != WORLDMAP_CONTINENT_WORLD) {
         int32_t area = CGWorldMap::GetMapAreaFromPos(x, y);
 
         if (CGWorldMap::m_currentZone >= 0 && CGWorldMap::m_continents.m_data[continent].m_zones.m_data[CGWorldMap::m_currentZone] == area) {

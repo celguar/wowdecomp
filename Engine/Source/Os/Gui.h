@@ -34,6 +34,16 @@ enum : int32_t {
     NUM_OSGUI_WINDOW_TYPES = 3,
 };
 
+enum : uint32_t {
+    OSGUI_FILTER_LETTERS = 0x1,
+    OSGUI_FILTER_DIGITS = 0x2,
+    OSGUI_FILTER_SIGN = 0x4,
+    OSGUI_FILTER_DECIMAL_POINT = 0x8,
+    OSGUI_FILTER_SPACE = 0x10,
+    OSGUI_FILTER_UNDERSCORE = 0x20,
+    OSGUI_FILTER_PRINTABLE_ASCII = 0x40,
+};
+
 typedef void* OsGuiHandle;
 typedef void* OsGuiTreeItem;
 
@@ -49,6 +59,11 @@ struct OsGuiCallbackParams {
 };
 
 typedef void (*OsGuiCallback)(const OsGuiCallbackParams& params);
+
+struct OsGuiCallbackInfo {
+    /* 0000 */ OsGuiCallback function; // Preserve the current callback calling convention.
+    /* 0004 */ void* userParam;
+};
 
 struct OsGuiTVDDInfo {
     /* 0000 */ COsTreeView* treeView;
@@ -145,8 +160,7 @@ class COsDialog {
     public:
     /* 0004 */ OsGuiHandle m_handle;
     /* 0008 */ void* m_tooltips;
-    /* 000C */ OsGuiCallback m_callback;
-    /* 0010 */ void* m_callbackParam;
+    /* 000C */ OsGuiCallbackInfo m_callbackInfo;
     /* 0014 */ TSGrowableArray<COsControl*> m_controls;
     /* 0024 */ COsControl* m_cancelButton;
     /* 0028 */ int32_t m_trackMouse;

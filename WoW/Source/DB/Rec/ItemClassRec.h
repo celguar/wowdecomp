@@ -5,6 +5,13 @@
 #include <cstdint>
 
 class SFileImpl;
+enum ITEM_CLASS : int32_t;
+
+// ItemClass.dbc flags tested by the client.
+enum ITEM_CLASS_FLAGS : int32_t {
+    ITEM_CLASS_FLAG_NONE   = 0x00000000,
+    ITEM_CLASS_FLAG_WEAPON = 0x00000001,
+};
 
 class ItemClassRec {
     public:
@@ -12,9 +19,9 @@ class ItemClassRec {
     static const int32_t s_rowSize = 80;
     static const bool s_generatedID = true;
 
-    /* 0000 */ int32_t m_classID;
+    /* 0000 */ ITEM_CLASS m_classID;
     /* 0004 */ int32_t m_subclassMapID;
-    /* 0008 */ int32_t m_flags;
+    /* 0008 */ ITEM_CLASS_FLAGS m_flags;
     /* 000C */ const char* m_className;
     /* 0010 */ int32_t m_generatedID;
 

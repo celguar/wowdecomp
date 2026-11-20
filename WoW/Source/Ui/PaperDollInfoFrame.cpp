@@ -73,7 +73,7 @@ int32_t PlayerEquipmentChangedHandler(WOWGUID guid, uint32_t fieldOffset, uint32
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
     if (player) {
-        player->UpdateAmmoModel(player->GetEquippedAmmoDisplayId(), 24);
+        player->UpdateAmmoModel(player->GetEquippedAmmoDisplayId(), INVTYPE_AMMO);
         CGActionBar::UpdateUsable();
         FrameScript_SignalEvent(SCRIPT_EVENT_UNIT_INVENTORY_CHANGED, "%s", "player");
     }
@@ -185,7 +185,7 @@ int32_t ResolveInventorySlotArg(lua_State* L, int32_t index, int32_t& slot) {
         }
     }
 
-    return (slot >= 0 && slot <= 22) || (slot >= 39 && slot <= 66) || (slot >= 67 && slot <= 73) || slot == -1 || (slot >= 86 && slot <= 117);
+    return (slot >= EQUIPPED_FIRST && slot <= INVSLOT_BAG3) || (slot >= BANKGENERIC_FIRST && slot <= BANKGENERIC_LAST) || (slot >= BANKBAG_FIRST && slot <= BANKBAG_LAST) || slot == INVSLOT_AMMO || (slot >= KEYRING_FIRST && slot <= KEYRING_LAST);
 }
 
 // VERIFY: f340d760 auto
@@ -292,12 +292,12 @@ void CGCharacterInfo::UpdateItem(WOWGUID guid) {
     CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
     int32_t slot = player->m_bag.FindItemSlot(guid);
 
-    if (slot == -1 && item && item->m_item->m_itemFieldContained != ClntObjMgrGetActivePlayer()) {
+    if (slot == INVSLOT_NONE && item && item->m_item->m_itemFieldContained != ClntObjMgrGetActivePlayer()) {
         slot = player->m_bag.FindItemSlot(item->m_item->m_itemFieldContained);
     }
 
     if (static_cast<uint32_t>(slot) > 22) {
-        if ((slot >= 39 && slot <= 66) || static_cast<uint32_t>(slot - 67) <= 6) {
+        if ((slot >= BANKGENERIC_FIRST && slot <= BANKGENERIC_LAST) || (slot >= BANKBAG_FIRST && slot <= BANKBAG_LAST)) {
             FrameScript_SignalEvent(SCRIPT_EVENT_PLAYERBANKSLOTS_CHANGED, "%d", slot - 38);
         }
 
@@ -320,11 +320,11 @@ static void BuyItemInBag(WOWGUID merchant, const MerchantItem* item, uint32_t co
 void CGCharacterInfo::PickupInventoryItem(int32_t slot) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (!player || (!CGGameUI::m_hasControl && !(player->m_unit->m_unitFieldFlags & 0x100000))) {
+    if (!player || (!CGGameUI::m_hasControl && !(player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_ON_TAXI))) {
         return;
     }
 
-    if (((slot >= 39 && slot <= 66) || static_cast<uint32_t>(slot - 67) <= 6) && !CGBankInfo::m_banker) {
+    if (((slot >= BANKGENERIC_FIRST && slot <= BANKGENERIC_LAST) || (slot >= BANKBAG_FIRST && slot <= BANKBAG_LAST)) && !CGBankInfo::m_banker) {
         return;
     }
 
@@ -336,11 +336,11 @@ void CGCharacterInfo::PickupInventoryItem(int32_t slot) {
     int32_t virtualSlot;
     CGGameUI::GetCursorVirtualItem(virtualId, virtualSlot);
 
-    if (slot == -1) {
+    if (slot == INVSLOT_AMMO) {
         if (cursorItem) {
             CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(cursorItem, TYPE_ITEM, __FILE__, __LINE__));
 
-            if (item && item->GetClassID() == 6) {
+            if (item && item->GetClassID() == ITEM_CLASS::ITEM_CLASS_PROJECTILE) {
                 CDataStore msg;
                 msg.Put(static_cast<uint32_t>(CMSG_SET_AMMO));
                 msg.Put(static_cast<uint32_t>(item->m_obj->m_entryID));
@@ -398,12 +398,12 @@ void CGCharacterInfo::PickupInventoryItem(int32_t slot) {
 
         CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(itemGuid, TYPE_ITEM, __FILE__, __LINE__));
 
-        if (item && (item->m_itemFlags & 1)) {
+        if (item && (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
             return;
         }
 
         if (!player->ValidateSlot(slot, cursorItem)) {
-            if (cursorContainer == player->m_obj->m_guid && cursorSlot < 19) {
+            if (cursorContainer == player->m_obj->m_guid && cursorSlot < INVSLOT_BAG0) {
                 CGGameUI::ClearCursor(1, 1);
                 return;
             }
@@ -436,7 +436,7 @@ void CGCharacterInfo::PickupInventoryItem(int32_t slot) {
 
     CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(itemGuid, TYPE_ITEM, __FILE__, __LINE__));
 
-    if (item && (item->m_itemFlags & 1)) {
+    if (item && (item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
         return;
     }
 
@@ -521,7 +521,7 @@ void CGCharacterInfo::SocketInventoryItem(int32_t slot) {
 
     CGItem_C* item = player->m_bag.GetItemPointer(slot);
 
-    if (item && !(item->m_itemFlags & 0x1) && item->GetNumSockets()) {
+    if (item && !(item->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED) && item->GetNumSockets()) {
         CGItemSocketInfo::SetItem(item->m_obj->m_guid);
     }
 }
@@ -531,7 +531,7 @@ void CGCharacterInfo::SocketInventoryItem(int32_t slot) {
 void CGCharacterInfo::PickupBag(uint32_t slot) {
     CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
 
-    if (!player || !CGGameUI::m_hasControl || (slot - 67 <= 6 && !CGBankInfo::m_banker)) {
+    if (!player || !CGGameUI::m_hasControl || (slot - BANKBAG_FIRST <= BANKBAG_LAST - BANKBAG_FIRST && !CGBankInfo::m_banker)) {
         return;
     }
 
@@ -553,7 +553,7 @@ void CGCharacterInfo::PickupBag(uint32_t slot) {
 
     CGItem_C* container = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(bag, TYPE_CONTAINER, __FILE__, __LINE__));
 
-    if (container && !(container->m_itemFlags & 0x1)) {
+    if (container && !(container->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) {
         CGGameUI::SetCursorItem(bag, player->m_obj->m_guid, slot, 1, 0, 1);
         CGGameUI::LockItem(bag);
     }
@@ -598,7 +598,7 @@ bool CGCharacterInfo::CanEquipItemInSlot(const ItemStats_C* stats, uint32_t slot
         return false;
     }
 
-    if (slot == 16 && (stats->m_inventoryType == 22 || stats->m_inventoryType == 13) && !CGPlayer_C::CanDualWield()) {
+    if (slot == INVSLOT_OFFHAND && (stats->m_inventoryType == INVTYPE_WEAPONOFFHAND || stats->m_inventoryType == INVTYPE_WEAPON) && !CGPlayer_C::CanDualWield()) {
         return false;
     }
 
@@ -608,7 +608,7 @@ bool CGCharacterInfo::CanEquipItemInSlot(const ItemStats_C* stats, uint32_t slot
         for (int32_t i = 0; i < g_chrRacesDB.m_numRecords; i++) {
             ChrRacesRec* race = g_chrRacesDB.GetRecordByIndex(i);
 
-            if (race && !(race->m_flags & 0x1) && ((1 << (race->m_id - 1)) & stats->m_allowableRace) && player->m_unit->m_unitFieldBytes0[0] != race->m_id) {
+            if (race && !(race->m_flags & ChrRacesRec::RACE_FLAGS::NON_PLAYABLE) && ((1 << (race->m_id - 1)) & stats->m_allowableRace) && player->m_unit->m_raceID != race->m_id) {
                 return false;
             }
         }
@@ -616,7 +616,7 @@ bool CGCharacterInfo::CanEquipItemInSlot(const ItemStats_C* stats, uint32_t slot
         for (int32_t i = 0; i < g_chrClassesDB.m_numRecords; i++) {
             ChrClassesRec* chrClass = g_chrClassesDB.GetRecordByIndex(i);
 
-            if (chrClass && ((1 << (chrClass->m_id - 1)) & stats->m_allowableClass) && player->m_unit->m_unitFieldBytes0[1] != chrClass->m_id) {
+            if (chrClass && ((1 << (chrClass->m_id - 1)) & stats->m_allowableClass) && player->m_unit->m_classID != chrClass->m_id) {
                 return false;
             }
         }
@@ -630,7 +630,7 @@ bool CGCharacterInfo::CanEquipItemInSlot(const ItemStats_C* stats, uint32_t slot
     for (int32_t i = 0; i < g_chrRacesDB.m_numRecords; i++) {
         ChrRacesRec* race = g_chrRacesDB.GetRecordByIndex(i);
 
-        if (race && !(race->m_flags & 0x1) && !((1 << (race->m_id - 1)) & stats->m_allowableRace)) {
+        if (race && !(race->m_flags & ChrRacesRec::RACE_FLAGS::NON_PLAYABLE) && !((1 << (race->m_id - 1)) & stats->m_allowableRace)) {
             allRaces = 0;
             break;
         }
@@ -651,7 +651,7 @@ bool CGCharacterInfo::CanEquipItemInSlot(const ItemStats_C* stats, uint32_t slot
         for (int32_t i = 0; i < g_chrRacesDB.m_numRecords; i++) {
             ChrRacesRec* race = g_chrRacesDB.GetRecordByIndex(i);
 
-            if (race && !(race->m_flags & 0x1) && ((1 << (race->m_id - 1)) & stats->m_allowableRace) && player->m_unit->m_unitFieldBytes0[0] == race->m_id) {
+            if (race && !(race->m_flags & ChrRacesRec::RACE_FLAGS::NON_PLAYABLE) && ((1 << (race->m_id - 1)) & stats->m_allowableRace) && player->m_unit->m_raceID == race->m_id) {
                 allowed = 1;
             }
         }
@@ -667,7 +667,7 @@ bool CGCharacterInfo::CanEquipItemInSlot(const ItemStats_C* stats, uint32_t slot
         for (int32_t i = 0; i < g_chrClassesDB.m_numRecords; i++) {
             ChrClassesRec* chrClass = g_chrClassesDB.GetRecordByIndex(i);
 
-            if (chrClass && ((1 << (chrClass->m_id - 1)) & stats->m_allowableClass) && player->m_unit->m_unitFieldBytes0[1] == chrClass->m_id) {
+            if (chrClass && ((1 << (chrClass->m_id - 1)) & stats->m_allowableClass) && player->m_unit->m_classID == chrClass->m_id) {
                 allowed = 1;
             }
         }
@@ -702,7 +702,7 @@ int32_t CGCharacterInfo::PutItemInBackpack(uint32_t slot) {
         return 0;
     }
 
-    if (slot - 67 <= 6 && !CGBankInfo::m_banker) {
+    if (slot - BANKBAG_FIRST <= BANKBAG_LAST - BANKBAG_FIRST && !CGBankInfo::m_banker) {
         return 0;
     }
 
@@ -733,7 +733,7 @@ int32_t CGCharacterInfo::PutItemInBackpack(uint32_t slot) {
 
     CGItem_C* bagItem = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(bag, TYPE_ITEM, __FILE__, __LINE__));
 
-    if ((bagItem && (bagItem->m_itemFlags & 1)) || cursorItem == bag) {
+    if ((bagItem && (bagItem->m_itemFlags & CGItem_C::ITEM_CLIENT_FLAGS::ITEM_CLIENT_LOCKED)) || cursorItem == bag) {
         CGGameUI::ClearCursor(1, 1);
         return 1;
     }
@@ -743,7 +743,7 @@ int32_t CGCharacterInfo::PutItemInBackpack(uint32_t slot) {
         return 0;
     }
 
-    if (cursorContainer == bag && (cursorContainer != player->m_obj->m_guid || cursorSlot - 23 <= 15)) {
+    if (cursorContainer == bag && (cursorContainer != player->m_obj->m_guid || (cursorSlot >= BACKPACK_FIRST && cursorSlot <= BACKPACK_LAST))) {
         CGGameUI::ClearCursor(1, 1);
         return 1;
     }
@@ -760,7 +760,7 @@ int32_t CGCharacterInfo::PutItemInBackpack(uint32_t slot) {
     if (slot != 0xFF) {
         CGItem_C* cursorObject;
 
-        if ((cursorContainer == player->m_obj->m_guid && cursorSlot - 19 <= 3) || ((cursorObject = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(cursorItem, TYPE_ITEM, __FILE__, __LINE__))) && (cursorObject->m_obj->m_type & TYPE_CONTAINER))) {
+        if ((cursorContainer == player->m_obj->m_guid && (cursorSlot >= INVSLOT_BAG0 && cursorSlot <= INVSLOT_BAG3)) || ((cursorObject = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(cursorItem, TYPE_ITEM, __FILE__, __LINE__))) && (cursorObject->m_obj->m_type & TYPE_CONTAINER))) {
             CGGameUI::LockItem(bag);
             player->SwapItems(cursorItem, cursorContainer, cursorSlot, player->m_obj->m_guid, slot, 0);
             return 1;
@@ -800,24 +800,24 @@ int32_t CGCharacterInfo::CalculateInventoryAlertStatus(CGPlayer_C* player, uint3
         return 0;
     }
 
-    if (item->m_item->m_itemFieldFlags & 0x10) {
+    if (item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_UNUSABLE) {
         return 2;
     }
 
-    if ((item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) || !item->m_item->m_itemFieldMaxdurability) {
+    if ((item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) || !item->m_item->m_itemFieldMaxdurability) {
         return 0;
     }
 
-    if (!(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldDurability) {
+    if (!(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldDurability) {
         if (item->GetDurability() > 5) {
             return 0;
         }
 
-        CGTutorial::TriggerTutorial(35);
+        CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_DAMAGED_ITEMS);
         return 1;
     }
 
-    CGTutorial::TriggerTutorial(36);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_BROKEN_ITEMS);
     return 2;
 }
 

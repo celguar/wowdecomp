@@ -1014,7 +1014,7 @@ static void LocateWeaponSubclass() {
     for (int32_t i = g_itemClassDB.m_numRecords - 1; i >= 0; i--) {
         const ItemClassRec* rec = i >= 0 && i < g_itemClassDB.m_numRecords ? &g_itemClassDB.m_records[i] : nullptr;
 
-        if (rec->m_flags & 1) {
+        if (rec->m_flags & ITEM_CLASS_FLAG_WEAPON) {
             s_weaponItemClass = rec;
         }
     }
@@ -1057,7 +1057,7 @@ void InitResistances() {
     for (int32_t i = 0; static_cast<uint32_t>(i) < count; i++) {
         const ResistancesRec* rec = i >= 0 && i < g_resistancesDB.m_numRecords ? &g_resistancesDB.m_records[i] : nullptr;
 
-        if (rec->m_flags & 1) {
+        if (rec->m_flags & RESISTANCE_FLAG_PHYSICAL) {
             s_physicalDamageClassID = i;
         }
 
@@ -1096,11 +1096,17 @@ void InitWeaponSubclasses() {
     s_unarmedWeapon = nullptr;
     LocateWeaponSubclass();
 
-    int32_t weaponClass = s_weaponItemClass->m_classID;
+    ITEM_CLASS weaponClass = s_weaponItemClass->m_classID;
     int32_t count = 0;
 
     for (int32_t i = g_itemSubClassDB.m_numRecords - 1; i >= 0; i--) {
         const ItemSubClassRec* rec = i >= 0 && i < g_itemSubClassDB.m_numRecords ? &g_itemSubClassDB.m_records[i] : nullptr;
+
+#if defined(WOWDECOMP_ARCH_64)
+        if (rec->m_subClassID < 0 || rec->m_subClassID == INT32_MAX) {
+            continue;
+        }
+#endif
 
         if (rec->m_classID == weaponClass && count <= rec->m_subClassID + 1) {
             count = rec->m_subClassID + 1;
@@ -1113,9 +1119,15 @@ void InitWeaponSubclasses() {
         const ItemSubClassRec* rec = i >= 0 && i < g_itemSubClassDB.m_numRecords ? &g_itemSubClassDB.m_records[i] : nullptr;
 
         if (rec->m_classID == weaponClass) {
+#if defined(WOWDECOMP_ARCH_64)
+            if (static_cast<uint32_t>(rec->m_subClassID) >= s_weaponSubclasses.Count()) {
+                continue;
+            }
+#endif
+
             s_weaponSubclasses[rec->m_subClassID] = rec;
 
-            if (rec->m_flags & 4) {
+            if (rec->m_flags & ITEM_SUBCLASS_FLAG_UNARMED) {
                 s_unarmedWeapon = rec;
             }
         }

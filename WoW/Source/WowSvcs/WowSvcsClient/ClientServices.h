@@ -21,6 +21,19 @@ struct CLIENTCDKEY {
 
 class ClientConnection : public RealmConnection {
     public:
+    // SMSG_CHARACTER_LOGIN_FAILED byte selectors;names describe mapped UI results.
+    // These ordinals are translated to ResponseCodes;all other bytes map to failure.
+    enum CHARACTER_LOGIN_FAILURE : int32_t {
+        LOGIN_FAILURE_UI_NO_WORLD = 1,
+        LOGIN_FAILURE_UI_DUPLICATE_CHARACTER = 2,
+        LOGIN_FAILURE_UI_NO_INSTANCES = 3,
+        LOGIN_FAILURE_UI_DISABLED = 4,
+        LOGIN_FAILURE_UI_NO_CHARACTER = 5,
+        LOGIN_FAILURE_UI_LOCKED_FOR_TRANSFER = 6,
+        LOGIN_FAILURE_UI_LOCKED_BY_BILLING = 7,
+        LOGIN_FAILURE_UI_LOCKED_BY_MOBILE_AH = 8,
+    };
+
     /* 2F3C */ uint32_t m_connected;
     /* 2F40 */ uint32_t m_characterLoggedIn;
     /* 2F44 */ int32_t m_statusComplete;
@@ -51,7 +64,7 @@ class ClientConnection : public RealmConnection {
     void Cleanup();
     void Complete(int32_t result, int32_t errorCode);
     void CharacterAbortLogout();
-    void CharacterLogin(WOWGUID guid, int32_t a2);
+    void CharacterLogin(WOWGUID guid, int32_t unknown2);
     int32_t CharacterLoggingOut();
     void CharacterLogout(bool quit, bool instant);
     void CharacterForceLogout();
@@ -152,8 +165,8 @@ class ClientServices : public LoginResponse {
     bool GetCdKeys(Grunt::CdKey& cdKey) override;
     void FileData(const uint8_t* data, uint32_t size) override;
     const char* GetLoginServer() override;
-    int32_t GetLoginServerType() override;
-    void JoinRealmResult(uint32_t realmId, int32_t a2, int32_t a3, int32_t a4, int32_t a5) override;
+    LOGIN_SERVER_TYPE GetLoginServerType() override;
+    void JoinRealmResult(uint32_t realmId, int32_t address, int32_t port, int32_t unknown4, int32_t error) override;
     void LoginServerStatus(LOGIN_STATE state, LOGIN_RESULT result, const char* addressString, const char* stateString, const char* resultString, uint16_t flags) override;
     void RealmEnumCallback(uint32_t result) override;
 };

@@ -1,3 +1,4 @@
+#include "Engine/Source/Tempest/CMath.h"
 #include "DetailDoodad.h"
 #include <cmath>
 #include "Engine/Source/Base/Handle.h"
@@ -201,7 +202,7 @@ void CDetailDoodadInstBatch::FillIndices() {
     for (uint32_t i = 0; i < this->m_adds.Count(); i++) {
         CM2Model* model = CDetailDoodad::s_doodadList[this->m_adds[i].m_doodadId]->m_model;
 
-        if (!(model->m_fFlags & 1)) {
+        if (!(model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
             model->WaitForLoad(nullptr);
         }
 
@@ -321,7 +322,7 @@ void CDetailDoodadData::ModelLoadedCallback(CM2Model* model, void* arg) {
     CDetailDoodadData* data = static_cast<CDetailDoodadData*>(arg);
     CM2Model* doodadModel = data->m_model;
 
-    if (!(doodadModel->m_fFlags & 1)) {
+    if (!(doodadModel->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
         doodadModel->WaitForLoad(nullptr);
     }
 
@@ -351,14 +352,14 @@ void CDetailDoodadInstBatch::FillVertices() {
         CDetailDoodadData* data = CDetailDoodad::s_doodadList[add.m_doodadId];
         CM2Model* model = data->m_model;
 
-        if (!(model->m_fFlags & 1)) {
+        if (!(model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
             model->WaitForLoad(nullptr);
         }
 
         M2Data* m2Data = model->m_shared->m_data;
         model = data->m_model;
 
-        if (!(model->m_fFlags & 1)) {
+        if (!(model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
             model->WaitForLoad(nullptr);
         }
 
@@ -383,7 +384,7 @@ void CDetailDoodadInstBatch::FillVertices() {
             color = swapped;
         }
 
-        if (data->m_record->m_flags & 1) {
+        if (data->m_record->m_flags & GROUND_EFFECT_DOODAD_ALIGN_TO_TERRAIN) {
             if ((add.m_triIndex & 0xFC) != cell) {
                 cell = add.m_triIndex & 0xFC;
                 built = 0;
@@ -502,7 +503,7 @@ void CDetailDoodad::Initialize() {
 
     CDetailDoodad::s_bUseShaders = 1;
 
-    if (!(CWorld::enables & Enable_PixelShaders)) {
+    if (!(CWorld::enables & Enables::Enable_PixelShaders)) {
         CDetailDoodad::s_bUseShaders = 0;
     }
 
@@ -593,13 +594,13 @@ void CDetailDoodad::UpdatePools() {
 // OFFSET: 0x007B2D30
 int32_t CDetailDoodad::InitializeRenderState() {
     GxRsSet(GxRs_Culling, 0);
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxRsSet(GxRs_AlphaRef, CWorld::detailDoodadAlphaRef);
     GxRsSet(GxRs_DepthWrite, 1);
 
     if (CDetailDoodad::s_bUseShaders) {
         uint32_t shadow = CShadowCache::GetShadowValue();
-        g_theGxDevicePtr->RsSet(GxRs_PixelShader, CDetailDoodad::s_pixelShader[4 * ((CWorld::enables2 >> 1) & 1) + shadow]);
+        g_theGxDevicePtr->RsSet(GxRs_PixelShader, CDetailDoodad::s_pixelShader[4 * ((CWorld::enables2 & Enables2::Enable_HwPcf) != 0) + shadow]);
         CDetailDoodad::InitializeShaderConstants();
         CShadowCache::SetShadowMapDetailDoodad();
         return 1;
@@ -611,13 +612,13 @@ int32_t CDetailDoodad::InitializeRenderState() {
     g_theGxDevicePtr->RsSet(GxRs_Texture1, CDetailDoodad::s_alphaRampTexture);
     GxRsSet(GxRs_ColorOp1, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp1, GxTexOp_Mod);
-    GxRsSet(GxRs_TexGen1, 3);
+    GxRsSet(GxRs_TexGen1, GxTexGen_View);
     GxRsSet(GxRs_TextureShader1, 1);
 
     C44Matrix matrix;
     float dist = CWorld::detailDoodadDist;
     matrix.Scale(1.0f / (dist * 0.15f));
-    matrix.RotateAroundY(1.5707964f);
+    matrix.RotateAroundY(HALF_PI);
     matrix.Translate(C3Vector(0.0f, 0.0f, dist * -0.85f));
 
     CGxMatrixStack& stack = g_theGxDevicePtr->m_xforms[GxXform_Tex1];
@@ -662,7 +663,7 @@ void CDetailDoodadInst::AddDoodad(uint32_t id, const C3Vector& position, float r
     CDetailDoodadData* data = CDetailDoodad::s_doodadList[id];
     CM2Model* model = data->m_model;
 
-    if (!(model->m_fFlags & 1)) {
+    if (!(model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
         model->WaitForLoad(nullptr);
     }
 

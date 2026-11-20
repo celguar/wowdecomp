@@ -109,41 +109,41 @@ void ConsoleGxOverride(const char* list) {
 
         if (override == GxOverride_PixelShader) {
             switch (overrideValue) {
-                case 0:
-                case 1:
-                case 2:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_1_1:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_1_2:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_1_3:
                     overrideValue = 1;
                     break;
 
-                case 3:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_1_4:
                     overrideValue = 2;
                     break;
 
-                case 4:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_2_0:
                     overrideValue = 3;
                     break;
 
-                case 5:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_NVRC:
                     overrideValue = 7;
                     break;
 
-                case 6:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_NVTS:
                     overrideValue = 8;
                     break;
 
-                case 7:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_NVTS2:
                     overrideValue = 9;
                     break;
 
-                case 8:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_NVTS3:
                     overrideValue = 10;
                     break;
 
-                case 10:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_ARBFP1:
                     overrideValue = 12;
                     break;
 
-                case 11:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_GLSL:
                     overrideValue = 13;
                     break;
 
@@ -311,7 +311,7 @@ void RemoveConsoleDeviceDefaultCallback(void (*callback)(OPTION_PAGE page)) {
 void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) {
     GxLogOpen();
 
-    s_cvHwDetect = CVar::Register("hwDetect", "do hardware detection", 1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvHwDetect = CVar::Register("hwDetect", "do hardware detection", CVAR_FLAGS::CVAR_ARCHIVE, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     ConsoleDetectDetectHardware(s_hardware, s_hwChanged);
     s_hardwareDetected = true;
 
@@ -323,6 +323,11 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
     }
 
     s_consoleAccessEnabled = CmdLineGetBool(static_cast<CMDOPT>(CMD_CONSOLE));
+
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug feature: the console is always available, without the -console argument.
+    s_consoleAccessEnabled = 1;
+#endif
 
     ConsoleDetectSetDefaultsFormat(s_defaults, s_hardware);
     RegisterGxCVars();
@@ -421,7 +426,7 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
 
     for (s_device = CreateGxDevice(api, OsWindowProc, format); !s_device; s_device = CreateGxDevice(api, OsWindowProc, format)) {
         if (format.m_multisampleCount > 1) {
-            if (format.m_multisampleCount - 2 <= 1) {
+            if (format.m_multisampleCount >= 2 && format.m_multisampleCount <= 3) {
                 format.m_multisampleCount = 1;
             } else {
                 format.m_multisampleCount -= 2;
@@ -437,15 +442,15 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
             if (desktopTried) {
                 GxLog("ConsoleDeviceInitialize(): no output device available!");
 
-                Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
+                Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(MSG_TITLE_WOW);
                 const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
                 const char* message;
 
                 if (api == GxApi_D3d9 || api == GxApi_D3d9Ex) {
-                    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(2);
+                    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(MSG_GX_INIT_FAILED_D3D);
                     message = rec ? rec->m_message : "World of Warcraft was unable to start up 3D acceleration. Please make sure DirectX 9.0c is installed and your video drivers are up-to-date.";
                 } else {
-                    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(3);
+                    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(MSG_GX_INIT_FAILED);
                     message = rec ? rec->m_message : "World of Warcraft was unable to start up 3D acceleration.";
                 }
 
@@ -505,7 +510,7 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
         }
 
         if (s_hwDetect || s_hwChanged) {
-            s_defaults.unk_0019 = g_theGxDevicePtr->Caps().m_shaderTargets[4] != 0;
+            s_defaults.unk_0019 = g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] != GxShPS_none;
         }
 
         char version[32];
@@ -519,9 +524,9 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
         return;
     }
 
-    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
+    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(MSG_TITLE_WOW);
     const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
-    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(4);
+    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(MSG_HW_UNSUPPORTED);
     const char* message = rec ? rec->m_message : "Your 3D accelerator card is not supported by World of Warcraft. Please install a 3D accelerator card with dual-TMU support.";
 
     OsGuiMessageBox(nullptr, OSGUI_MESSAGE_STYLE_OK, message, caption);
