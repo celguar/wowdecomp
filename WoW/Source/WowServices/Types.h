@@ -160,6 +160,22 @@ struct CHARACTER_CREATE_INFO {
     /* 0038 */ uint8_t m_outfitID;
 };
 
+// Account flags from the legacy (Grunt) and Battle.net logon; raw protocol words stay unchanged.
+enum ACCOUNT_FLAGS : int32_t {
+    ACCOUNT_GAME_MASTER = 0x1,
+    ACCOUNT_TRIAL = 0x8,
+    ACCOUNT_UNKNOWN_10 = 0x10, // Set by Grunt account info when its unk_0068 field is positive.
+    ACCOUNT_PRO_PASS = 0x800000,
+    // Inferred: the account info bits Grunt keeps from the server value.
+    ACCOUNT_FLAGS_RETAINED_MASK = 0x6A8E040F,
+};
+
+// Logon proof login flags, passed through LoginResponse::UpdateLoginStatus to CGlueMgr::SetLoginStateAndResult.
+enum LOGIN_FLAGS : uint16_t {
+    LOGIN_FLAG_NONE = 0x0,
+    LOGIN_FLAG_ACCOUNT_MESSAGE_AVAILABLE = 0x1, // Inferred: sets CGlueMgr::m_accountMsgAvailable.
+};
+
 // Realm list flags; names follow the GetRealmInfo returns (invalid, realmDown, load, version).
 enum REALM_FLAGS : uint8_t {
     REALM_FLAG_NONE = 0x00,
