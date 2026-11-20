@@ -7,6 +7,7 @@
 #include "WoW/Source/Magic/MagicClient/Spell_C.h"
 #include "WoW/Source/ObjectMgrClient/ObjectMgrClient.h"
 #include "WoW/Source/Object/ObjectClient/Unit_C.h"
+#include <cfloat>
 #include <cstdint>
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
@@ -535,7 +536,7 @@ static int32_t Script_PetAttack(lua_State* L) {
 
     if (token && *token) {
         if (!Script_GetGUIDFromToken(token, target, false)) {
-            target = CGGameUI::ClosestObjectMatch(token, 8, 1, StringToBOOL(L, 2, 0), 3.4028235e38f, 1);
+            target = CGGameUI::ClosestObjectMatch(token, 8, UNIT_TARGET_ENEMY, StringToBOOL(L, 2, 0), FLT_MAX, 1);
         }
 
         a3 = 1;
@@ -599,9 +600,9 @@ static int32_t Script_PetRename(lua_State* L) {
         return 0;
     }
 
-    char declinedNames[5][96];
+    char declinedNames[NUM_DECLINED_NAME_CASES][96];
 
-    for (int32_t i = 0; i < 5; i++) {
+    for (int32_t i = 0; i < NUM_DECLINED_NAME_CASES; i++) {
         const char* declined = lua_tolstring(L, i + 2, nullptr);
 
         if (!declined || !*declined) {
@@ -626,7 +627,8 @@ static int32_t Script_PickupPetAction(lua_State* L) {
 
     uint32_t slot = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (slot > 10) {
+    // Original client bug: accepts slot NUM_PET_ACTION_SLOTS, one past the last slot.
+    if (slot > NUM_PET_ACTION_SLOTS) {
         luaL_error(L, "Invalid slot in PickupPetAction");
         return 0;
     }
@@ -672,7 +674,8 @@ static int32_t Script_TogglePetAutocast(lua_State* L) {
 
     uint32_t slot = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (slot > 10) {
+    // Original client bug: accepts slot NUM_PET_ACTION_SLOTS, one past the last slot.
+    if (slot > NUM_PET_ACTION_SLOTS) {
         luaL_error(L, "Invalid slot in TogglePetAutocast");
         return 0;
     }
@@ -699,7 +702,8 @@ static int32_t Script_CastPetAction(lua_State* L) {
 
     uint32_t slot = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (slot > 10) {
+    // Original client bug: accepts slot NUM_PET_ACTION_SLOTS, one past the last slot.
+    if (slot > NUM_PET_ACTION_SLOTS) {
         luaL_error(L, "Invalid slot in CastPetAction");
         return 0;
     }
