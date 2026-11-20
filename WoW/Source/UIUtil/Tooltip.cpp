@@ -141,7 +141,7 @@ int32_t CGTooltip::s_objectType;
 int32_t CGTooltip::s_metatable = LUA_NOREF;
 
 // STATIC: 0x00AD2A84
-static const char* s_itemQualityColorStrings[8] = { "|cff9d9d9d", "|cffffffff", "|cff1eff00", "|cff0070dd", "|cffa335ee", "|cffff8000", "|cffe6cc80", "|cffe6cc80" };
+static const char* s_itemQualityColorStrings[ITEM_QUALITY::NUM_ITEM_QUALITIES] = { "|cff9d9d9d", "|cffffffff", "|cff1eff00", "|cff0070dd", "|cffa335ee", "|cffff8000", "|cffe6cc80", "|cffe6cc80" };
 
 // STATIC: 0x00AD2D2C
 uint32_t s_tooltipTitleColor = 0xFFFFD200;
@@ -162,10 +162,10 @@ static uint32_t s_tooltipGreenColor = COLOR_GREEN_ARGB;
 static uint32_t s_threatStatusColors[5] = { COLOR_WHITE_ARGB, 0xFFB0B0B0, 0xFFFFFF77, 0xFFFF9900, COLOR_RED_ARGB };
 
 // STATIC: 0x00AD2E6C
-static const char* s_classificationTokens[6] = { nullptr, "ELITE", "ELITE", nullptr, nullptr, nullptr };
+static const char* s_classificationTokens[NUM_CREATURE_CLASSIFICATIONS] = { nullptr, "ELITE", "ELITE", nullptr, nullptr, nullptr };
 
 // STATIC: 0x00AD2D84
-static uint32_t s_itemQualityColors[8] = { 0xFF9D9D9D, COLOR_WHITE_ARGB, 0xFF1EFF00, 0xFF0070DD, 0xFFA335EE, 0xFFFF8000, 0xFFE6CC80, 0xFFE6CC80 };
+static uint32_t s_itemQualityColors[ITEM_QUALITY::NUM_ITEM_QUALITIES] = { 0xFF9D9D9D, COLOR_WHITE_ARGB, 0xFF1EFF00, 0xFF0070DD, 0xFFA335EE, 0xFFFF8000, 0xFFE6CC80, 0xFFE6CC80 };
 
 // STATIC: 0x00AD2ADC
 const char* CGTooltip::s_objectTypeName = "GameTooltip";
@@ -860,7 +860,7 @@ void CGTooltip::GetScriptTime(lua_State* L, double* time, uint32_t* count, int32
 // OFFSET: 0x0061A510
 const CImVector* CGTooltip::GetItemQualityColor(uint32_t quality) {
     if (quality >= sizeof(s_itemQualityColors) / sizeof(s_itemQualityColors[0])) {
-        quality = 1;
+        quality = ITEM_QUALITY::ITEM_QUALITY_COMMON;
     }
 
     return reinterpret_cast<const CImVector*>(&s_itemQualityColors[quality]);
@@ -870,7 +870,7 @@ const CImVector* CGTooltip::GetItemQualityColor(uint32_t quality) {
 // OFFSET: 0x0061A530
 const char* CGTooltip::GetItemQualityColorString(uint32_t quality) {
     if (quality >= sizeof(s_itemQualityColorStrings) / sizeof(s_itemQualityColorStrings[0])) {
-        quality = 1;
+        quality = ITEM_QUALITY::ITEM_QUALITY_COMMON;
     }
 
     return s_itemQualityColorStrings[quality];
@@ -1292,7 +1292,7 @@ int32_t CGTooltip::HideThis() {
 
 // VERIFY: 82cc22f3 auto
 // OFFSET: 0x0061F2B0
-void CGItemStatsSummary::AddEnchantEffect(int32_t type, int32_t arg, int32_t amount) {
+void CGItemStatsSummary::AddEnchantEffect(ITEM_ENCHANTMENT_EFFECT type, int32_t arg, int32_t amount) {
     switch (type) {
         case ITEM_ENCHANTMENT_EFFECT::ENCHANTMENT_EFFECT_EQUIP_SPELL: {
             SpellRec spell;
@@ -1972,10 +1972,10 @@ int32_t CGTooltip::SetUnit(const WOWGUID& guid, BOOL showHealth, const WOWGUID& 
     char level[32];
 
     CGPlayer_C* activePlayer = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
-    int32_t dead = 0;
+    BOOL dead = 0;
     CreatureTypeRec* creatureType = nullptr;
     int32_t unitLevel = 0;
-    int32_t showLevel = 1;
+    BOOL showLevel = 1;
 
     if (unit) {
         dead = unit->m_unit->m_unitFieldHealth <= 0 || (unit->m_unit->m_unitDynamicFlags & UNIT_DYNAMIC_FLAGS::UNIT_DYNFLAG_DEAD);
@@ -2006,7 +2006,7 @@ int32_t CGTooltip::SetUnit(const WOWGUID& guid, BOOL showHealth, const WOWGUID& 
 
         if (petState) {
             dead = petState->m_health <= 0;
-        } else if (creature && creature->m_type != 10) {
+        } else if (creature && creature->m_type != CREATURE_TYPE_NOT_SPECIFIED) {
             creatureType = g_creatureTypeDB.GetRecord(creature->m_type);
         }
     }
@@ -2384,7 +2384,7 @@ const char* CGTooltip::CreateItemLink(int32_t itemId, uint32_t quality, int32_t 
     }
 
     if (quality >= sizeof(s_itemQualityColorStrings) / sizeof(s_itemQualityColorStrings[0])) {
-        quality = 1;
+        quality = ITEM_QUALITY::ITEM_QUALITY_COMMON;
     }
 
     const char* color = s_itemQualityColorStrings[quality];
@@ -2577,7 +2577,7 @@ int32_t CGTooltip::AddTalentPrereqs(const TalentRec* talent, CGTalentGroup_C* gr
 
     int32_t met = 1;
 
-    for (uint32_t i = 0; i < 3; i++) {
+    for (uint32_t i = 0; i < MAX_TALENT_PREREQS; i++) {
         int32_t prereqId = talent->m_prereqTalent[i];
 
         if (!prereqId) {
@@ -2597,7 +2597,7 @@ int32_t CGTooltip::AddTalentPrereqs(const TalentRec* talent, CGTalentGroup_C* gr
             continue;
         }
 
-        for (uint32_t r = rank; r < 9; r++) {
+        for (uint32_t r = rank; r < MAX_TALENT_RANKS; r++) {
             int32_t spellId = prereq->m_spellRank[r];
 
             if (spellId) {
@@ -2879,7 +2879,7 @@ static int32_t AddSpellCastTimeLine(CGTooltip* tooltip, const SpellRec* spell, B
 static void AddSpellToolLine(CGTooltip* tooltip, const SpellRec* spell, CGPlayer_C* player, BOOL brief) {
     const CImVector& textColor = *reinterpret_cast<const CImVector*>(&s_tooltipTextColor);
     char text[4096];
-    int32_t first = 1;
+    BOOL first = 1;
     int32_t allFound = 1;
 
     for (uint32_t i = 0; i < 2; i++) {
@@ -2958,7 +2958,7 @@ static void AddSpellEquippedItemLine(CGTooltip* tooltip, const SpellRec* spell, 
     }
 
     items[0] = '\0';
-    int32_t found = 0;
+    BOOL found = 0;
 
     for (int32_t i = 0; i < g_itemSubClassMaskDB.m_numRecords; i++) {
         ItemSubClassMaskRec* mask = &g_itemSubClassMaskDB.m_records[i];
@@ -2970,7 +2970,7 @@ static void AddSpellEquippedItemLine(CGTooltip* tooltip, const SpellRec* spell, 
         }
     }
 
-    int32_t first = 1;
+    BOOL first = 1;
     int32_t equipped = 1;
     uint32_t slotMask = (spell->m_attributesExC & SPELL_ATTR3::SPELL_ATTR3_REQUIRES_MAIN_HAND_WEAPON) ? 0x8000 : (spell->m_attributesExC & SPELL_ATTR3::SPELL_ATTR3_REQUIRES_OFF_HAND_WEAPON) ? 0x10000 : 0xFFFFFFFF;
 
@@ -3024,7 +3024,7 @@ static void AddSpellFormLine(CGTooltip* tooltip, const SpellRec* spell, CGUnit_C
         return;
     }
 
-    int32_t first = 1;
+    BOOL first = 1;
     int32_t needsForm = spell->m_attributesExB & SPELL_ATTR2::SPELL_ATTR2_ALLOW_WHILE_NOT_SHAPESHIFTED_CASTER_FORM;
 
     if (!needsForm) {
@@ -3095,7 +3095,7 @@ static void AddSpellReagentLine(CGTooltip* tooltip, const SpellRec* spell, CGPla
     const CImVector& textColor = *reinterpret_cast<const CImVector*>(&s_tooltipTextColor);
     char text[4096];
     char reagent[128];
-    int32_t first = 1;
+    BOOL first = 1;
     int32_t allFound = 1;
 
     for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
@@ -3953,7 +3953,7 @@ void CGTooltip::AddSpellReagents(const SpellRec* spell, const char* token, void 
     char line[4096];
     char text[4096];
     char reagent[1024];
-    int32_t first = 1;
+    BOOL first = 1;
 
     for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
         int32_t itemId = spell->m_reagent[i];
@@ -4260,7 +4260,7 @@ static bool AddItemPetitionLines(CGTooltip* tooltip, CGItem_C* item, const WOWGU
         return false;
     }
 
-    if (petition->m_staticType) {
+    if (petition->m_staticType != CGPetition::STATIC_TYPE_GUILD) {
         SStrPrintf(text, sizeof(text), FrameScript_GetText("PETITION_TITLE", -1, GENDER_NOT_APPLICABLE), petition->m_title);
     } else {
         SStrPrintf(text, sizeof(text), FrameScript_GetText("GUILD_CHARTER_TITLE", -1, GENDER_NOT_APPLICABLE), petition->m_title);
@@ -4270,7 +4270,7 @@ static bool AddItemPetitionLines(CGTooltip* tooltip, CGItem_C* item, const WOWGU
     NameCache* owner = g_nameDBCache.GetRecord(petition->m_ownerGuid.m_guid, petition->m_ownerGuid, TooltipItemCallback, tooltip, true);
 
     if (owner) {
-        const char* token = petition->m_staticType ? FrameScript_GetText("PETITION_CREATOR", -1, GENDER_NOT_APPLICABLE) : FrameScript_GetText("GUILD_CHARTER_CREATOR", -1, GENDER_NOT_APPLICABLE);
+        const char* token = petition->m_staticType != CGPetition::STATIC_TYPE_GUILD ? FrameScript_GetText("PETITION_CREATOR", -1, GENDER_NOT_APPLICABLE) : FrameScript_GetText("GUILD_CHARTER_CREATOR", -1, GENDER_NOT_APPLICABLE);
         SStrPrintf(text, sizeof(text), token, owner->m_name);
         tooltip->AddLine(text, nullptr, textColor, textColor, 0);
     }
@@ -4326,7 +4326,7 @@ static void AddItemLockLines(CGTooltip* tooltip, const ItemStats_C* stats, CGIte
     tooltip->AddLine(text, nullptr, lockColor, lockColor, 0);
 
     for (uint32_t i = 0; i < NUM_LOCK_KEYS; i++) {
-        int32_t type = lock->m_type[i];
+        LOCK_KEY_TYPE type = lock->m_type[i];
 
         if (type == LOCK_KEY_SKILL) {
             int32_t skillSpell = 0;
@@ -4457,7 +4457,7 @@ static const LockRec* AddItemBindLines(CGTooltip* tooltip, const ItemStats_C* st
         } else if (stats->m_itemLimitCategory) {
             ItemLimitCategoryRec* category = g_itemLimitCategoryDB.GetRecord(stats->m_itemLimitCategory);
 
-            if (category->m_flags & 1) {
+            if (category->m_flags & ITEM_LIMIT_CATEGORY_FLAG_MULTIPLE) {
                 FormatString("ITEM_LIMIT_CATEGORY_MULTIPLE", -1, GENDER_NOT_APPLICABLE, format, sizeof(format));
             } else {
                 FormatString("ITEM_LIMIT_CATEGORY", -1, GENDER_NOT_APPLICABLE, format, sizeof(format));
@@ -4655,7 +4655,7 @@ static float AddItemDamageLines(CGTooltip* tooltip, const ItemStats_C* stats, co
     char speed[1024];
     char school[4096];
     float average = 0.0f;
-    int32_t first = 1;
+    BOOL first = 1;
 
     if ((stats->m_scalingStatValue & ItemStats_C::SCALING_STAT_FLAGS::DAMAGE_MASK) && values) {
         float minDamage;
@@ -4875,7 +4875,7 @@ static int32_t AddItemSocketLines(CGTooltip* tooltip, const ItemStats_C* stats, 
         }
 
         uint32_t socket = slot - CGItemData::ENCHANTMENT_SLOT::SOCKET_1;
-        int32_t isSocket = socket < MAX_NUM_SOCKETS && static_cast<int32_t>(socket) < numSockets;
+        BOOL isSocket = socket < MAX_NUM_SOCKETS && static_cast<int32_t>(socket) < numSockets;
 
         if (socket < MAX_NUM_SOCKETS && socketPreview) {
             WOWGUID gemGuid = socket < MAX_NUM_SOCKETS ? CGItemSocketInfo::m_gemItems[socket] : WOWGUID{ 0 };
@@ -5435,7 +5435,7 @@ static void AddItemRaceClassLines(CGTooltip* tooltip, const ItemStats_C* stats, 
 
         if (!allClasses) {
             list[0] = '\0';
-            int32_t first = 1;
+            BOOL first = 1;
             allowed = 0;
 
             for (int32_t i = 0; i < g_chrClassesDB.m_numRecords; i++) {
@@ -5880,7 +5880,7 @@ static int32_t AddItemSpellTriggerLines(CGTooltip* tooltip, const ItemStats_C* s
     char text[4096];
     char line[1024];
     char buffer[4096];
-    int32_t isRecipe = 0;
+    BOOL isRecipe = 0;
 
     for (int32_t i = 0; i < NUM_ITEM_SPELLS; i++) {
         if (stream) {
@@ -6021,7 +6021,7 @@ static int32_t AddItemSpellTriggerLines(CGTooltip* tooltip, const ItemStats_C* s
             WOWGUID requester = { 0 };
             WOWGUID itemGuid = { 0 };
             tooltip->SetItem(created.m_effectItemType[0], &requester, &itemGuid, 0, 0, 0, 1, WOWGUID{ 0 }, 0, nullptr, hideCharges, nullptr, 0, 0, 1);
-            int32_t first = 1;
+            BOOL first = 1;
             int32_t missing = 0;
             text[0] = '\0';
 
@@ -6381,7 +6381,7 @@ static int32_t AddItemTradeLines(CGTooltip* tooltip, const ItemStats_C* stats, C
         int32_t timeLeft = purchase->m_purchasePlayedTime - player->GetPlayedTime() + CGItem_C::ItemPurchaseData::REFUND_PERIOD_SECONDS;
 
         if (timeLeft > 0 && !item->HasEnchantments()) {
-            if (static_cast<uint32_t>(timeLeft - 3660) > 3539) {
+            if (timeLeft < 3660 || timeLeft > 7199) {
                 CGTooltip::GetDurationString(format, sizeof(format), timeLeft, "INT_SPELL_DURATION", nullptr, 0, 1);
             } else {
                 SStrPrintf(text, sizeof(text), FrameScript_GetText("INT_SPELL_DURATION_HOURS", 1, GENDER_NOT_APPLICABLE), 1);
@@ -6403,7 +6403,7 @@ static int32_t AddItemTradeLines(CGTooltip* tooltip, const ItemStats_C* stats, C
         int32_t timeLeft = item->m_item->m_itemFieldCreatePlayedTime - player->GetPlayedTime() + CGItem_C::BIND_TRADE_PERIOD_SECONDS;
 
         if (timeLeft > 0) {
-            if (static_cast<uint32_t>(timeLeft - 3660) > 3539) {
+            if (timeLeft < 3660 || timeLeft > 7199) {
                 CGTooltip::GetDurationString(format, sizeof(format), timeLeft, "INT_SPELL_DURATION", nullptr, 0, 1);
             } else {
                 SStrPrintf(text, sizeof(text), FrameScript_GetText("INT_SPELL_DURATION_HOURS", 1, GENDER_NOT_APPLICABLE), 1);
@@ -6895,7 +6895,7 @@ void CGTooltip::SetTalent(const TalentRec* talent, CGTalentGroup_C* group, BOOL 
     int32_t currentRank = -1;
     int32_t maxRank = -1;
 
-    for (int32_t i = 8; i >= 0; i--) {
+    for (int32_t i = MAX_TALENT_RANKS - 1; i >= 0; i--) {
         if (talent->m_spellRank[i]) {
             maxRank = i;
             break;
@@ -6917,8 +6917,8 @@ void CGTooltip::SetTalent(const TalentRec* talent, CGTalentGroup_C* group, BOOL 
         displayRank = currentRank;
     }
 
-    if (talent->m_flags & 1) {
-        int32_t showNext = maxRank > 0 && displayRank >= 0 && displayRank < maxRank;
+    if (talent->m_flags & TALENT_FLAG_EXCEPTIONAL) {
+        BOOL showNext = maxRank > 0 && displayRank >= 0 && displayRank < maxRank;
         this->SetSpell(talent->m_spellRank[displayRank < 0 ? 0 : displayRank], 0, 0, isPet, 0, isInspect, useRank, talent, group, 0, usePreview, displayRank < 0 ? 0 : displayRank, displayRank, maxRank, !showNext);
 
         if (showNext) {
@@ -6933,8 +6933,8 @@ void CGTooltip::SetTalent(const TalentRec* talent, CGTalentGroup_C* group, BOOL 
     int32_t nextSpellId = talent->m_spellRank[displayRank + 1];
     SpellRec spell;
     SpellRec nextSpell;
-    int32_t hasSpell = displayRank < 0 ? 0 : g_spellDB.GetRecord(spellId, &spell);
-    int32_t hasNext = displayRank >= maxRank ? 0 : g_spellDB.GetRecord(nextSpellId, &nextSpell);
+    BOOL hasSpell = displayRank < 0 ? 0 : g_spellDB.GetRecord(spellId, &spell);
+    BOOL hasNext = displayRank >= maxRank ? 0 : g_spellDB.GetRecord(nextSpellId, &nextSpell);
 
     if (!hasSpell && !hasNext) {
         return;
@@ -7304,7 +7304,7 @@ int32_t SetCompareItem(CGTooltip* tooltip, uint32_t itemId, int32_t offset, int3
 
                 if (!item) {
                     mainHand = player->m_bag.GetItemPointer(INVSLOT_MAINHAND);
-                    item = mainHand && mainHand->GetInventoryType() == 17 ? mainHand : nullptr;
+                    item = mainHand && mainHand->GetInventoryType() == INVTYPE_2HWEAPON ? mainHand : nullptr;
                 }
             }
         }
@@ -7504,7 +7504,7 @@ void CGTooltip::AddEmpathyText(CGUnit_C* unit, char* buffer, uint32_t size) {
 
     char spells[512];
     spells[0] = '\0';
-    int32_t first = 1;
+    BOOL first = 1;
 
     for (uint32_t j = 0; j < NUM_CREATURE_FAMILY_SKILL_LINES; j++) {
         for (int32_t i = 0; i < g_skillLineAbilityDB.m_numRecords; i++) {
