@@ -59,7 +59,7 @@ void CGActionBar::HideGrid() {
 
 // VERIFY: a8f31305 auto
 // OFFSET: 0x005648A0
-int32_t CGActionBar::IsMacro(uint32_t slot) {
+BOOL CGActionBar::IsMacro(uint32_t slot) {
     uint32_t action = CGActionBar::m_slotActions[slot];
     return action && (action & ACTION_MASK::ACTION_MASK_TAG) == ACTION_TAG::ACTION_TAG_MACRO;
 }
@@ -78,21 +78,21 @@ uint32_t CGActionBar::GetMacroID(uint32_t slot) {
 
 // VERIFY: 0d7360f9 auto
 // OFFSET: 0x005A7890
-int32_t CGActionBar::IsItem(uint32_t slot) {
+BOOL CGActionBar::IsItem(uint32_t slot) {
     uint32_t action = CGActionBar::m_slotActions[slot];
     return action && (action & ACTION_MASK::ACTION_MASK_TAG) == ACTION_TAG::ACTION_TAG_ITEM;
 }
 
 // VERIFY: 2927bc93 auto
 // OFFSET: 0x005A78C0
-int32_t CGActionBar::IsPetAction(uint32_t slot) {
+BOOL CGActionBar::IsPetAction(uint32_t slot) {
     uint32_t action = CGActionBar::m_slotActions[slot];
     return action && (action & ACTION_MASK::ACTION_MASK_TAG) == ACTION_TAG::ACTION_TAG_PET_ACTION;
 }
 
 // VERIFY: ac5a6409 auto
 // OFFSET: 0x005A78F0
-int32_t CGActionBar::IsEquipmentSet(uint32_t slot) {
+BOOL CGActionBar::IsEquipmentSet(uint32_t slot) {
     uint32_t action = CGActionBar::m_slotActions[slot];
     return action && (action & ACTION_MASK::ACTION_MASK_TAG) == ACTION_TAG::ACTION_TAG_EQUIPMENT_SET;
 }
@@ -111,7 +111,7 @@ int32_t CGActionBar::GetEquipmentSetID(uint32_t slot) {
 
 // VERIFY: e56c7d55 auto
 // OFFSET: 0x005A7A40
-int32_t CGActionBar::HasMacro(uint32_t slot) {
+BOOL CGActionBar::HasMacro(uint32_t slot) {
     return CGUIMacros::GetMacroIndexByID(CGActionBar::m_slotActions[slot] & ACTION_MASK::ACTION_MASK_MACRO_ID) != -1;
 }
 
@@ -232,7 +232,7 @@ int32_t CGActionBar::ActionHasRange(uint32_t slot) {
 
 // VERIFY: c3489cdd auto
 // OFFSET: 0x005A96D0
-int32_t CGActionBar::IsAttackAction(uint32_t slot) {
+BOOL CGActionBar::IsAttackAction(uint32_t slot) {
     if (slot >= sizeof(CGActionBar::m_slotActions) / sizeof(CGActionBar::m_slotActions[0])) {
         return 0;
     }
@@ -249,7 +249,7 @@ int32_t CGActionBar::IsAttackAction(uint32_t slot) {
 
 // VERIFY: 67ae0d31 auto
 // OFFSET: 0x005A9760
-int32_t CGActionBar::IsRangedAttackAction(uint32_t slot) {
+BOOL CGActionBar::IsRangedAttackAction(uint32_t slot) {
     if (slot >= sizeof(CGActionBar::m_slotActions) / sizeof(CGActionBar::m_slotActions[0])) {
         return 0;
     }
@@ -506,7 +506,7 @@ int32_t CGActionBar::GetMacroSpell(uint32_t slot, int32_t& petSpell) {
 
 // VERIFY: 3cf4ef31 auto
 // OFFSET: 0x005A7860
-int32_t CGActionBar::IsSpell(uint32_t slot) {
+BOOL CGActionBar::IsSpell(uint32_t slot) {
     uint32_t action = CGActionBar::m_slotActions[slot];
     return action && !(action & ACTION_MASK::ACTION_MASK_TAG);
 }
@@ -579,7 +579,7 @@ uint32_t CGActionBar::GetMultiCastSlotMaskForTotemCategory(int32_t category) {
 
 // VERIFY: 48490470 manual
 // OFFSET: 0x005A7BC0
-int32_t IsMultiCastSpellForSlot(int32_t slot, const SpellRec* spell, int32_t* category) {
+BOOL IsMultiCastSpellForSlot(int32_t slot, const SpellRec* spell, int32_t* category) {
     int32_t totem = (spell->m_attributesExG & SPELL_ATTR7::SPELL_ATTR7_CAN_BE_MULTI_CAST) ? 1 : 0;
     *category = GetMultiCastTotemCategory(slot);
 
@@ -604,7 +604,7 @@ void CGActionBar::UpdateSelection() {
 
 // VERIFY: 437cce19 auto
 // OFFSET: 0x005A8160
-int32_t CGActionBar::HasAction(uint32_t slot) {
+BOOL CGActionBar::HasAction(uint32_t slot) {
     uint32_t action = CGActionBar::m_slotActions[slot];
 
     if (action && (action & ACTION_MASK::ACTION_MASK_TAG) == ACTION_TAG::ACTION_TAG_MACRO && CGUIMacros::GetMacroIndexByID(action & ACTION_MASK::ACTION_MASK_MACRO_ID) == -1) {
@@ -893,7 +893,7 @@ const char* CGActionBar::GetTexture(int32_t slot) {
 
 // VERIFY: 8513f070 auto
 // OFFSET: 0x005AA240
-int32_t CGActionBar::IsCurrentAction(int32_t slot) {
+BOOL CGActionBar::IsCurrentAction(int32_t slot) {
     if (slot < 0 || slot >= sizeof(CGActionBar::m_slotActions) / sizeof(CGActionBar::m_slotActions[0]) || !CGActionBar::m_slotActions[slot]) {
         return 0;
     }
@@ -1487,7 +1487,7 @@ void CGActionBar::UpdateRangedAttackAction() {
 
 // VERIFY: 7f087db2 manual
 // OFFSET: 0x005A8470
-int32_t IsStackableAucItem(uint32_t slot) {
+BOOL IsStackableAucItem(uint32_t slot) {
     if (slot > (CGActionBar::NUM_ACTION_SLOTS - 1)) {
         return 0;
     }
@@ -1499,7 +1499,7 @@ int32_t IsStackableAucItem(uint32_t slot) {
 
 // VERIFY: e7c2b372 manual
 // OFFSET: 0x005A88B0
-int32_t CGActionBar::IsEquippedAction(uint32_t slot) {
+BOOL CGActionBar::IsEquippedAction(uint32_t slot) {
     if (slot > (CGActionBar::NUM_ACTION_SLOTS - 1)) {
         return 0;
     }
@@ -1526,7 +1526,7 @@ int32_t CGActionBar::IsEquippedAction(uint32_t slot) {
 
 // VERIFY: 20f78ef5 manual
 // OFFSET: 0x005A9360
-int32_t CGActionBar::IsConsumableAction(uint32_t slot) {
+BOOL CGActionBar::IsConsumableAction(uint32_t slot) {
     if (slot > (CGActionBar::NUM_ACTION_SLOTS - 1)) {
         return 0;
     }
@@ -1600,7 +1600,7 @@ uint32_t CGActionBar::GetSlotSpellAction(uint32_t slot) {
 
 // VERIFY: eaef0f5d auto
 // OFFSET: 0x005A7C80
-static int32_t HasOverrideSpellData(const OverrideSpellDataRec* rec) {
+static BOOL HasOverrideSpellData(const OverrideSpellDataRec* rec) {
     if (!rec) {
         return 0;
     }
@@ -1824,7 +1824,7 @@ void CGActionBar::UpdateShapeShiftBar() {
 
 // VERIFY: 3645420e manual
 // OFFSET: 0x005A9470
-int32_t CGActionBar::IsAutoRepeatAction(uint32_t slot) {
+BOOL CGActionBar::IsAutoRepeatAction(uint32_t slot) {
     if (slot > (CGActionBar::NUM_ACTION_SLOTS - 1)) {
         return 0;
     }
@@ -1837,7 +1837,7 @@ int32_t CGActionBar::IsAutoRepeatAction(uint32_t slot) {
 
 // VERIFY: 7fa85525 manual
 // OFFSET: 0x005A94C0
-int32_t CGActionBar::HasValidTarget(uint32_t slot, WOWGUID target, int32_t* inRange) {
+BOOL CGActionBar::HasValidTarget(uint32_t slot, WOWGUID target, int32_t* inRange) {
     if (slot > (CGActionBar::NUM_ACTION_SLOTS - 1)) {
         return 0;
     }

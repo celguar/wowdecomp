@@ -517,7 +517,7 @@ void CGObject_C::HandleOutOfRange(OUT_OF_RANGE_TYPE type) {
 
 // VERIFY: 25fd42ac auto
 // OFFSET: 0x008C8DE0
-int32_t CGObject_C::ShouldFadeout() {
+BOOL CGObject_C::ShouldFadeout() {
     return 1;
 }
 
@@ -617,7 +617,7 @@ void CGObject_C::SetFrameOfReference(const C44Matrix* matrix) {
 
 // VERIFY: b70df993 auto
 // OFFSET: 0x008E5250
-int32_t CGObject_C::IsQuestGiver() const {
+BOOL CGObject_C::IsQuestGiver() const {
     return 0;
 }
 
@@ -744,25 +744,25 @@ void CGObject_C::OnSpecialMountAnim() {
 
 // VERIFY: f815c558 auto
 // OFFSET: 0x008C8DE0
-int32_t CGObject_C::IsSolidSelectable() const {
+BOOL CGObject_C::IsSolidSelectable() const {
     return 1;
 }
 
 // VERIFY: 76524fa5 auto
 // OFFSET: 0x00959DE0
-int32_t CGObject_C::IsCollidable(int32_t flags) const {
+BOOL CGObject_C::IsCollidable(int32_t flags) const {
     return 1;
 }
 
 // VERIFY: b4c0da8d auto
 // OFFSET: 0x008E5250
-int32_t CGObject_C::CanHighlight() const {
+BOOL CGObject_C::CanHighlight() const {
     return 0;
 }
 
 // VERIFY: df7e2e8f auto
 // OFFSET: 0x008E5250
-int32_t CGObject_C::CanBeTargetted() const {
+BOOL CGObject_C::CanBeTargetted() const {
     return 0;
 }
 
@@ -779,7 +779,7 @@ void CGObject_C::OnRightClick() {
 
 // VERIFY: 896f70ae auto
 // OFFSET: 0x008E5250
-int32_t CGObject_C::IsHighlightSuppressed() const {
+BOOL CGObject_C::IsHighlightSuppressed() const {
     return 0;
 }
 
@@ -803,7 +803,7 @@ int32_t CGObject_C::UpdateObjectNameString(int32_t flags, char* buffer, uint32_t
 
 // VERIFY: 9000471f auto
 // OFFSET: 0x00743530
-int32_t CGObject_C::ShouldRenderObjectName(uint32_t flags) const {
+BOOL CGObject_C::ShouldRenderObjectName(uint32_t flags) const {
     if (this->m_interactIcon) {
         return 0;
     }
@@ -836,7 +836,7 @@ void CGObject_C::CleanUpVehicleBoneAnimsBeforeObjectModelChange() {
 
 // VERIFY: daa8fb99 auto
 // OFFSET: 0x008C8DE0
-int32_t CGObject_C::ShouldFadeIn() const {
+BOOL CGObject_C::ShouldFadeIn() const {
     return 1;
 }
 
@@ -854,7 +854,7 @@ bool CGObject_C::IsTransport() const {
 
 // VERIFY: f7102178 auto
 // OFFSET: 0x004899F0
-int32_t CGObject_C::IsPointInside(const C3Vector& point) const {
+BOOL CGObject_C::IsPointInside(const C3Vector& point) const {
     return 0;
 }
 
@@ -1002,13 +1002,13 @@ void CGObject_C::HideHighlightType(HIGHLIGHTTYPE type) {
 
 // VERIFY: 9da10cdf manual
 // OFFSET: 0x007433D0
-int32_t CGObject_C::IsObjectLocked() {
+BOOL CGObject_C::IsObjectLocked() {
     return (this->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_LOCK_COUNT_MASK) != 0;
 }
 
 // VERIFY: b07b7284 auto
 // OFFSET: 0x00743390
-int32_t CGObject_C::IsObjectModelLoaded() {
+BOOL CGObject_C::IsObjectModelLoaded() {
     if (this->GetObjectModel() && this->GetObjectModel()->IsLoaded(0, 0)) {
         return 1;
     }
@@ -1018,7 +1018,7 @@ int32_t CGObject_C::IsObjectModelLoaded() {
 
 // VERIFY: 72e63e2b auto
 // OFFSET: 0x00743450
-int32_t CGObject_C::IsReadyToDraw() {
+BOOL CGObject_C::IsReadyToDraw() {
     if (this->GetObjectModel() && this->GetObjectModel()->IsDrawable(0, 0)) {
         return 1;
     }
