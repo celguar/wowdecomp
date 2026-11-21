@@ -442,8 +442,8 @@ static int32_t Script_SetChatWindowLocked(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
-        s_chatWindows[index].m_unkD8 = StringToBOOL(L, 2, 0);
+    if (index < NUM_CHAT_WINDOWS) {
+        s_chatWindows[index].m_locked = StringToBOOL(L, 2, 0);
     }
 
     return 0;
@@ -459,7 +459,7 @@ static int32_t Script_SetChatWindowUninteractable(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         s_chatWindows[index].m_unkE4 = StringToBOOL(L, 2, 0);
     }
 
@@ -476,7 +476,7 @@ static int32_t Script_SetChatWindowShown(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         s_chatWindows[index].m_shown = StringToBOOL(L, 2, 1);
     }
 
@@ -493,7 +493,7 @@ static int32_t Script_GetChatWindowSavedDimensions(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -512,7 +512,7 @@ static int32_t Script_SetChatWindowName(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         const char* name = "";
 
         if (lua_isstring(L, 2)) {
@@ -535,7 +535,7 @@ static int32_t Script_SetChatWindowSize(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         int32_t size = static_cast<int32_t>(lua_tonumber(L, 2));
 
         if (size > 0) {
@@ -566,7 +566,7 @@ static int32_t Script_SetChatWindowAlpha(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         s_chatWindows[index].m_color.a = static_cast<uint8_t>(lua_tonumber(L, 2) * 255.0);
     }
 
@@ -583,7 +583,7 @@ static int32_t Script_SetChatWindowDocked(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         uint32_t docked = 0;
 
         if (lua_isnumber(L, 2)) {
@@ -606,7 +606,7 @@ static int32_t Script_SetChatWindowSavedDimensions(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -628,7 +628,7 @@ static int32_t Script_GetChatWindowSavedPosition(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10 || !s_chatWindows[index].m_hasSavedLayout) {
+    if (index >= NUM_CHAT_WINDOWS || !s_chatWindows[index].m_hasSavedLayout) {
         return 0;
     }
 
@@ -704,7 +704,7 @@ static int32_t Script_SetChatWindowSavedPosition(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -761,7 +761,7 @@ static int32_t Script_SetChatWindowColor(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -782,7 +782,7 @@ static int32_t Script_GetChatWindowInfo(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -799,7 +799,7 @@ static int32_t Script_GetChatWindowInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (s_chatWindows[index].m_unkD8) {
+    if (s_chatWindows[index].m_locked) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1115,13 +1115,13 @@ static int32_t Script_GetChatWindowMessages(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
     int32_t count = 0;
 
-    for (uint32_t i = 0; i < 46; i++) {
+    for (uint32_t i = 0; i < NUM_CHAT_MESSAGE_GROUPS; i++) {
         if (s_chatWindows[index].m_messageGroups[i]) {
             lua_checkstack(L, 1);
             lua_pushstring(L, s_chatMessageGroups[i].m_name);
@@ -1142,13 +1142,13 @@ static int32_t Script_AddChatWindowMessages(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
     const char* group = lua_tolstring(L, 2, nullptr);
 
-    for (uint32_t i = 0; i < 46; i++) {
+    for (uint32_t i = 0; i < NUM_CHAT_MESSAGE_GROUPS; i++) {
         if (!SStrCmpI(group, s_chatMessageGroups[i].m_name, STORM_MAX_STR)) {
             s_chatWindows[index].m_messageGroups[i] = 1;
             return 0;
@@ -1168,13 +1168,13 @@ static int32_t Script_RemoveChatWindowMessages(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
     const char* group = lua_tolstring(L, 2, nullptr);
 
-    for (uint32_t i = 0; i < 46; i++) {
+    for (uint32_t i = 0; i < NUM_CHAT_MESSAGE_GROUPS; i++) {
         if (!SStrCmpI(group, s_chatMessageGroups[i].m_name, STORM_MAX_STR)) {
             s_chatWindows[index].m_messageGroups[i] = 0;
             return 0;
@@ -1330,7 +1330,7 @@ static int32_t Script_GetChatWindowChannels(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -1738,7 +1738,7 @@ static int32_t Script_RemoveChatWindowChannel(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -2114,7 +2114,7 @@ static int32_t Script_AddChatWindowChannel(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -2155,9 +2155,9 @@ static int32_t Script_ResetChatWindows(lua_State* L) {
         s_chatColors[i].m_colorNameByClass = s_chatTypeInfo[i].m_colorNameByClass;
     }
 
-    s_channelColors.SetCount(10);
+    s_channelColors.SetCount(MAX_WOW_CHAT_CHANNELS);
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < MAX_WOW_CHAT_CHANNELS; i++) {
         SStrPrintf(s_channelColors.m_data[i].m_name, sizeof(s_channelColors.m_data[i].m_name), "CHANNEL%d", i + 1);
         s_channelColors.m_data[i].m_color[0] = s_chatColors[CHAT_MSG_CHANNEL].m_color[0];
         s_channelColors.m_data[i].m_color[1] = s_chatColors[CHAT_MSG_CHANNEL].m_color[1];
@@ -2165,7 +2165,7 @@ static int32_t Script_ResetChatWindows(lua_State* L) {
         s_channelColors.m_data[i].m_colorNameByClass = s_chatColors[CHAT_MSG_CHANNEL].m_colorNameByClass;
     }
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < NUM_CHAT_WINDOWS; i++) {
         memset(s_chatWindows[i].m_messageGroups, 0, sizeof(s_chatWindows[i].m_messageGroups));
         s_chatWindows[i].Reset();
         s_chatWindows[i].Init();
@@ -2173,7 +2173,7 @@ static int32_t Script_ResetChatWindows(lua_State* L) {
         if (i == 0) {
             s_chatWindows[0].m_shown = 1;
 
-            for (uint32_t j = 0; j < 40; j++) {
+            for (uint32_t j = 0; j < CHAT_MESSAGE_GROUP_FIRST_COMBAT_LOG; j++) {
                 s_chatWindows[0].m_messageGroups[j] = s_chatMessageGroups[j].m_default != 0;
             }
 
@@ -2181,12 +2181,12 @@ static int32_t Script_ResetChatWindows(lua_State* L) {
         } else if (i == 1) {
             s_chatWindows[1].m_shown = 1;
             s_chatWindows[1].m_docked = 2;
-            s_chatWindows[1].m_messageGroups[40] = 1;
-            s_chatWindows[1].m_messageGroups[41] = 1;
-            s_chatWindows[1].m_messageGroups[42] = 1;
-            s_chatWindows[1].m_messageGroups[43] = 1;
-            s_chatWindows[1].m_messageGroups[44] = 1;
-            s_chatWindows[1].m_messageGroups[45] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_OPENING] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_TRADESKILLS] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_PET_INFO] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_COMBAT_XP_GAIN] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_COMBAT_HONOR_GAIN] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_COMBAT_MISC_INFO] = 1;
         }
     }
 
