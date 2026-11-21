@@ -9,6 +9,15 @@ class SFileImpl;
 // Four independent procedural-effect slots in SpellVisualKit.dbc.
 constexpr int32_t NUM_SPELL_VISUAL_CHAR_PROCS = 4;
 
+// Inferred name: length of SpellVisualKitRec::m_specialEffect.
+constexpr int32_t NUM_SPELL_VISUAL_SPECIAL_EFFECTS = 3;
+
+// SpellVisualKit.dbc record IDs the client selects directly, named from their
+// effect model.
+enum SPELL_VISUAL_KIT_ID : int32_t {
+    SPELL_VISUAL_KIT_ID_GHOST = 989, // chest effect "Spells\Ghost_state.mdx"
+};
+
 // Descriptive client behavior. Unresolved meanings remain UNKNOWN, not UNUSED.
 // IDs 0 and 12 share the native chain-lightning branch (0x007265C0).
 enum SPELL_VISUAL_CHAR_PROC : int32_t {
@@ -36,6 +45,7 @@ enum SPELL_VISUAL_CHAR_PROC : int32_t {
 class SpellVisualKitRec {
     public:
     enum KIT_FLAGS : int32_t {
+        NONE = 0x0,
         WAIT_FOR_BEAM_ACTIVATION = 0x1,
         // Reference bit1: PlayImpactKitOncePerMissileVolley; current use unconfirmed.
         FORCE_SPECIFIC_ANIMATION = 0x4,
@@ -65,16 +75,16 @@ class SpellVisualKitRec {
     /* 0020 */ int32_t m_breathEffect;
     /* 0024 */ int32_t m_leftWeaponEffect;
     /* 0028 */ int32_t m_rightWeaponEffect;
-    /* 002C */ int32_t m_specialEffect [3];
+    /* 002C */ int32_t m_specialEffect [NUM_SPELL_VISUAL_SPECIAL_EFFECTS];
     /* 0038 */ int32_t m_worldEffect;
     /* 003C */ int32_t m_soundID;
     /* 0040 */ int32_t m_shakeID;
-    /* 0044 */ int32_t m_charProc [NUM_SPELL_VISUAL_CHAR_PROCS];
+    /* 0044 */ SPELL_VISUAL_CHAR_PROC m_charProc [NUM_SPELL_VISUAL_CHAR_PROCS];
     /* 0054 */ float m_charParamZero [NUM_SPELL_VISUAL_CHAR_PROCS];
     /* 0064 */ float m_charParamOne [NUM_SPELL_VISUAL_CHAR_PROCS];
     /* 0074 */ float m_charParamTwo [NUM_SPELL_VISUAL_CHAR_PROCS];
     /* 0084 */ float m_charParamThree [NUM_SPELL_VISUAL_CHAR_PROCS];
-    /* 0094 */ int32_t m_flags;
+    /* 0094 */ KIT_FLAGS m_flags;
 
     SpellVisualKitRec();
     ~SpellVisualKitRec();
