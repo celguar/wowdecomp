@@ -1,6 +1,6 @@
 #include "Engine/Source/Gxu/GxuDebugDraw.h"
 
-#ifdef WOWDECOMP_TOOL_FEATURES
+#ifdef WOWDECOMP_GXU_DEBUG_DRAW
 
 // Tool features: GxuBufferCache (4.1 Engine/Source/Gxu/GxuBufferCache.cpp, 13850 Mac 0x00AE5810..0x00AE6970).
 // Shared vertex/index buffers addressed by small handles; the debug shape factories keep one handle each. 4.1 asserts
