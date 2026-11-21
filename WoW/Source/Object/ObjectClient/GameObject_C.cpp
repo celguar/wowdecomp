@@ -663,7 +663,7 @@ bool CGGameObject_C::IsTransport() const {
 
 // VERIFY: da4967fc manual
 // OFFSET: 0x0070EF90
-bool CGGameObject_C::IsValidOpenAction(int32_t action) const {
+bool CGGameObject_C::IsValidOpenAction(LOCK_ACTION action) const {
     if (action == LOCK_ACTION_UNKNOWN_4) {
         return this->m_displayState == GAMEOBJECT_DISPLAY_STATE_DESTROYED;
     }
@@ -961,17 +961,17 @@ void CGGameObject_C_TypeAnimated::ResetAnimState() {
     int32_t state = -1;
 
     switch (owner->m_displayState) {
-        case 0: {
+        case GAMEOBJECT_DISPLAY_STATE_OPEN: {
             state = (owner->m_gameObject->m_pathProgress == 0xFFFF) + ANIMSTATE_OPENING;
             break;
         }
 
-        case 1: {
+        case GAMEOBJECT_DISPLAY_STATE_CLOSED: {
             state = owner->m_gameObject->m_pathProgress != 0xFFFF ? ANIMSTATE_CLOSING : ANIMSTATE_CLOSED;
             break;
         }
 
-        case 2: {
+        case GAMEOBJECT_DISPLAY_STATE_DESTROYED: {
             state = (owner->m_gameObject->m_pathProgress == 0xFFFF) + ANIMSTATE_DESTROYING;
             break;
         }
@@ -1468,7 +1468,7 @@ void CGGameObject_C::UpdateObjectEffectAnimationStates(uint32_t anim) {
         return;
     }
 
-    uint32_t state = FindObjectEffectStateFromAnimID(anim, 0);
+    OBJECT_EFFECT_STATE state = FindObjectEffectStateFromAnimID(anim, 0);
 
     if (!state || state == this->m_effectAnimState) {
         return;
@@ -2001,7 +2001,7 @@ CGGameObject_C::CGGameObject_C(uint32_t time, const CClientObjCreate& create) : 
             break;
     }
 
-    this->m_effectAnimState = 0;
+    this->m_effectAnimState = OBJECT_EFFECT_STATE_INVALID;
 }
 
 // VERIFY: cd300a2b auto
@@ -3064,13 +3064,13 @@ effects:
         uint32_t current = model->GetBoneSequenceId(M2_KEY_BONE_NONE);
 
         if (current != sequence) {
-            int32_t exitState = FindObjectEffectStateFromAnimID(current, 0);
+            OBJECT_EFFECT_STATE exitState = FindObjectEffectStateFromAnimID(current, 0);
 
             if (exitState) {
                 this->m_owner->m_effectManager->ExitState(exitState, 1);
             }
 
-            int32_t enterState = FindObjectEffectStateFromAnimID(sequence, 0);
+            OBJECT_EFFECT_STATE enterState = FindObjectEffectStateFromAnimID(sequence, 0);
 
             if (enterState) {
                 this->m_owner->m_effectManager->EnterState(enterState, 1, 0);
@@ -3627,7 +3627,7 @@ bool CGGameObject_C::IsLocked(int32_t* spellId, int32_t* skillValue, int32_t* re
     bool locked = false;
 
     for (uint32_t i = 0; i < NUM_LOCK_KEYS; i++) {
-        int32_t type = lock->m_type[i];
+        LOCK_KEY_TYPE type = lock->m_type[i];
 
         if (!type) {
             continue;
@@ -4026,8 +4026,8 @@ void CGGameObject_C::RefreshInteractIcon() {
     if (this->ObjectReaction(player) >= UNIT_REACTION_NEUTRAL && this->IsQuestGiver()) {
         player->UpdateQuestStatus(this);
     } else {
-        this->m_questStatus = 0;
-        this->m_interactIconType = 0;
+        this->m_questStatus = QUEST_GIVER_STATUS::QUEST_GIVER_NONE;
+        this->m_interactIconType = INTERACT_ICON_NONE;
         this->RemoveInteractIcon();
     }
 }
