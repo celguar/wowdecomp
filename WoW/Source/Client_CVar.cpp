@@ -23,6 +23,8 @@
 #include "WoW/Source/Hardware.h"
 #include "WoW/Source/WowSysMessageOutput.h"
 #include "WoW/Source/DebugFeatures.h"
+#include "WoW/Source/Ui/WorldFrame_DebugDrawTest.h"
+#include "WowEdit/Source/WowEdit.h"
 
 // STATIC: 0x00AB6004
 static const char* s_filterNames[] = { "general", "world", "ui", "animation", "models", "objects", "sound", "movement", "network" };
@@ -187,7 +189,7 @@ static void DisplayErrorLevelStatus() {
     uint32_t minLevel = SysMsgGetMinDisplayLevel();
     uint32_t maxLevel = SysMsgGetMaxDisplayLevel();
 
-    if (!minLevel && maxLevel == 3) {
+    if (minLevel == STATUS_INFO && maxLevel == STATUS_FATAL) {
         ConsoleWrite("Displaying all system messages", DEFAULT_COLOR);
         return;
     }
@@ -200,19 +202,19 @@ static void DisplayErrorLevelStatus() {
     }
 
     switch (minLevel) {
-        case 0:
+        case STATUS_INFO:
             SStrPack(status, "informational messages", STORM_MAX_STR);
             break;
 
-        case 1:
+        case STATUS_WARNING:
             SStrPack(status, "warnings", STORM_MAX_STR);
             break;
 
-        case 2:
+        case STATUS_ERROR:
             SStrPack(status, "errors", STORM_MAX_STR);
             break;
 
-        case 3:
+        case STATUS_FATAL:
             SStrPack(status, "fatal errors", STORM_MAX_STR);
             break;
 
@@ -222,15 +224,15 @@ static void DisplayErrorLevelStatus() {
 
     if (minLevel != maxLevel) {
         switch (maxLevel) {
-            case 1:
+            case STATUS_WARNING:
                 SStrPack(status, " through warnings", STORM_MAX_STR);
                 break;
 
-            case 2:
+            case STATUS_ERROR:
                 SStrPack(status, " through errors", STORM_MAX_STR);
                 break;
 
-            case 3:
+            case STATUS_FATAL:
                 SStrPack(status, " through fatal errors", STORM_MAX_STR);
                 break;
         }
@@ -666,6 +668,10 @@ void ClientRegisterConsoleCommands() {
     g_readEULAVar = CVar::Register("readEULA", "Status of the EULA", CVAR_FLAGS::CVAR_NONE, "0", nullptr, CATEGORY_GAME, false, nullptr, false);
 #ifdef WOWDECOMP_DEBUG_FEATURES
     ClientDebugRegisterConsoleCommands();
+#endif
+#ifdef WOWDECOMP_TOOL_FEATURES
+    GxuDebugDrawTestRegister();
+    WowEditRegisterConsoleCommands();
 #endif
     g_readTerminationWithoutNoticeVar = CVar::Register("readTerminationWithoutNotice", "Status of the Termination without Notice notice", CVAR_FLAGS::CVAR_NONE, "0", nullptr, CATEGORY_GAME, false, nullptr, false);
     g_readScanningVar = CVar::Register("readScanning", "Status of the Scanning notice", CVAR_FLAGS::CVAR_NONE, "0", nullptr, CATEGORY_GAME, false, nullptr, false);
