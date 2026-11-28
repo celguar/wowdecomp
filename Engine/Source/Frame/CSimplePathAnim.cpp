@@ -135,6 +135,8 @@ void CSimplePathAnim::UpdateControlPointPositions() {
 // VERIFY: c544ae9e manual
 // OFFSET: 0x00499090
 void CSimplePathAnim::NotifyOrderChanged(CSimpleControlPoint* point) {
+    STORM_ASSERT_RECOVERABLE(point);
+
     if (!point) {
         return;
     }
@@ -142,7 +144,7 @@ void CSimplePathAnim::NotifyOrderChanged(CSimpleControlPoint* point) {
     int32_t index = this->FindControlPoint(point->m_order);
 
     if (index >= 0) {
-        this->m_controlPoints.LinkNode(point, 2, this->m_sortedPoints[index]);
+        this->m_controlPoints.LinkNode(point, TSLIST_LINK_BEFORE, this->m_sortedPoints[index]);
     }
 
     this->BuildSpline();
@@ -432,13 +434,11 @@ void CSimplePathAnim::LoadXML(XMLNode* node, CStatus* status) {
 // VERIFY: f10c3adc auto
 // OFFSET: 0x0049C040
 void CSimplePathAnim::PostLoadXML(XMLNode* node, CStatus* status) {
-    this->m_flags ^= 1;
+    this->m_flags ^= SIMPLEANIM_FLAG_IS_LOADING;
     this->BuildSpline();
     this->UpdateControlPointPositions();
 
-    if (this->m_onLoad.m_luaRef) {
-        this->RunScript(this->m_onLoad, 0, nullptr);
-    }
+    this->RunOnLoadScript();
 }
 
 // VERIFY: 6a79e6ce manual
@@ -455,7 +455,7 @@ void CSimplePathAnim::NotifyControlPointAdded(CSimpleControlPoint* point) {
             this->UpdateControlPointPositions();
         }
     } else {
-        this->m_controlPoints.LinkNode(point, 2, this->m_sortedPoints[index]);
+        this->m_controlPoints.LinkNode(point, TSLIST_LINK_BEFORE, this->m_sortedPoints[index]);
         this->BuildSpline();
         this->UpdateControlPointPositions();
     }

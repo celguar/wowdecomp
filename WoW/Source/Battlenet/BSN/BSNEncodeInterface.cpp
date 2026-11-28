@@ -9,11 +9,11 @@ void BSN::EncodeContext::ResolveType() {
         return;
     }
 
-    this->m_header = BSN::Protocol::Meta::Base(this->m_protocol, this->m_typeId).m_header & 0x3F;
+    this->m_header = BSN::Protocol::Meta::Base(this->m_protocol, this->m_typeId).m_header & BSN::META_HEADER_TYPE_MASK;
 
     while (this->m_header == BSN::META_USER) {
         this->m_typeId = BSN::Protocol::Meta::User(this->m_protocol, this->m_typeId).m_userTypeId;
-        this->m_header = BSN::Protocol::Meta::Base(this->m_protocol, this->m_typeId).m_header & 0x3F;
+        this->m_header = BSN::Protocol::Meta::Base(this->m_protocol, this->m_typeId).m_header & BSN::META_HEADER_TYPE_MASK;
     }
 }
 
@@ -55,13 +55,13 @@ uint64_t BSN::BSNPrimitiveEncoder::GetUInt(const EncodeContext* context) const {
 
     if (context->m_header == BSN::META_INT) {
         BSN::Protocol::Meta::Int meta(context->m_protocol, context->m_typeId);
-        BSN::Cpp::ReadInt(context->m_data, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(meta.m_codeInfo[0])), (meta.m_bounds.m_intType & 1) == 0, value);
+        BSN::Cpp::ReadInt(context->m_data, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(meta.m_codeInfo[0])), (meta.bounds.m_intType & BSN::Protocol::Type::Int::TYPE_UNSIGNED) == 0, value);
         return value;
     }
 
     if (context->m_header == BSN::META_ENUM) {
         BSN::Protocol::Meta::Enum meta(context->m_protocol, context->m_typeId);
-        BSN::Cpp::ReadInt(context->m_data, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(meta.m_codeInfo[0])), (meta.m_bounds.m_intType & 1) == 0, value);
+        BSN::Cpp::ReadInt(context->m_data, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(meta.m_codeInfo[0])), (meta.bounds.m_intType & BSN::Protocol::Type::Int::TYPE_UNSIGNED) == 0, value);
         return value;
     }
 
@@ -132,13 +132,15 @@ uint32_t BSN::BSNPrimitiveEncoder::GetStringLength(const EncodeContext* context)
 
 // VERIFY: 471108be manual
 // OFFSET: 0x00889500
-bool BSN::BSNPrimitiveEncoder::GetString(const EncodeContext* context, char* buffer, uint32_t size) const {
+bool BSN::BSNPrimitiveEncoder::GetString(const EncodeContext* context, char* buffer, uint32_t maxLength) const {
+    STORM_ASSERT(maxLength > 0);
+
     if (context->m_header == BSN::META_ASCII_STRING) {
         BSN::Protocol::Meta::AsciiString meta(context->m_protocol, context->m_typeId);
         uint32_t length = reinterpret_cast<AdapterGetLength>(meta.m_codeInfo[0])(context->m_data);
 
-        if (length >= size) {
-            length = size - 1;
+        if (length >= maxLength) {
+            length = maxLength - 1;
         }
 
         memcpy(buffer, reinterpret_cast<AdapterGetElements>(meta.m_codeInfo[1])(context->m_data), length);
@@ -150,8 +152,8 @@ bool BSN::BSNPrimitiveEncoder::GetString(const EncodeContext* context, char* buf
         BSN::Protocol::Meta::String meta(context->m_protocol, context->m_typeId);
         uint32_t length = reinterpret_cast<AdapterGetLength>(meta.m_codeInfo[0])(context->m_data);
 
-        if (length >= size) {
-            length = size - 1;
+        if (length >= maxLength) {
+            length = maxLength - 1;
         }
 
         memcpy(buffer, reinterpret_cast<AdapterGetElements>(meta.m_codeInfo[1])(context->m_data), length);
@@ -266,7 +268,7 @@ bool BSN::BSNPrimitiveEncoder::GetMemberContext(const EncodeContext* context, co
 
     if (context->m_header == BSN::META_STRUCT) {
         BSN::Protocol::Meta::Struct meta(context->m_protocol, context->m_typeId);
-        uint32_t count = meta.m_count;
+        uint32_t count = meta.fieldCount;
 
         if (!count) {
             return false;
@@ -371,7 +373,7 @@ bool BSN::BSNPrimitiveEncoder::SetUInt(EncodeContext* context, uint64_t value) c
     if (context->m_header == BSN::META_INT) {
         BSN::Protocol::Meta::Int meta(context->m_protocol, context->m_typeId);
 
-        if (meta.m_bounds.Contains(value)) {
+        if (meta.bounds.Contains(value)) {
             BSN::Cpp::WriteInt(value, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(meta.m_codeInfo[0])), context->m_data);
             return true;
         }
@@ -381,7 +383,7 @@ bool BSN::BSNPrimitiveEncoder::SetUInt(EncodeContext* context, uint64_t value) c
         BSN::Protocol::Meta::Enum meta(context->m_protocol, context->m_typeId);
         uint32_t field;
 
-        if (meta.GetEnumField(value, field) || (meta.m_bounds.m_variable && meta.m_bounds.Contains(value))) {
+        if (meta.GetEnumField(value, field) || (meta.bounds.m_variable && meta.bounds.Contains(value))) {
             BSN::Cpp::WriteInt(value, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(meta.m_codeInfo[0])), context->m_data);
             return true;
         }
@@ -569,7 +571,7 @@ bool BSN::BSNPrimitiveEncoder::SetOptional(EncodeContext* context, bool exists) 
 // VERIFY: 284266a9 auto
 // OFFSET: 0x00889360
 bool BSN::BSNPrimitiveEncoder::WalkAndSet(const PrimitiveEncoder* encoder, EncodeContext* context, const EncodeContext* source) const {
-    if (!source->m_protocol->m_dumpInfoSize) {
+    if (!source->m_protocol->HasDumpInfo()) {
         return false;
     }
 
@@ -582,13 +584,15 @@ bool BSN::BSNPrimitiveEncoder::WalkAndSet(const PrimitiveEncoder* encoder, Encod
     walkContext.m_targetContext = context;
 
     BSNPrimitiveWalker walker;
-    return walker.Copy(walkContext) == BSN::WALK_VALID;
+    int32_t r = walker.Copy(walkContext);
+    STORM_ASSERT(r == BSN::WALK_VALID); // 12213: "r == BSNPrimitiveWalker::VALID"
+    return r == BSN::WALK_VALID;
 }
 
 // VERIFY: c490c34a auto
 // OFFSET: 0x008893C0
 bool BSN::BSNPrimitiveEncoder::WalkAndGet(const PrimitiveEncoder* encoder, const EncodeContext* source, EncodeContext* context) const {
-    if (!context->m_protocol->m_dumpInfoSize) {
+    if (!context->m_protocol->HasDumpInfo()) {
         return false;
     }
 
@@ -601,7 +605,9 @@ bool BSN::BSNPrimitiveEncoder::WalkAndGet(const PrimitiveEncoder* encoder, const
     walkContext.m_targetContext = context;
 
     BSNPrimitiveWalker walker;
-    return walker.Copy(walkContext) == BSN::WALK_VALID;
+    int32_t r = walker.Copy(walkContext);
+    STORM_ASSERT(r == BSN::WALK_VALID); // 12213: "r == BSNPrimitiveWalker::VALID"
+    return r == BSN::WALK_VALID;
 }
 
 // VERIFY: 671c3b71 manual
@@ -821,7 +827,7 @@ int32_t BSN::BSNPrimitiveWalker::Struct(const Protocol::Meta::Struct& meta, cons
         return BSN::WALK_INVALID;
     }
 
-    uint32_t count = meta.m_count;
+    uint32_t count = meta.fieldCount;
 
     for (uint32_t index = 0; index < count; index++) {
         if (result) {

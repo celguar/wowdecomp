@@ -1,3 +1,4 @@
+#include "WoW/Common/ComponentCore/Types.h"
 #include "VisibleItem_C.h"
 #include <cstdlib>
 #include "WoW/Source/DB/DBClient/DBCacheInstances.h"
@@ -33,16 +34,16 @@ uint32_t VisibleItem_C::GetSubtypeID() {
 
 // VERIFY: 0eef7107 auto
 // OFFSET: 0x00758DD0
-uint32_t VisibleItem_C::GetInventoryType() {
+INVENTORY_TYPES VisibleItem_C::GetInventoryType() {
     WOWGUID guid = WOWGUID();
     ItemStats_C* stats = g_itemDBCache.GetRecord(abs(this->m_itemId), guid, &VisibleItemCacheCallback, nullptr, true);
 
     if (stats) {
-        return stats->m_inventoryType;
+        return static_cast<INVENTORY_TYPES>(stats->m_inventoryType);
     }
 
     ItemRec* rec = g_itemDB.GetRecord(abs(this->m_itemId));
-    return rec ? rec->m_inventoryType : 0;
+    return rec ? rec->m_inventoryType : INVTYPE_NON_EQUIP;
 }
 
 // VERIFY: 9f906c98 auto
@@ -75,16 +76,16 @@ uint32_t VisibleItem_C::GetMaterial() {
 
 // VERIFY: 38f006d3 auto
 // OFFSET: 0x00758F50
-uint32_t VisibleItem_C::GetSheatheType() {
+SHEATHE_TYPE VisibleItem_C::GetSheatheType() {
     WOWGUID guid = WOWGUID();
     ItemStats_C* stats = g_itemDBCache.GetRecord(abs(this->m_itemId), guid, &VisibleItemCacheCallback, nullptr, true);
 
     if (stats) {
-        return stats->m_sheatheType;
+        return static_cast<SHEATHE_TYPE>(stats->m_sheatheType);
     }
 
     ItemRec* rec = g_itemDB.GetRecord(abs(this->m_itemId));
-    return rec ? rec->m_sheatheType : 0;
+    return rec ? static_cast<SHEATHE_TYPE>(rec->m_sheatheType) : SHEATHE_NONE;
 }
 
 // VERIFY: 610fe897 auto

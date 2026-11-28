@@ -54,6 +54,30 @@ if (WOWDECOMP_DISABLE_SIGNATURE_CHECKS)
     add_compile_definitions(DISABLE_SIGNATURE_CHECKS=1)
 endif ()
 
+# Off by default: debug features (0.5.3 debug commands, CVars and render modes stripped from the 3.3.5 release build)
+# are compiled only when ON, and the console is then always available (no -console argument needed).
+# The release build stays identical to the original.
+option(WOWDECOMP_DEBUG_FEATURES "Build the debug-feature shells stripped from the release client" OFF)
+if (WOWDECOMP_DEBUG_FEATURES)
+    add_compile_definitions(WOWDECOMP_DEBUG_FEATURES=1)
+endif ()
+
+# Off by default: tool features (the art-tool and editor code the engine shared with Blizzard's internal tools and
+# that the retail branches compiled out: the OsGui Win32 control toolkit, the M2/skin and WMO writers, the CAaBsp
+# tree builder, the Gxu debug-draw module, and the WowEdit/ editor library). Shells and restorations live behind
+# #ifdef WOWDECOMP_TOOL_FEATURES.
+option(WOWDECOMP_TOOL_FEATURES "Build the tool/editor code shells stripped from the release client" OFF)
+if (WOWDECOMP_TOOL_FEATURES)
+    add_compile_definitions(WOWDECOMP_TOOL_FEATURES=1)
+endif ()
+
+# Off by default: the debug assertions found in the 3.3.5.12213 Mac build (SErrDisplayError with
+# STORM_ERROR_ASSERTION). The 3.3.5a Windows release compiled them out; ON restores them (STORM_ASSERT).
+option(WOWDECOMP_ASSERTIONS "Build the debug assertions compiled out of the release client" OFF)
+if (WOWDECOMP_ASSERTIONS)
+    add_compile_definitions(WOWDECOMP_ASSERTIONS=1)
+endif ()
+
 # Game identity (build 12340, version 3.3.5, client name) lives in GameVersion.h at the repository root.
 # WaystoneVersion.h is regenerated from git on every build; the login screen shows its build number.
 set(WAYSTONE_VERSION_HEADER ${CMAKE_BINARY_DIR}/generated/WaystoneVersion.h)
@@ -115,8 +139,14 @@ add_subdirectory(WoW/Source/WorldClient)
 add_subdirectory(WoW/Source/WowServices)
 add_subdirectory(WoW/Source/WowSvcs)
 add_subdirectory(WoW/Source)
+if (WOWDECOMP_TOOL_FEATURES)
+    add_subdirectory(WowEdit)
+endif ()
 if (WIN32)
     add_subdirectory(Tools/WowClient)
+endif ()
+if (WIN32 AND WOWDECOMP_TOOL_FEATURES)
+    add_subdirectory(Tools/WowEditApp)
 endif ()
 if (WOWDECOMP_ARCH_64)
     add_subdirectory(Tools/XvidDecoder)
@@ -125,8 +155,19 @@ endif ()
 add_dependencies(Glue WaystoneVersion)
 add_dependencies(Ui WaystoneVersion)
 
-foreach (target Wow WowClient MapViewer M2Viewer GxTest MpqTest BlpTest DbcTest AssetCheck)
+foreach (target Wow WowClient WowEditApp MapViewer M2Viewer GxTest MpqTest BlpTest DbcTest AssetCheck)
     if (TARGET ${target})
         target_sources(${target} PRIVATE ${CMAKE_SOURCE_DIR}/waystone.rc)
     endif ()
 endforeach ()
+
+# List headers in the IDE projects (Visual Studio) so they can be searched and opened there.
+include(${CMAKE_SOURCE_DIR}/cmake/IdeHeaders.cmake)
+wowdecomp_add_ide_headers()
+
+# Visual Studio: WowClient is the startup project (F5 builds and launches it), run from its output directory like
+# launching the exe directly.
+if (TARGET WowClient)
+    set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT WowClient)
+    set_property(TARGET WowClient PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:WowClient>)
+endif ()

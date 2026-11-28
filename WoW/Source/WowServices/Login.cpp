@@ -168,7 +168,7 @@ Login::Login() {
     this->m_password = nullptr;
     this->m_loggedOn = false;
     this->m_online = false;
-    this->m_logonStatus = -1;
+    this->m_logonStatus = LOGON_STATUS_PENDING;
     this->m_pinFailures = 0;
     this->m_reconnect = false;
     memset(this->m_username, 0, sizeof(this->m_username));
@@ -215,6 +215,12 @@ bool Login::GetCdKeys(Grunt::CdKey& cdKey) {
     return this->m_loginResponse->GetCdKeys(cdKey);
 }
 
+// Realm list population sentinels; each is replaced by the REALM_FLAG_* it
+// stands for and a display population (inferred names).
+static const float REALM_POPULATION_NEW_PLAYERS = 200.0f;
+static const float REALM_POPULATION_FULL = 400.0f;
+static const float REALM_POPULATION_RECOMMENDED = 600.0f;
+
 // VERIFY: 829265f4 manual
 // OFFSET: 0x00465B20
 void LoginResponse::HandleRealmData(uint32_t result, CDataStore* msg) {
@@ -244,7 +250,7 @@ void LoginResponse::HandleRealmData(uint32_t result, CDataStore* msg) {
         msg->Get(realm->m_numCharacters);
         msg->Get(realm->m_category);
 
-        if (this->GetLoginServerType() == 1) {
+        if (this->GetLoginServerType() == LOGIN_SERVER_BATTLENET) {
             msg->Get(realm->m_regionId);
             msg->Get(realm->m_battlegroupId);
             msg->Get(realm->m_realmId);
@@ -258,7 +264,7 @@ void LoginResponse::HandleRealmData(uint32_t result, CDataStore* msg) {
             realm->m_build = 0;
         }
 
-        if (realm->m_flags & 0x4) {
+        if (realm->m_flags & REALM_FLAG_SPECIFY_BUILD) {
             msg->Get(realm->m_versionMajor);
             msg->Get(realm->m_versionMinor);
             msg->Get(realm->m_versionRevision);
@@ -274,14 +280,14 @@ void LoginResponse::HandleRealmData(uint32_t result, CDataStore* msg) {
             break;
         }
 
-        if (realm->m_population == 600.0f) {
-            realm->m_flags |= 0x20;
+        if (realm->m_population == REALM_POPULATION_RECOMMENDED) {
+            realm->m_flags |= REALM_FLAG_RECOMMENDED;
             realm->m_population = 0.0f;
-        } else if (realm->m_population == 200.0f) {
-            realm->m_flags |= 0x40;
+        } else if (realm->m_population == REALM_POPULATION_NEW_PLAYERS) {
+            realm->m_flags |= REALM_FLAG_NEW_PLAYERS;
             realm->m_population = 0.001f;
-        } else if (realm->m_population == 400.0f) {
-            realm->m_flags |= 0x80;
+        } else if (realm->m_population == REALM_POPULATION_FULL) {
+            realm->m_flags |= REALM_FLAG_FULL;
             realm->m_population = 8.0f;
         }
 

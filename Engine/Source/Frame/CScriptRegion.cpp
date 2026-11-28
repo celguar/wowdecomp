@@ -157,18 +157,10 @@ void CScriptRegion::LoadXML(XMLNode* node, CStatus* status) {
         CScriptObject* parent = this->GetScriptObjectParent();
 
         if (parent) {
-            if (!parent->m_luaRegistered) {
-                parent->RegisterScriptObject(nullptr);
-            }
-
-            lua_rawgeti(L, LUA_REGISTRYINDEX, parent->m_luaObjectRef);
+            lua_rawgeti(L, LUA_REGISTRYINDEX, parent->GetLuaObjectRef());
             lua_pushstring(L, parentKey);
 
-            if (!this->m_luaRegistered) {
-                this->RegisterScriptObject(nullptr);
-            }
-
-            lua_rawgeti(L, LUA_REGISTRYINDEX, this->m_luaObjectRef);
+            lua_rawgeti(L, LUA_REGISTRYINDEX, this->GetLuaObjectRef());
             lua_settable(L, -3);
             lua_settop(L, -2);
         }
@@ -179,7 +171,7 @@ void CScriptRegion::LoadXML(XMLNode* node, CStatus* status) {
 
 // VERIFY: 23893fb6 auto
 // OFFSET: 0x00488740
-int32_t CScriptRegion::HasActiveAnimGroup() {
+BOOL CScriptRegion::HasActiveAnimGroup() {
     for (CScriptRegion* region = this; region; region = region->m_parent) {
         if (region->m_playingAnimGroups && region->m_playingAnimGroups->Head()) {
             return 1;
@@ -191,7 +183,7 @@ int32_t CScriptRegion::HasActiveAnimGroup() {
 
 // VERIFY: 0d8bdeba manual
 // OFFSET: 0x00488770
-int32_t CScriptRegion::HasActiveAnimOfType(int32_t type) {
+BOOL CScriptRegion::HasActiveAnimOfType(int32_t type) {
     for (CScriptRegion* region = this; region; region = region->m_parent) {
         if (region->m_playingAnimGroups && region->m_playingAnimGroups->Head()) {
             for (CSimpleAnimGroup* group = region->m_playingAnimGroups->Head(); group; group = region->m_playingAnimGroups->Next(group)) {
@@ -262,8 +254,10 @@ void CScriptRegion::NotifyAnimEnd(CSimpleAnimGroup* group) {
 
 // VERIFY: 3973d91a manual
 // OFFSET: 0x004889C0
-void CScriptRegion::NotifyAnimBegin(CSimpleAnimGroup* group) {
-    if (!group) {
+void CScriptRegion::NotifyAnimBegin(CSimpleAnimGroup* animGroup) {
+    STORM_ASSERT_RECOVERABLE(animGroup);
+
+    if (!animGroup) {
         return;
     }
 
@@ -275,14 +269,16 @@ void CScriptRegion::NotifyAnimBegin(CSimpleAnimGroup* group) {
         }
     }
 
-    this->AnimActivated(group, !this->HasActiveAnimGroup(), group->HasAnimOfType(CSimpleAlphaAnim::GetObjectType()));
-    this->m_playingAnimGroups->LinkToTail(group);
+    this->AnimActivated(animGroup, !this->HasActiveAnimGroup(), animGroup->HasAnimOfType(CSimpleAlphaAnim::GetObjectType()));
+    this->m_playingAnimGroups->LinkToTail(animGroup);
 }
 
 // VERIFY: 5d173137 manual
 // OFFSET: 0x00488AE0
-void CScriptRegion::RegisterAnimGroup(CSimpleAnimGroup* group) {
-    if (!group) {
+void CScriptRegion::RegisterAnimGroup(CSimpleAnimGroup* animGroup) {
+    STORM_ASSERT_RECOVERABLE(animGroup);
+
+    if (!animGroup) {
         return;
     }
 
@@ -291,7 +287,7 @@ void CScriptRegion::RegisterAnimGroup(CSimpleAnimGroup* group) {
     }
 
     if (this->m_animGroups) {
-        this->m_animGroups->LinkToTail(group);
+        this->m_animGroups->LinkToTail(animGroup);
     }
 }
 
@@ -315,7 +311,7 @@ void CScriptRegion::PreOnAnimUpdate() {
 
 // VERIFY: c64042c5 auto
 // OFFSET: 0x0047ADD0
-void CScriptRegion::AnimActivated(CSimpleAnimGroup* group, int32_t first, int32_t hasAlpha) {
+void CScriptRegion::AnimActivated(CSimpleAnimGroup* group, int32_t first, BOOL hasAlpha) {
 }
 
 // VERIFY: 83a5621b auto

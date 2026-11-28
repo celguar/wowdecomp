@@ -3,15 +3,29 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Frame/CSimpleFrame.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
 #include "Engine/Source/SoundEngine/SoundEngine.h"
 #include "Engine/Source/Storm/H/stpl.h"
+#include "Engine/Source/Tempest/C2iVector.h"
 
 class CGxTex;
 class CRenderBatch;
 struct lua_State;
+
+// CSimpleMovieFrame::m_layout, an index into the frame and texture tables;
+// named from the video size OpenVideo maps to each value.
+enum MOVIE_LAYOUT : uint32_t {
+    MOVIE_LAYOUT_800 = 0, // 800 wide, other heights
+    MOVIE_LAYOUT_1024 = 1, // 1024 wide, other heights
+    MOVIE_LAYOUT_800X448 = 2,
+    MOVIE_LAYOUT_1024X576 = 3,
+    MOVIE_LAYOUT_800X342 = 4, // also 800x340
+    MOVIE_LAYOUT_1024X436 = 5,
+    NUM_MOVIE_LAYOUTS = 6,
+};
 
 struct MOVIECAPTION {
     /* 0000 */ uint32_t m_startTime;
@@ -39,10 +53,8 @@ struct MOVIETEXTURERECT {
 };
 
 struct MOVIEUPDATERECT {
-    /* 0000 */ int32_t m_minX;
-    /* 0004 */ int32_t m_minY;
-    /* 0008 */ int32_t m_maxX;
-    /* 000C */ int32_t m_maxY;
+    /* 0000 */ C2iVector m_min; // Lower texel corner, inclusive.
+    /* 0008 */ C2iVector m_max; // Upper texel corner, exclusive.
 };
 
 class CSimpleMovieFrame : public CSimpleFrame {
@@ -64,7 +76,7 @@ class CSimpleMovieFrame : public CSimpleFrame {
     static void RenderMovie(void* param);
 
     /* 029C */ SESound m_sound;
-    /* 02A0 */ int32_t m_isPlaying;
+    /* 02A0 */ BOOL m_isPlaying;
     /* 02A4 */ int32_t m_finished;
     /* 02A8 */ int32_t m_subtitlesEnabled;
     /* 02AC */ int32_t m_audioRestart;
@@ -75,10 +87,9 @@ class CSimpleMovieFrame : public CSimpleFrame {
     /* 03C4 */ FrameScript_Object::ScriptIx m_onMovieHideSubtitle;
     /* 03CC */ int32_t m_decoder;
     /* 03D0 */ float m_fps;
-    /* 03D4 */ int32_t m_width;
-    /* 03D8 */ int32_t m_height;
+    /* 03D4 */ C2iVector m_size; // Decoded frame width/height in pixels, from the AVI video format.
     /* 03DC */ int32_t m_frameCount;
-    /* 03E0 */ uint32_t m_layout;
+    /* 03E0 */ uint32_t m_layout; // MOVIE_LAYOUT
     /* 03E4 */ CGxTex* m_textures[6];
     /* 03FC */ MOVIETEXTUREDATA m_textureData[6];
     /* 042C */ uint8_t* m_frameBuffer;

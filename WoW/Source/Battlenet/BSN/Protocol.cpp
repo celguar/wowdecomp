@@ -1,4 +1,5 @@
 #include "WoW/Source/Battlenet/BSN/Protocol.h"
+#include "Engine/Source/Storm/H/storm.h"
 
 // VERIFY: fcec72ef auto
 // OFFSET: 0x00889E50
@@ -14,82 +15,77 @@ uint32_t BSN::Protocol::GetUInt32(const uint8_t*& cursor) {
 
 // VERIFY: af4a973b auto
 // OFFSET: 0x00889E80
-BSN::Protocol::Protocol::Protocol(const uint8_t* bytecode, uint32_t bytecodeSize, const void* const* codeInfo, uint32_t codeInfoCount) {
-    this->m_bytecodeSize = bytecodeSize;
+BSN::Protocol::Protocol::Protocol(const uint8_t* bytecodeData, uint32_t bytecodeSize, const void* const* codeInfoData, uint32_t codeInfoCount) {
+    this->bytecodeSize = bytecodeSize;
     this->m_codeInfoCount = codeInfoCount;
-    this->m_codeInfo = codeInfo;
-    this->m_bytecode = bytecode;
+    this->m_codeInfo = codeInfoData;
+    this->m_bytecode = bytecodeData;
 
-    const uint8_t* cursor = bytecode;
+    // 12213: "bytecodeSize >= 5 * sizeof(u32)"
+    STORM_ASSERT(bytecodeSize >= 5 * sizeof(uint32_t));
+    const uint8_t* bytecode = bytecodeData;
 
-    uint32_t version = 0;
-    for (uint32_t i = 4; i; i--) {
-        version = (version << 8) | *cursor++;
-    }
+    uint32_t version = GetUInt32(bytecode);
     this->m_version = version;
+    STORM_ASSERT(version == 7);
 
-    uint32_t value = 0;
-    for (uint32_t i = 4; i; i--) {
-        value = (value << 8) | *cursor++;
-    }
-    this->unk_0014 = value;
+    this->unk_0014 = GetUInt32(bytecode);
 
-    uint32_t typeIdCount = 0;
-    for (uint32_t i = 4; i; i--) {
-        typeIdCount = (typeIdCount << 8) | *cursor++;
-    }
-    this->m_typeIdCount = typeIdCount;
+    uint32_t typeIdCount = GetUInt32(bytecode);
+    this->typeIdCount = typeIdCount;
+    STORM_ASSERT((size_t)codeInfoData[0] == typeIdCount);
 
-    uint32_t typeInfoSize = 0;
-    for (uint32_t i = 4; i; i--) {
-        typeInfoSize = (typeInfoSize << 8) | *cursor++;
-    }
+    uint32_t typeInfoSize = GetUInt32(bytecode);
     this->m_typeInfoSize = typeInfoSize;
 
-    uint32_t dumpInfoSize = 0;
-    for (uint32_t i = 4; i; i--) {
-        dumpInfoSize = (dumpInfoSize << 8) | *cursor++;
-    }
+    uint32_t dumpInfoSize = GetUInt32(bytecode);
     this->m_dumpInfoSize = dumpInfoSize;
 
-    this->m_typeOffsets = cursor;
-    const uint8_t* typeInfo = &cursor[4 * typeIdCount];
+    this->m_typeOffsets = bytecode;
+    const uint8_t* typeInfo = &bytecode[4 * typeIdCount];
     this->m_typeInfo = typeInfo;
 
     const uint8_t* dumpOffsets = &typeInfo[typeInfoSize];
 
-    if (dumpOffsets == &bytecode[bytecodeSize]) {
+    if (dumpOffsets == &bytecodeData[bytecodeSize]) {
         this->m_dumpInfoSize = 0;
         this->m_dumpOffsets = nullptr;
         this->m_dumpInfo = nullptr;
     } else {
+        STORM_ASSERT(dumpInfoSize != 0);
         this->m_dumpInfo = &dumpOffsets[4 * typeIdCount];
         this->m_dumpOffsets = dumpOffsets;
+#if defined(WOWDECOMP_ASSERTIONS)
+        bytecode = this->m_dumpInfo + dumpInfoSize;
+        STORM_ASSERT(bytecode == bytecodeData + bytecodeSize);
+#endif
     }
 }
 
 // VERIFY: 40eb7cef auto
 // OFFSET: 0x00889F80
-const uint8_t* BSN::Protocol::Protocol::TypeInfo(uint32_t typeId) const {
-    const uint8_t* cursor = &this->m_typeOffsets[4 * typeId];
-    uint32_t offset = 0;
+const uint8_t* BSN::Protocol::Protocol::TypeInfo(uint32_t t) const {
+    STORM_ASSERT(t < typeIdCount);
 
-    for (uint32_t i = 4; i; i--) {
-        offset = (offset << 8) | *cursor++;
-    }
+    const uint8_t* cursor = &this->m_typeOffsets[4 * t];
+    uint32_t offset = GetUInt32(cursor);
+    STORM_ASSERT(offset < bytecodeSize);
 
     return &this->m_bytecode[offset];
 }
 
 // VERIFY: de035afd auto
 // OFFSET: 0x00889FC0
-const uint8_t* BSN::Protocol::Protocol::DumpInfo(uint32_t typeId) const {
+const uint8_t* BSN::Protocol::Protocol::DumpInfo(uint32_t t) const {
+    STORM_ASSERT(t < typeIdCount);
+
     if (!this->m_dumpInfoSize) {
         return nullptr;
     }
 
-    const uint8_t* cursor = &this->m_dumpOffsets[4 * typeId];
-    uint32_t offset = BSN::Protocol::GetUInt32(cursor);
+    const uint8_t* cursor = &this->m_dumpOffsets[4 * t];
+    uint32_t offset = GetUInt32(cursor);
+    STORM_ASSERT(offset < bytecodeSize);
 
     if (!offset) {
         return nullptr;
@@ -106,7 +102,8 @@ const char* BSN::Protocol::Protocol::DumpString(const uint8_t* dumpInfo, uint32_
     }
 
     const uint8_t* cursor = &dumpInfo[4 * index];
-    uint32_t offset = BSN::Protocol::GetUInt32(cursor);
+    uint32_t offset = GetUInt32(cursor);
+    STORM_ASSERT(offset < bytecodeSize);
 
     if (!offset) {
         return nullptr;

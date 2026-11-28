@@ -8,8 +8,27 @@
 #include "Engine/Source/Storm/H/stpl.h"
 
 enum CVAR_FLAGS : uint32_t {
+    CVAR_NONE = 0,
     CVAR_ARCHIVE = 1,
     CVAR_LATCH = 2,
+    CVAR_READ_ONLY = 0x4,
+    CVAR_PROTECTED = 0x8,
+    CVAR_HIDDEN = 0x40,
+    CVAR_UNKNOWN_80 = 0x80,
+    CVAR_CONSOLE_READ_ONLY = 0x100,
+    CVAR_CODE_REGISTERED = 0x80000000,
+    CVAR_ARCHIVE_LATCH = 3,
+    CVAR_LATCH_READ_ONLY = 6,
+    CVAR_ACCOUNT_HIDDEN = 0x50,
+    CVAR_ACCOUNT_CONSOLE_READ_ONLY = 0x110,
+    CVAR_CHARACTER_CONSOLE_READ_ONLY = 0x120,
+};
+
+enum CVAR_ARCHIVE_SCOPE : uint32_t {
+    CVAR_SCOPE_CONFIG = 0,
+    CVAR_SCOPE_ACCOUNT = 0x10,
+    CVAR_SCOPE_CHARACTER = 0x20,
+    CVAR_SCOPE_MASK = 0x30,
 };
 
 struct CVar;
@@ -58,36 +77,63 @@ struct CVar : public TSHashObject<CVar, HASHKEY_STRI> {
 
     CVar();
     void Default();
-    void InternalSet(const char* value, bool setValue, bool setReset, bool setDefault, bool setNeedsSave);
     void Reset();
     bool Set(const char* value, bool setValue, bool setReset, bool setDefault, bool setNeedsSave);
     bool Set(int32_t value, bool setValue, bool setReset, bool setDefault, bool setNeedsSave);
     void SetReadOnly(bool readOnly);
     bool Update();
+
+    private:
+    void InternalSet(const char* value, bool setValue, bool setReset, bool setDefault, bool setNeedsSave);
 };
 
 class CVarArrayWrapper {
-    public:
+    private:
     /* 0000 */ CVar* m_cvar;
     /* 0004 */ uint8_t m_defaultValue;
 
-    CVarArrayWrapper(CVar* cvar);
+    void UpdateFromVersion(int32_t version);
+
+    public:
+    explicit CVarArrayWrapper(CVar* cvar);
+    uint8_t GetDefaultValue() const { return this->m_defaultValue; } // (inferred)
     bool RawGetValue(uint32_t index) const;
     bool RawSetValue(uint32_t index, bool value);
-    void UpdateFromVersion(int32_t version);
 };
 
 class CVarIntListWrapper {
-    public:
-    /* 0000 */ CVar* m_cvar;
-    /* 0004 */ uint32_t m_pos;
-    /* 0008 */ char m_buffer[256];
-    /* 0108 */ uint32_t m_state;
+    private:
+    static constexpr uint32_t CVAR_INT_LIST_MAX_VALUE = 93 * 93 * 93 - 1;
+    static constexpr uint32_t CVAR_INT_LIST_MAX_STRING_SIZE = 256;
 
-    void AddNextValue(uint32_t value);
-    uint32_t GetNextValue();
+    // Last operation on the list (names from the 12213 assertions; type name and NONE inferred).
+    enum CVAR_INT_LIST_OP : uint32_t {
+        CVAR_INT_LIST_OP_NONE = 0,
+        CVAR_INT_LIST_OP_GET = 1,
+        CVAR_INT_LIST_OP_ADD = 2,
+    };
+
+    /* 0000 */ CVar* m_cvar;
+    /* 0004 */ uint32_t m_listIndex;
+    /* 0008 */ char m_buffer[CVAR_INT_LIST_MAX_STRING_SIZE];
+    /* 0108 */ CVAR_INT_LIST_OP m_lastOp;
+
     void UpdateFromVersion(int32_t version);
     void WriteVersionTag();
+
+    public:
+    explicit CVarIntListWrapper(CVar* cvar)
+        : m_cvar(cvar), m_listIndex(2), m_lastOp(CVAR_INT_LIST_OP_NONE) {
+    }
+
+    void Commit() { // (inferred)
+        if (this->m_lastOp != CVAR_INT_LIST_OP_GET) {
+            this->WriteVersionTag();
+        }
+    }
+
+    void AddNextValue(uint32_t val);
+    uint32_t GetNextValue();
 };
 
 // INLINED

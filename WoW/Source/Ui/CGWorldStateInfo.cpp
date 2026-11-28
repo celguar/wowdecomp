@@ -90,7 +90,7 @@ void CheckEventWorldStateUITimerUpdate() {
     CGWorldStateInfo::m_nextUpdateTime = now + 1000;
 
     for (uint32_t i = 0; i < CGWorldStateInfo::m_worldStateUI.m_count; i++) {
-        if (CGWorldStateInfo::m_worldStateUI.m_data[i].m_state == 3) {
+        if (CGWorldStateInfo::m_worldStateUI.m_data[i].m_state == WORLD_STATE_UI_TYPE_TIMER) {
             FrameScript_SignalEvent(SCRIPT_EVENT_WORLD_STATE_UI_TIMER_UPDATE, nullptr);
             return;
         }
@@ -126,7 +126,7 @@ bool CGWorldStateInfo::SetWorldState(uint32_t state, uint32_t value) {
 
     worldState->m_value = value;
 
-    if (state == 3191) {
+    if (state == WORLD_STATE_ARENA_SEASON) {
         FrameScript_SignalEvent(SCRIPT_EVENT_ARENA_SEASON_WORLD_STATE, nullptr);
     }
 
@@ -145,7 +145,7 @@ void CGWorldStateInfo::OnUITime(uint32_t time) {
 void CGWorldStateInfo::ResetWorldStateUI() {
     CGWorldStateInfo::m_worldStateUI.m_count = 0;
 
-    for (int32_t i = 0; i < g_worldStateUIDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_worldStateUIDB.GetNumRecords(); i++) {
         WorldStateUIRec* rec = g_worldStateUIDB.GetRecordByIndex(i);
 
         if (rec->m_mapID != -1 && rec->m_mapID != CGWorldStateInfo::m_mapID) {
@@ -160,7 +160,7 @@ void CGWorldStateInfo::ResetWorldStateUI() {
             continue;
         }
 
-        if (rec->m_type && rec->m_type != 3 && rec->m_type != 1) {
+        if (rec->m_type != WORLD_STATE_UI_TYPE_DEFAULT && rec->m_type != WORLD_STATE_UI_TYPE_TIMER && rec->m_type != WORLD_STATE_UI_TYPE_UNKNOWN_1) {
             continue;
         }
 

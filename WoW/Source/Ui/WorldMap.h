@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Storm/H/stpl.h"
 
@@ -40,11 +41,12 @@ struct WorldMapContinentInfo {
     /* 00004 */ int32_t m_areaID;
     /* 00008 */ TSFixedArray<int32_t> m_zones;
     /* 00014 */ uint32_t m_zoneMap[128][128];
-    /* 10014 */ float unk_10014;
-    /* 10018 */ float unk_10018;
-    /* 1001C */ float unk_1001C;
-    /* 10020 */ float unk_10020;
-    /* 10024 */ int32_t unk_10024;
+    // WorldMapContinent.dbc boundaries scaled into world map coordinates, and its world map ID.
+    /* 10014 */ float m_topBoundary;
+    /* 10018 */ float m_leftBoundary;
+    /* 1001C */ float m_bottomBoundary;
+    /* 10020 */ float m_rightBoundary;
+    /* 10024 */ int32_t m_worldMapID;
 
     WorldMapContinentInfo();
 };
@@ -53,11 +55,20 @@ struct WorldMapLandmarkInfo {
     /* 0000 */ int32_t m_id;
     /* 0004 */ float m_x;
     /* 0008 */ float m_y;
-    /* 000C */ int32_t m_isGraveyard;
-    /* 0010 */ int32_t m_isGossip;
+    /* 000C */ BOOL m_isGraveyard;
+    /* 0010 */ BOOL m_isGossip;
 };
 
 bool WorldMapTransformPosition(int32_t mapID, float x, float y, int32_t* outMapID, float* outX, float* outY, int32_t* outDungeonMapID);
+
+// CGWorldMap::m_currentContinent/m_currentZone values below zero. Lua reports both one higher, so
+// WORLD and COSMIC are FrameXML's WORLDMAP_WORLD_ID (0) and WORLDMAP_COSMIC_ID (-1).
+constexpr int32_t WORLDMAP_CONTINENT_WORLD = -1;
+constexpr int32_t WORLDMAP_CONTINENT_COSMIC = -2; // Shows m_currentOrphanZone.
+constexpr int32_t WORLDMAP_ZONE_NONE = -1; // Continent view (GetCurrentMapZone 0).
+
+// GetMapLandmarkInfo textureIndex returned for graveyard landmarks.
+constexpr int32_t WORLDMAP_LANDMARK_TEXTURE_GRAVEYARD = 6;
 
 class CGWorldMap {
     public:
@@ -112,10 +123,10 @@ void WorldMapUnregisterScriptFunctions();
 
 // INLINED
 inline WorldMapContinentInfo::WorldMapContinentInfo() {
-    this->unk_10014 = 0.0f;
-    this->unk_10018 = 0.0f;
-    this->unk_1001C = 0.0f;
-    this->unk_10020 = 0.0f;
+    this->m_topBoundary = 0.0f;
+    this->m_leftBoundary = 0.0f;
+    this->m_bottomBoundary = 0.0f;
+    this->m_rightBoundary = 0.0f;
 }
 
 int32_t PlayerExploredZonesUpdateHandler(WOWGUID guid, uint32_t fieldOffset, uint32_t fieldSize, const void* oldValue, void* param);

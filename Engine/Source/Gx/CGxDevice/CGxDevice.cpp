@@ -36,10 +36,10 @@ static uint32_t s_primVertsExtra[GxPrims_Last] = { 0, 0, 1, 0, 2, 2 };
 const char* s_formatToInt[CGxFormat::Formats_Last] = { "16", "24", "24", "30", "16", "24", "24", "32" };
 
 // STATIC: 0x00AD87FC
-const char* CGxDevice::s_pixelShaderTargetNames[14] = { "none", "ps_1_1", "ps_1_4", "ps_2_0", "ps_3_0", "ps_4_0", "ps_5_0", "nvrc", "nvts", "nvts2", "nvts3", "nvfp2", "arbfp1", "glsl" };
+const char* CGxDevice::s_pixelShaderTargetNames[GxShPS_Last] = { "none", "ps_1_1", "ps_1_4", "ps_2_0", "ps_3_0", "ps_4_0", "ps_5_0", "nvrc", "nvts", "nvts2", "nvts3", "nvfp2", "arbfp1", "glsl" };
 
 // STATIC: 0x00AD8834
-const char* CGxDevice::s_vertexShaderTargetNames[12] = { "none", "vs_1_1", "vs_2_0", "vs_3_0", "vs_4_0", "vs_5_0", "arbvp1", "arbvp1_cg12", "nvvp", "nvvp2", "nvvp3", "glsl" };
+const char* CGxDevice::s_vertexShaderTargetNames[GxShVS_Last] = { "none", "vs_1_1", "vs_2_0", "vs_3_0", "vs_4_0", "vs_5_0", "arbvp1", "arbvp1_cg12", "nvvp", "nvvp2", "nvvp3", "glsl" };
 
 // STATIC: 0x00AD8864
 static const char* s_geometryShaderTargetNames[3] = { "none", "gs_4_0", "gs_5_0" };
@@ -213,7 +213,7 @@ int32_t CGxDevice::BufUnlock(CGxBuf* buf, uint32_t size) {
 
 // VERIFY: 51c4b8e7 auto
 // OFFSET: 0x00683640
-void CGxDevice::CursorSetVisible(int32_t visible) {
+void CGxDevice::CursorSetVisible(BOOL visible) {
     this->m_cursorVisible = visible;
 }
 
@@ -462,20 +462,20 @@ void CGxDevice::ICursorDraw() {
 
     GxRsSet(GxRs_PolygonOffset, 0);
     GxRsSet(GxRs_NormalizeNormals, 0);
-    GxRsSet(GxRs_BlendingMode, 1);
+    GxRsSet(GxRs_BlendingMode, GxBlend_AlphaKey);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_DepthTest, 0);
     GxRsSet(GxRs_DepthWrite, 0);
-    GxRsSet(GxRs_ColorWrite, 15);
+    GxRsSet(GxRs_ColorWrite, GxColorWrite_All);
     GxRsSet(GxRs_Culling, 0);
     GxRsSet(GxRs_ClipPlaneMask, 0);
     GxRsSet(GxRs_Texture0, this->m_cursorTexture);
     GxRsSet(GxRs_Texture1, nullptr);
     GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
-    GxRsSet(GxRs_TexGen0, 0);
+    GxRsSet(GxRs_TexGen0, GxTexGen_Disabled);
     GxRsSet(GxRs_TextureShader0, 0);
 
     C44Matrix world;
@@ -626,7 +626,7 @@ EGxApi CGxDevice::DeviceApi() {
 
 // VERIFY: 8d0aae56 manual
 // OFFSET: 0x00682DC0
-int32_t CGxDevice::CapsIsWindowVisible(int32_t visible) {
+int32_t CGxDevice::CapsIsWindowVisible(BOOL visible) {
     if (visible < 0) {
         return this->m_windowVisible;
     }
@@ -681,8 +681,8 @@ void CGxDevice::XformPushAndSet(EGxXform xf, const C44Matrix& matrix) {
 // OFFSET: 0x00682C50
 void CGxDevice::InitLights() {
     for (uint32_t i = 0; i < 4; i++) {
-        this->m_lights[i].m_flags = 0xFF;
-        this->m_lights[i].unk_0046 = 0xFF;
+        this->m_lights[i].m_flags = CGxApiLight::FIELD_MASK::FIELD_ALL;
+        this->m_lights[i].m_updateMask = CGxApiLight::FIELD_MASK::FIELD_ALL;
         this->m_lights[i].m_enable = 0;
     }
 }
@@ -762,18 +762,18 @@ uint32_t CGxDevice::PrimCalcCount(EGxPrim primType, uint32_t indexCount) {
 
 // VERIFY: 341ce950 manual
 // OFFSET: 0x00683080
-void CGxDevice::LightEnable(uint32_t index, int32_t enable) {
+void CGxDevice::LightEnable(uint32_t index, BOOL enable) {
     CGxApiLight& light = this->m_lights[index];
 
     if (light.m_enable != enable) {
-        light.m_flags |= 0x1;
+        light.m_flags |= CGxApiLight::FIELD_MASK::FIELD_ENABLE;
         light.m_enable = enable;
     }
 }
 
 // VERIFY: 45b10c41 manual
 // OFFSET: 0x006830B0
-int32_t CGxDevice::NeedsUpdate(uint32_t app, uint32_t hw, uint32_t appDisables, uint32_t hwDisables, uint32_t flagPos, int32_t& enable) {
+BOOL CGxDevice::NeedsUpdate(uint32_t app, uint32_t hw, uint32_t appDisables, uint32_t hwDisables, uint32_t flagPos, int32_t& enable) {
     enable = (app & (1 << flagPos) & ~appDisables) != 0;
     return enable != ((hw & (1 << flagPos) & ~hwDisables) != 0);
 }
@@ -846,11 +846,13 @@ void CGxDevice::ShaderConstantsClear() {
 // VERIFY: 4ce72d69 manual
 // OFFSET: 0x006833E0
 void CGxDevice::ShaderConstantsSet(EGxShTarget target, uint32_t index, const float* constants, uint32_t count) {
+    STORM_ASSERT((index + count - 1) <= 255);
+
     ShadowConstants& shadow = s_shadowConstants[target ? 0 : 1];
     float* dest = &shadow.constants[index * 4];
 
     for (uint32_t i = index; i < index + count; i++) {
-        int32_t changed = 0;
+        BOOL changed = 0;
 
         for (uint32_t c = 0; c < 4; c++) {
             if (constants[c] != dest[c]) {
@@ -883,6 +885,8 @@ float* CGxDevice::ShaderConstantsLock(EGxShTarget target) {
 // VERIFY: 636e6d3d manual
 // OFFSET: 0x00683580
 void CGxDevice::ShaderConstantsUnlock(EGxShTarget target, uint32_t index, uint32_t count) {
+    STORM_ASSERT((index + count - 1) <= 255);
+
     ShadowConstants& shadow = s_shadowConstants[target ? 0 : 1];
 
     if (shadow.dirtyMin > index) {
@@ -1016,8 +1020,8 @@ void CGxDevice::LightSet(uint32_t index, const CGxLight& light, const C3Vector& 
     CGxApiLight& apiLight = this->m_lights[index];
     apiLight = light;
 
-    if ((light.m_flags & 0x2) && (pos.x != 0.0f || pos.y != 0.0f || pos.z != 0.0f)) {
-        apiLight.m_flags |= 0x2;
+    if ((light.m_flags & CGxLight::FLAGS::F_OMNI) && (pos.x != 0.0f || pos.y != 0.0f || pos.z != 0.0f)) {
+        apiLight.m_flags |= CGxApiLight::FIELD_MASK::FIELD_DIRECTION_OR_POSITION;
         apiLight.m_dir.x = apiLight.m_dir.x - pos.x;
         apiLight.m_dir.y = apiLight.m_dir.y - pos.y;
         apiLight.m_dir.z = apiLight.m_dir.z - pos.z;
@@ -1043,7 +1047,7 @@ CGxBuf* CGxDevice::BufStream(EGxPoolTarget target, uint32_t itemSize, uint32_t i
 
 // VERIFY: 06465d73 auto
 // OFFSET: 0x006848A0
-void CGxDevice::TexMarkForUpdate(CGxTex* texId, const CiRect& updateRect, int32_t immediate) {
+void CGxDevice::TexMarkForUpdate(CGxTex* texId, const CiRect& updateRect, BOOL immediate) {
     texId->m_needsUpdate = 1;
 
     if (updateRect.minY >= updateRect.maxY || updateRect.minX >= updateRect.maxX) {
@@ -1115,6 +1119,15 @@ int32_t CGxDevice::TexCreate(EGxTexTarget target, uint32_t width, uint32_t heigh
 // VERIFY: ff832600 manual
 // OFFSET: 0x00687980
 void CGxDevice::TexDestroy(CGxTex* texId) {
+    STORM_ASSERT(texId);
+
+#if defined(WOWDECOMP_ASSERTIONS)
+    for (uint32_t i = GxRs_Texture0; i <= GxRs_Texture15; i++) {
+        const CGxTex* activeTex = static_cast<const CGxTex*>(this->m_appRenderStates[i].m_value.m_data.p);
+        STORM_ASSERT(activeTex != texId);
+    }
+#endif
+
     texId->m_link.Unlink();
     delete texId;
 }
@@ -1209,7 +1222,7 @@ void CGxDevice::IRsForceUpdate() {
 
 // VERIFY: ef9949e8 manual
 // OFFSET: 0x00685B50
-void CGxDevice::IRsSync(int32_t force) {
+void CGxDevice::IRsSync(BOOL force) {
     if (force) {
         this->IRsForceUpdate();
     }
@@ -1273,7 +1286,7 @@ void CGxDevice::TexSetWrap(CGxTex* texId, EGxTexWrapMode wrapU, EGxTexWrapMode w
 
 // VERIFY: 69ad163c auto
 // OFFSET: 0x00685EB0
-void CGxDevice::MasterEnableSet(EGxMasterEnables state, int32_t enable) {
+void CGxDevice::MasterEnableSet(EGxMasterEnables state, BOOL enable) {
     this->m_appMasterEnables = ((enable & 1) << state) | (this->m_appMasterEnables & ~(1 << state));
 
     switch (state) {
@@ -1376,7 +1389,7 @@ void CGxDevice::IRsInit() {
     this->m_appRenderStates[GxRs_DepthTest].m_value.m_data.i[0] = 1;
     this->m_appRenderStates[GxRs_DepthFunc].m_value.m_data.i[0] = GxCmp_LEqual;
     this->m_appRenderStates[GxRs_DepthWrite].m_value.m_data.i[0] = 1;
-    this->m_appRenderStates[GxRs_ColorWrite].m_value.m_data.i[0] = 15;
+    this->m_appRenderStates[GxRs_ColorWrite].m_value.m_data.i[0] = GxColorWrite_All;
     this->m_appRenderStates[GxRs_Culling].m_value.m_data.i[0] = 1;
     this->m_appRenderStates[GxRs_ClipPlaneMask].m_value.m_data.i[0] = 0;
     this->m_appRenderStates[GxRs_Multisample].m_value.m_data.i[0] = 1;
@@ -1386,7 +1399,7 @@ void CGxDevice::IRsInit() {
         this->m_appRenderStates[GxRs_Texture0 + i].m_value.m_data.i[0] = 0;
         this->m_appRenderStates[GxRs_ColorOp0 + i].m_value.m_data.i[0] = GxTexOp_Mod;
         this->m_appRenderStates[GxRs_AlphaOp0 + i].m_value.m_data.i[0] = GxTexOp_Mod;
-        this->m_appRenderStates[GxRs_TexGen0 + i].m_value.m_data.i[0] = 0;
+        this->m_appRenderStates[GxRs_TexGen0 + i].m_value.m_data.i[0] = GxTexGen_Disabled;
         this->m_appRenderStates[GxRs_TextureShader0 + i].m_value.m_data.i[0] = 0;
         this->m_appRenderStates[GxRs_TextureCoord0 + i].m_value.m_data.i[0] = i;
     }
@@ -1559,8 +1572,8 @@ CGxDevice::CGxDevice() : m_defWindowRect(), m_curWindowRect(), m_viewport(), m_s
     this->m_viewport.m_z.m_h = 1.0f;
     this->m_viewportDirty = 1;
     this->InitLights();
-    this->m_appMasterEnables = 0x1FF;
-    this->m_hwMasterEnables = 0x1FF;
+    this->m_appMasterEnables = ((1 << EGxMasterEnables::GxMasterEnables_Last) - 1);
+    this->m_hwMasterEnables = ((1 << EGxMasterEnables::GxMasterEnables_Last) - 1);
     this->m_scrShotClick = 0;
     this->m_scrShotWidth = 0;
     this->m_scrShotHeight = 0;
@@ -1613,6 +1626,10 @@ CGxDevice::CGxDevice() : m_defWindowRect(), m_curWindowRect(), m_viewport(), m_s
 // VERIFY: ea9f4c67 manual
 // OFFSET: [0x006890C0, 0x00689690]
 CGxDevice::~CGxDevice() {
+    STORM_ASSERT(m_stereoChangedCallbacks.Count() == 0);
+    STORM_ASSERT(m_textureRecreationCallbacks.Count() == 0);
+    STORM_ASSERT(m_deviceRestoredCallbacks.Count() == 0);
+
     for (CGxTex* texId = this->m_textures.Head(); texId; texId = this->m_textures.Next(texId)) {
         if (texId->m_apiSpecificData) {
             char buffer[256];
@@ -1650,6 +1667,8 @@ CGxPool* CGxDevice::PoolCreate(EGxPoolTarget target, EGxPoolUsage usage, int32_t
 // OFFSET: 0x00688340
 void CGxDevice::PoolDestroy(CGxPool* pool) {
     if (pool) {
+        STORM_ASSERT(pool->m_bufList.IsEmpty());
+
         this->m_poolList.UnlinkNode(pool);
         delete pool;
     }
@@ -1694,13 +1713,14 @@ void CGxDevice::IShaderLoad(CGxShader** shaders, EGxShTarget target, const char*
             uint32_t magic;
             SFileReadFile(file, &magic, 4, nullptr, nullptr, 0);
 
-            if (magic == 'GXSH') {
+            if (magic == Magic) {
                 uint32_t version;
                 SFileReadFile(file, &version, 4, nullptr, nullptr, 0);
 
-                if (version == 0x10003) {
-                    uint32_t unknown;
-                    SFileReadFile(file, &unknown, 4, nullptr, nullptr, 0);
+                if (version == Version) {
+                    uint32_t permutationCount;
+                    SFileReadFile(file, &permutationCount, 4, nullptr, nullptr, 0);
+                    STORM_ASSERT(permutationCount == permutations);
 
                     for (uint32_t i = 0; i < permutations; i++) {
                         shaders[i]->Load(file);
@@ -1717,12 +1737,12 @@ void CGxDevice::IShaderLoad(CGxShader** shaders, EGxShTarget target, const char*
 
         if (target == GxSh_Vertex) {
             switch (profile) {
-                case 2:
-                    profile = 1;
+                case GxShVS_vs_2_0:
+                    profile = GxShVS_vs_1_1;
                     break;
 
-                case 3:
-                    profile = 2;
+                case GxShVS_vs_3_0:
+                    profile = GxShVS_vs_2_0;
                     break;
 
                 default:
@@ -1730,21 +1750,21 @@ void CGxDevice::IShaderLoad(CGxShader** shaders, EGxShTarget target, const char*
             }
         } else if (target == GxSh_Pixel) {
             switch (profile) {
-                case 2:
-                    profile = 1;
+                case GxShPS_ps_1_4:
+                    profile = GxShPS_ps_1_1;
                     break;
 
-                case 3:
-                    profile = 2;
+                case GxShPS_ps_2_0:
+                    profile = GxShPS_ps_1_4;
                     break;
 
-                case 4:
-                    profile = 3;
+                case GxShPS_ps_3_0:
+                    profile = GxShPS_ps_2_0;
                     break;
 
-                case 9:
-                case 10:
-                    profile = 8;
+                case GxShPS_nvts2:
+                case GxShPS_nvts3:
+                    profile = GxShPS_nvts;
                     break;
 
                 default:
@@ -1824,7 +1844,7 @@ void CGxDevice::ShaderDestroy(CGxShader*& shader) {
 void CGxDevice::DeviceOverride(EGxOverride override, uint32_t value) {
     CGxDevice::Log("CGxDevice::DeviceOverride(): %d set to %d", override, value);
 
-    if (override == GxOverride_Unk8) {
+    if (override == GxOverride_PointScaleMax) {
         int32_t enable = value > 1;
         this->m_caps.m_pointParameters = enable;
         this->m_caps.m_pointSprite = enable;
@@ -1964,10 +1984,10 @@ void CGxDevice::RsSet(EGxRenderState which, const C3Vector& value) {
 // OFFSET: 0x00682FD0
 void CGxDevice::Light(uint32_t index, CGxLight& light) {
     CGxApiLight& apiLight = this->m_lights[index];
-    light.m_flags ^= (light.m_flags ^ apiLight.m_enable) & 0x1;
+    light.m_flags ^= (light.m_flags ^ apiLight.m_enable) & CGxLight::FLAGS::F_ENABLED;
 
-    if (light.m_flags & 0x1) {
-        light.m_flags ^= (light.m_flags ^ (2 * (apiLight.m_dir.w != 0.0f))) & 0x2;
+    if (light.m_flags & CGxLight::FLAGS::F_ENABLED) {
+        light.m_flags ^= (light.m_flags ^ (CGxLight::FLAGS::F_OMNI * (apiLight.m_dir.w != 0.0f))) & CGxLight::FLAGS::F_OMNI;
         light.m_dir.x = apiLight.m_dir.x;
         light.m_dir.y = apiLight.m_dir.y;
         light.m_dir.z = apiLight.m_dir.z;
@@ -2069,7 +2089,7 @@ void CGxDevice::RsInit() {
     this->RsSet(GxRs_MatEmissive, 0.0f);
     this->RsSet(GxRs_MatSpecular, 0.0f);
     this->RsSet(GxRs_NormalizeNormals, 0);
-    this->RsSet(GxRs_BlendingMode, 0);
+    this->RsSet(GxRs_BlendingMode, GxBlend_Opaque);
     this->RsSet(GxRs_FogStart, 0.0f);
     this->RsSet(GxRs_FogEnd, 1.0f);
     this->RsSet(GxRs_FogColor, static_cast<int32_t>(0xFFFF0000));
@@ -2087,7 +2107,7 @@ void CGxDevice::RsInit() {
         this->RsSet(static_cast<EGxRenderState>(GxRs_Texture0 + tmu), nullptr);
         this->RsSet(static_cast<EGxRenderState>(GxRs_ColorOp0 + tmu), GxTexOp_Mod);
         this->RsSet(static_cast<EGxRenderState>(GxRs_AlphaOp0 + tmu), GxTexOp_Mod);
-        this->RsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + tmu), 0);
+        this->RsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + tmu), GxTexGen_Disabled);
         this->RsSet(static_cast<EGxRenderState>(GxRs_TextureShader0 + tmu), 0);
         this->RsSet(static_cast<EGxRenderState>(GxRs_TextureCoord0 + tmu), static_cast<int32_t>(tmu));
     }

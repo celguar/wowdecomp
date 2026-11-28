@@ -10,6 +10,12 @@ struct CGxBuf;
 struct CGxPool;
 class CGxQuery;
 
+// PCI vendor IDs compared against the adapter identifier.
+enum GX_PCI_VENDOR : uint16_t {
+    GX_PCI_VENDOR_NVIDIA = 0x10DE,
+    GX_PCI_VENDOR_INTEL = 0x8086,
+};
+
 enum EGxApi {
     GxApi_OpenGl = 0,
     GxApi_D3d9 = 1,
@@ -18,6 +24,11 @@ enum EGxApi {
     GxApi_D3d11 = 4,
     GxApi_GLL = 5,
     GxApis_Last = 6,
+};
+
+enum EGxEnable : int32_t {
+    Gx_Disable = 0,
+    Gx_Enable = 1,
 };
 
 enum EGxBlend {
@@ -92,20 +103,20 @@ enum EGxBufferBit : uint32_t {
 
 enum EGxOverride {
     GxOverride_PixelShader = 0,
-    GxOverride_Unk1 = 1,
-    GxOverride_Unk2 = 2,
-    GxOverride_Unk3 = 3,
-    GxOverride_Unk4 = 4,
-    GxOverride_Unk5 = 5,
-    GxOverride_Unk6 = 6,
-    GxOverride_Unk7 = 7,
-    GxOverride_Unk8 = 8,
+    GxOverride_VertexBufferObject = 1,
+    GxOverride_StreamVertexBufferObject = 2,
+    GxOverride_StreamIndexBufferObject = 3,
+    GxOverride_StreamVertexBufferBroker = 4,
+    GxOverride_StreamIndexBufferBroker = 5,
+    GxOverride_SphereMapReflection = 6,
+    GxOverride_TexNonPow2 = 7,
+    GxOverride_PointScaleMax = 8,
     GxOverrides_Last = 9,
 };
 
 enum EGxQueryParam {
-    GxQueryParam_Unk0 = 0,
-    GxQueryParam_Unk1 = 1,
+    GxQueryParam_DataSize = 0,
+    GxQueryParam_ResultAvailable = 1,
     GxQueryParams_Last = 2,
 };
 
@@ -221,7 +232,7 @@ class CGxCaps {
     /* 000C */ int32_t m_numStreams;
     /* 0010 */ int32_t m_streamOffset;
     /* 0014 */ EGxColorFormat m_colorFormat;
-    /* 0018 */ int32_t unk_0018;
+    /* 0018 */ int32_t m_buffering; // GetVideoCaps "buffering" (FrameXML VideoOptionsPanels.lua)
     /* 001C */ uint32_t m_maxIndex;
     /* 0020 */ int32_t m_generateMipMaps;
     /* 0024 */ int32_t m_texFmt [13];
@@ -229,7 +240,7 @@ class CGxCaps {
     /* 0068 */ uint32_t m_texNonPow2;
     /* 006C */ uint32_t m_texMaxSize [4];
     /* 007C */ int32_t m_rttFormat [13];
-    /* 00B0 */ uint32_t unk_00B0;
+    /* 00B0 */ uint32_t m_rttOriginUpperLeft; // Render-to-texture (RTT) coordinate origin is at the upper left.
     /* 00B4 */ int32_t m_shaderTargets [6];
     /* 00CC */ uint32_t m_shaderConstants [6];
     /* 00E4 */ int32_t m_texFilterTrilinear;
@@ -278,6 +289,17 @@ enum EGxPoolUsage {
     GxPoolUsage_Dynamic = 1,
     GxPoolUsage_Stream = 2,
     GxPoolUsages_Last = 3,
+};
+
+// GxRs_ColorWrite channel mask; the D3D devices pass it straight to
+// D3DRS_COLORWRITEENABLE, so the bits follow that layout (inferred names).
+enum EGxColorWrite : int32_t {
+    GxColorWrite_None = 0x0,
+    GxColorWrite_Red = 0x1,
+    GxColorWrite_Green = 0x2,
+    GxColorWrite_Blue = 0x4,
+    GxColorWrite_Alpha = 0x8,
+    GxColorWrite_All = 0xF,
 };
 
 enum EGxRenderState {
@@ -378,6 +400,44 @@ enum EGxShTarget {
     GxSh_Pixel = 4,
     GxSh_Compute = 5,
     GxShTargets_Last = 6,
+};
+
+// Pixel shader profile in CGxCaps::m_shaderTargets[GxSh_Pixel], named after
+// CGxDevice::s_pixelShaderTargetNames.
+enum EGxShPixelTarget : int32_t {
+    GxShPS_none = 0,
+    GxShPS_ps_1_1 = 1,
+    GxShPS_ps_1_4 = 2,
+    GxShPS_ps_2_0 = 3,
+    GxShPS_ps_3_0 = 4,
+    GxShPS_ps_4_0 = 5,
+    GxShPS_ps_5_0 = 6,
+    GxShPS_nvrc = 7,
+    GxShPS_nvts = 8,
+    GxShPS_nvts2 = 9,
+    GxShPS_nvts3 = 10,
+    GxShPS_nvfp2 = 11,
+    GxShPS_arbfp1 = 12,
+    GxShPS_glsl = 13,
+    GxShPS_Last = 14,
+};
+
+// Vertex shader profile in CGxCaps::m_shaderTargets[GxSh_Vertex], named after
+// CGxDevice::s_vertexShaderTargetNames.
+enum EGxShVertexTarget : int32_t {
+    GxShVS_none = 0,
+    GxShVS_vs_1_1 = 1,
+    GxShVS_vs_2_0 = 2,
+    GxShVS_vs_3_0 = 3,
+    GxShVS_vs_4_0 = 4,
+    GxShVS_vs_5_0 = 5,
+    GxShVS_arbvp1 = 6,
+    GxShVS_arbvp1_cg12 = 7,
+    GxShVS_nvvp = 8,
+    GxShVS_nvvp2 = 9,
+    GxShVS_nvvp3 = 10,
+    GxShVS_glsl = 11,
+    GxShVS_Last = 12,
 };
 
 typedef intptr_t (*GxWindowProc)(void* window, uint32_t message, uintptr_t wparam, intptr_t lparam);

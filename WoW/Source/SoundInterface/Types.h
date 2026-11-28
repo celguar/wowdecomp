@@ -4,6 +4,30 @@
 #include <cstddef>
 #include <cstdint>
 
+// Results of the SI2 play/attach calls (PlaySoundKit, PlaySoundFile, AddAdvancedSound,
+// SI2ZoneSoundPair::Transition, ...). The client has no strings for them: every name is
+// inferred from the check that returns it. Values 1..4, 13, 19 and 23 are never returned.
+enum SI2_RESULT : int32_t {
+    SI2_OK = 0,
+    SI2_ERR_INVALID_SOUND_KIT = 5,    // ID <= 0 or no SoundEntries row
+    SI2_ERR_NO_FILES = 6,
+    SI2_ERR_SOUND_KIT_NOT_FOUND = 7,  // name lookup failed
+    SI2_ERR_INVALID_GROUP = 8,
+    SI2_ERR_SFX_DISABLED = 9,         // Sound_EnableSFX off, or a 2D sound while chat is paused
+    SI2_ERR_MUSIC_DISABLED = 10,
+    SI2_ERR_AMBIENCE_DISABLED = 11,
+    SI2_ERR_NOT_3D = 12,
+    SI2_ERR_GROUP_FULL = 14,          // channel group at its max sound count
+    SI2_ERR_ALREADY_PLAYING = 15,     // suppressed, already current, or an identical sound nearby
+    SI2_ERR_FILE_FAILED = 16,
+    SI2_ERR_SOUND_DISABLED = 17,      // no sound system, Sound_EnableAllSound off or in a movie
+    SI2_ZONE_SOUND_STOPPED = 18,
+    SI2_DOWNLOAD_PENDING = 20,
+    SI2_ZONE_SOUND_RESUMED = 21,      // fading back in the sound that was fading out
+    SI2_ERR_OUT_OF_MEMORY = 22,
+    SI2_ERR_NO_ADVANCED_RECORD = 24,
+};
+
 enum SNDROOMTYPE : int32_t {
     SNDROOMTYPE_OFF = -1, // Current FMOD disabled-environment sentinel.
     SNDROOMTYPE_GENERIC = 0,
@@ -82,6 +106,29 @@ enum VOCALUISOUNDS : int32_t {
     VUI_GUILDPERMISSIONS = 62,
     VUI_NORAGE = 63,
     VUI_NOENERGY = 64,
+    // Supported table slots with unresolved current semantic names.
+    VUI_UNKNOWN_6 = 6,
+    VUI_UNKNOWN_9 = 9,
+    VUI_UNKNOWN_14 = 14,
+    VUI_UNKNOWN_16 = 16,
+    VUI_UNKNOWN_17 = 17,
+    VUI_UNKNOWN_18 = 18,
+    VUI_UNKNOWN_19 = 19,
+    VUI_UNKNOWN_21 = 21,
+    VUI_UNKNOWN_23 = 23,
+    VUI_UNKNOWN_24 = 24,
+    VUI_UNKNOWN_34 = 34,
+    VUI_UNKNOWN_36 = 36,
+    VUI_UNKNOWN_37 = 37,
+    VUI_UNKNOWN_39 = 39,
+    VUI_UNKNOWN_53 = 53,
+    VUI_UNKNOWN_55 = 55,
+    VUI_UNKNOWN_56 = 56,
+    VUI_UNKNOWN_58 = 58,
+    VUI_UNKNOWN_60 = 60,
+    VUI_UNKNOWN_65 = 65,
+    VUI_UNKNOWN_66 = 66,
+    VUI_UNKNOWN_67 = 67,
     NUM_VOCALUISOUNDS = 68,
     VUI_NONE = 68,
 };
@@ -89,7 +136,7 @@ enum VOCALUISOUNDS : int32_t {
 enum PARRYMATERIALS : int32_t {
     PARRYMATERIAL_WOOD = 0,
     PARRYMATERIAL_METAL = 1,
-    NUM_PARRYMATERIALS = 2,
+    NUM_WEAPONMATERIALS = 2,
 };
 
 enum AMBIENCE : int32_t {
@@ -123,7 +170,39 @@ enum ITEMSOUNDTYPE : int32_t {
     // ITEMSOUND_CLOSE = 3,
 };
 
-enum SI2_DSP_TYPE {
+// Game sound-kit groups; 7..17 share SFX routing but have separate voice limits.
+// Names describe 3.3.5 tables/callers; original enum spelling is unknown.
+enum SI2_SOUND_GROUP : int32_t {
+    SI2_SOUND_GROUP_SFX = 0,
+    SI2_SOUND_GROUP_MUSIC = 1,
+    SI2_SOUND_GROUP_AMBIENCE = 2,
+    SI2_SOUND_GROUP_CINEMATIC = 3,
+    SI2_SOUND_GROUP_SCRIPT_SOUND = 4,
+    SI2_SOUND_GROUP_SCRIPT_MUSIC = 5,
+    SI2_SOUND_GROUP_RACIAL_CINEMATIC = 6,
+    SI2_SOUND_GROUP_VOCAL_ERROR = 7,
+    SI2_SOUND_GROUP_SPLASH = 8,
+    SI2_SOUND_GROUP_EXERTION = 9,
+    SI2_SOUND_GROUP_WEAPON_SWING = 10,
+    SI2_SOUND_GROUP_INJURY = 11,
+    SI2_SOUND_GROUP_PLAYER_INJURY = 12,
+    SI2_SOUND_GROUP_FOOTSTEP = 13,
+    SI2_SOUND_GROUP_IMPACT = 14,
+    SI2_SOUND_GROUP_MORE_AUDIBLE_EXERTION = 15,
+    SI2_SOUND_GROUP_MORE_AUDIBLE_INJURY = 16,
+    SI2_SOUND_GROUP_PLAYER_FOOTSTEP = 17,
+    SI2_SOUND_GROUP_COUNT = 18,
+};
+
+// Inferred from 3.3.5 playback/update dispatch; original enum spelling is unknown.
+enum SI2_SOUND_USAGE : int32_t {
+    SI2_SOUND_USAGE_LOOPING = 0,
+    SI2_SOUND_USAGE_INTERVAL = 1,
+    SI2_SOUND_USAGE_ONESHOT = 2,
+};
+
+enum SI2_DSP_TYPE : int32_t {
+    SI2_DSP_TYPE_UNINITIALIZED = -1,
     SI2_DSP_TYPE_NONE = 0,
     SI2_DSP_TYPE_PITCHSHIFT = 1,
     SI2_DSP_TYPE_HIGHPASS = 2,

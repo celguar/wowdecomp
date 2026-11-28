@@ -20,6 +20,8 @@ static TSExplicitList<CGGameObject_C, offsetof(CGGameObject_C, m_transportLink)>
 // VERIFY: 15b28f8e auto
 // OFFSET: 0x0074B730
 void MovementAddTransport(CGGameObject_C* transport) {
+    STORM_ASSERT(!s_transports.IsLinked(transport));
+
     s_transports.LinkToTail(transport);
 }
 
@@ -70,22 +72,7 @@ int32_t MovementGetTransportMtxSafe(WOWGUID transport, C44Matrix* matrix) {
         return 1;
     }
 
-    matrix->d3 = 1.0f;
-    matrix->c2 = 1.0f;
-    matrix->b1 = 1.0f;
-    matrix->a0 = 1.0f;
-    matrix->d2 = 0.0f;
-    matrix->d1 = 0.0f;
-    matrix->d0 = 0.0f;
-    matrix->c3 = 0.0f;
-    matrix->c1 = 0.0f;
-    matrix->c0 = 0.0f;
-    matrix->b3 = 0.0f;
-    matrix->b2 = 0.0f;
-    matrix->b0 = 0.0f;
-    matrix->a3 = 0.0f;
-    matrix->a2 = 0.0f;
-    matrix->a1 = 0.0f;
+    matrix->Identity();
     return 0;
 }
 
@@ -133,16 +120,15 @@ int32_t MovementInsideTransport(WOWGUID transport, const C3Vector& point) {
 // OFFSET: 0x0074B6E0
 void MovementMoveTransports(uint32_t time, uint32_t elapsed) {
     for (CGGameObject_C* transport = s_transports.Head(); transport; transport = s_transports.Next(transport)) {
-        transport->m_typeData->UpdateMovement(time, elapsed);
+        transport->GetBaseObject()->UpdateMovement(time, elapsed);
     }
 }
 
 // VERIFY: 1678bec4 manual
 // OFFSET: 0x0074B670
 void MovementNotifyTransportUnitRemoved(WOWGUID passenger, WOWGUID transport, uint8_t seat) {
-    uint32_t high = (uint32_t)(transport.m_guid >> 32);
 
-    if ((high & 0xF0F00000) == 0xF0500000 || (!(high & 0xF0000000) && ((high & 0xF07FFFFF) | (uint32_t)transport.m_guid))) {
+    if (transport.IsVehicle() || transport.IsPlayer()) {
         CGUnit_C* unit = (CGUnit_C*)ClntObjMgrObjectPtr(transport, TYPE_UNIT, __FILE__, __LINE__);
 
         if (unit && unit->m_vehicle) {
@@ -171,6 +157,8 @@ int32_t MovementObjIsTransport(WOWGUID guid) {
 // VERIFY: abd26a7a auto
 // OFFSET: 0x0074B750
 void MovementRemoveTransport(CGGameObject_C* transport) {
+    STORM_ASSERT(s_transports.IsLinked(transport));
+
     s_transports.UnlinkNode(transport);
 }
 
@@ -179,11 +167,11 @@ void MovementRemoveTransport(CGGameObject_C* transport) {
 int32_t MovementGetLastUpdateTime(uint32_t* time) {
     CMovementGlobals* globals = MovementGetGlobals();
 
-    if (!globals || !(globals->m_flags & 0x1)) {
+    if (!globals || !(globals->m_flags & CMovementGlobals::FLAG_INITIALIZED)) {
         return 0;
     }
 
-    *time = globals->m_lastUpdateTime;
+    *time = globals->GetLastUpdateTime();
 
     return 1;
 }
@@ -193,13 +181,16 @@ int32_t MovementGetLastUpdateTime(uint32_t* time) {
 int32_t MovementIdleMoveUnits(const void* data, void* param) {
     uint32_t now = OsGetAsyncTimeMs();
     CMovementGlobals* globals = MovementGetGlobals();
-    int32_t elapsed = now - globals->m_lastUpdateTime;
+    STORM_ASSERT(globals);
+    // 12213: "globals->initialized"
+    STORM_ASSERT(globals->m_flags & CMovementGlobals::FLAG_INITIALIZED);
+    int32_t elapsed = now - globals->GetLastUpdateTime();
 
     if (elapsed > 0) {
         MovementMoveTransports(now, elapsed);
 
         if (globals->m_movers.Head()) {
-            CMovement_C::MoveUnits(now, globals->m_lastUpdateTime);
+            CMovement_C::MoveUnits(now, globals->GetLastUpdateTime());
         }
 
         CGUnit_C* mover = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGUnit_C::s_activeMover, TYPE_UNIT, __FILE__, __LINE__));
@@ -209,7 +200,7 @@ int32_t MovementIdleMoveUnits(const void* data, void* param) {
         }
 
         globals->m_idleTime = now;
-        globals->m_lastUpdateTime = now;
+        globals->SetLastUpdateTime(now);
     }
 
     return 1;
@@ -226,13 +217,12 @@ void MovementDelSpline(CMoveSpline* spline) {
 // VERIFY: d283f620 auto
 // OFFSET: 0x0074B380
 void MovementUpdateCameraYaw(WOWGUID guid, WOWGUID transport) {
-    uint32_t high = static_cast<uint32_t>(transport.m_guid >> 32);
-
-    if ((high & 0xF0F00000) == 0xF0500000 || (!(high & 0xF0000000) && ((high & 0xF07FFFFF) | static_cast<uint32_t>(transport.m_guid)))) {
+    if (transport.IsVehicle() || transport.IsPlayer()) {
         return;
     }
 
     CGCamera* camera = CGWorldFrame::GetActiveCamera();
+    STORM_ASSERT(camera);
 
     if (camera->m_targetGUID == guid) {
         camera->MakeRelativeTo(transport);
@@ -271,6 +261,7 @@ uint32_t MovementGetIdleTime() {
 // OFFSET: 0x006E8F70
 void MovementSetTransportUpdateTime(uint32_t time) {
     CMovementGlobals* globals = MovementGetGlobals();
+    STORM_ASSERT(globals);
     globals->m_transportTime2 = globals->m_transportTime;
     globals->m_transportTime = time;
 }

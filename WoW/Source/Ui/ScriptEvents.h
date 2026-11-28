@@ -38,7 +38,7 @@ void UnitNameQueryCallback(int32_t id, const WOWGUID& guid, void* param, bool su
 bool Script_GetGUIDFromString(const char** name, WOWGUID& guid);
 bool Script_GetGUIDFromToken(const char* token, WOWGUID& guid, bool defaultToTarget);
 bool Script_GetNameFromToken(const char* token, const char** name, bool defaultToTarget, bool withRealm);
-char** Script_GetTokenIDsFromGUID(const WOWGUID& guid, int32_t* count);
+char** Script_GetTokenIDsFromGUID(const WOWGUID& guid, int32_t* numtokens);
 void ScriptEventsInitialize();
 void ScriptEventsRegisterFunctions();
 void ScriptEventsUnregisterFunctions();
@@ -50,7 +50,7 @@ void Script_SendUniqueSignal(int32_t signal);
 void Script_SendUniqueSignalToAllUnits(int32_t signal);
 void Script_SendUniqueSignals();
 
-void Script_SendUnitSpellSignal(const WOWGUID& guid, uint8_t castCount, const SpellRec* spell, int32_t signal);
+void Script_SendUnitSpellSignal(const WOWGUID& guid, uint8_t castCount, const SpellRec* spell, SCRIPT_EVENT signal);
 void ScriptEventsRegisterUnit(CGUnit_C* unit);
 void ScriptEventsUnregisterUnit(CGUnit_C* unit);
 

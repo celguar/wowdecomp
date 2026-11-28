@@ -3,11 +3,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Frame/CSimpleFrame.h"
 #include "Engine/Source/Gx/CGxTex.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/C2Vector.h"
+#include "Engine/Source/Tempest/C2iVector.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Tempest/CRect.h"
@@ -35,6 +37,17 @@ struct MINIMAPQUAD {
 };
 
 struct MINIMAPTILE {
+    // Runtime tile state; reconstructed names.
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // UpdateQuad built the vertices; required to render.
+        QUAD_BUILT = 0x1,
+        // Claimed by the current tile/quad layout.
+        IN_USE = 0x2,
+        // The texture was created and its GX texture is not ready yet.
+        TEXTURE_PENDING = 0x4,
+    };
+
     /* 0000 */ C3Vector m_vertices[4];
     /* 0030 */ C2Vector m_texCoords[4];
     /* 0050 */ C2Vector m_maskCoords[4];
@@ -42,12 +55,11 @@ struct MINIMAPTILE {
     /* 0088 */ MINIMAPTILE* m_nextSorted;
     /* 008C */ float m_depth;
     /* 0090 */ CTexture* m_texture;
-    /* 0094 */ uint32_t m_flags;
-    /* 0098 */ int32_t m_x;
-    /* 009C */ int32_t m_y;
+    /* 0094 */ uint32_t m_flags; // FLAGS
+    /* 0098 */ C2iVector m_tileCoords; // Signed texture tile/quad indices; LeaveWorld resets both to -1.
     /* 00A0 */ int32_t m_groupId;
 
-    void BuildQuad(const CRect& rect, uint32_t index, const C2Vector* center, float scale, const CRect& bounds, float layoutScale, float width);
+    void BuildQuad(const CRect& rect, uint32_t index, const C2Vector* centerPoint, float radius, const CRect& maskBox, float layoutScale, float width);
     void Render(uint32_t index, const CImVector* color);
     void UpdateQuad(uint32_t index, C2Vector center, float scale, float layoutScale, float width);
 };
@@ -67,8 +79,7 @@ struct MINIMAPINDOOR {
 
 struct MINIMAPQUADINFO {
     /* 0000 */ int32_t m_groupId;
-    /* 0004 */ int32_t m_x;
-    /* 0008 */ int32_t m_y;
+    /* 0004 */ C2iVector m_quad; // Integer x/y indices of the WMO group's minimap texture quad.
     /* 000C */ CAaBox m_bounds;
 };
 
@@ -105,11 +116,23 @@ struct MINIMAPENUMPARAM {
     /* 0020 */ CGMinimapFrame* m_frame;
 };
 
+// Slots of the client-placed POIs appended after the AreaPOI records. Names inferred from the
+// function that fills each slot (DisplayQuestPoint, MinimapGetGossipPoi, MinimapSetCorpsePOI,
+// MinimapSetSpiritHealerPOI).
+enum DYNAMIC_POI : int32_t {
+    DYNAMIC_POI_NONE = -2, // POIDIRECTIONDATA::m_dynamicIndex of an AreaPOI record
+    DYNAMIC_POI_QUEST = 0,
+    DYNAMIC_POI_GOSSIP = 1,
+    DYNAMIC_POI_CORPSE = 2,
+    DYNAMIC_POI_SPIRIT_HEALER = 3,
+    NUM_DYNAMIC_POIS = 4,
+};
+
 struct POIDIRECTIONDATA {
     /* 0000 */ char m_name[64];
     /* 0040 */ float m_facing;
     /* 0044 */ int32_t m_alwaysShow;
-    /* 0048 */ int32_t m_dynamicIndex;
+    /* 0048 */ int32_t m_dynamicIndex; // DYNAMIC_POI
 };
 
 struct POIINFO {
@@ -123,8 +146,16 @@ struct MINIMAPMD5NAME : public TSHashObject<MINIMAPMD5NAME, HASHKEY_STRI> {
     /* 0018 */ char m_md5Name[40];
 };
 
+enum TRACKING_TYPE : int32_t {
+    // m_npcFlags is a UNIT_NPC_FLAGS mask.
+    TRACKING_TYPE_NPC_FLAGS = 1,
+    // m_npcFlags is a gameobject type ID.
+    TRACKING_TYPE_GAMEOBJECT = 2,
+    TRACKING_TYPE_TRIVIAL_QUESTS = 3,
+};
+
 struct TrackingTypeInfo {
-    /* 0000 */ int32_t m_type;
+    /* 0000 */ TRACKING_TYPE m_type;
     /* 0004 */ uint32_t m_npcFlags;
     /* 0008 */ const char* m_name;
     /* 000C */ const char* m_texture;
@@ -191,7 +222,7 @@ class CGMinimapFrame : public CSimpleFrame {
     void OnLayerUpdate(float elapsedSec) override;
     int32_t OnLayerTrackUpdate(const CMouseEvent& evt) override;
     void OnFrameRender(CRenderBatch* batch, uint32_t layer) override;
-    void OnLayerCursorExit(int32_t motion, int32_t a3) override;
+    void OnLayerCursorExit(int32_t motion, BOOL releaseMouse) override;
     bool UpdateScale(bool force) override;
 
     CGMinimapFrame(CSimpleFrame* parent);
@@ -217,7 +248,7 @@ void MinimapRegisterScriptFunctions();
 void MinimapUnregisterScriptFunctions();
 
 void MinimapInitialize(int32_t mapId);
-int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* position, C2Vector* center, float* scale, MINIMAPTILE* tiles, MINIMAPINDOOR* indoor, int32_t force);
+int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* position, C2Vector* center, float* scale, MINIMAPTILE* tiles, MINIMAPINDOOR* indoor, BOOL force);
 TSGrowableArray<AreaPOIRec*>* MinimapGetPOI(int32_t* changed);
 float MinimapGetViewRadius();
 AreaPOIRec* MinimapGetGossipPoi();
@@ -231,12 +262,12 @@ void MinimapSetSpiritHealerPOI(float x, float y);
 int32_t MinimapGetZoom();
 int32_t MinimapGetZoomLevels();
 
-extern CTexture* s_staticPOIArrowTexture;
-extern CTexture* s_corpseArrowTexture;
-extern CTexture* s_poiArrowTexture;
-extern CTexture* s_maskTexture;
+extern CTexture* s_arrowStaticTexture;
+extern CTexture* s_arrowCorpseTexture;
+extern CTexture* s_arrowPOITexture;
+extern CTexture* s_minimapMaskTexture;
 extern CTexture* s_classBlipTexture;
-extern CTexture* s_blipTexture;
+extern CTexture* s_objectBlipTexture;
 extern CTexture* s_iconTexture;
 
 void MinimapSetZoom(uint32_t zoom);

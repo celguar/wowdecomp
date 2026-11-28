@@ -8,12 +8,27 @@ class SFileImpl;
 
 class CreatureModelDataRec {
     public:
+    enum MODEL_FLAGS : int32_t {
+        NO_FOOTPRINT_PARTICLES = 0x1,
+        NO_BREATH_PARTICLES = 2,
+        IS_PLAYER_MODEL = 0x4,
+        NO_TORSO_SPLIT = 0x8,
+        NO_ATTACHED_WEAPONS = 0x10, // Also gates hand-bound spell effects.
+        NO_FOOTPRINT_TRAIL_TEXTURES = 0x20,
+        DISABLE_HIGHLIGHT = 0x40,
+        CAN_MOUNT_WHILE_TRANSFORMED = 0x80,
+        // UNKNOWN_100 = 0x100, // Reference: DisableScaleInterpolation; current use unconfirmed.
+        FORCE_PROJECTED_TEXTURES = 0x200,
+        CAN_JUMP_IN_PLACE_AS_MOUNT = 0x400,
+        // UNKNOWN_800 = 0x800, // Unused by client.
+    };
+
     static const int32_t s_numColumns = 28;
     static const int32_t s_rowSize = 112;
     static const bool s_generatedID = false;
 
     /* 0000 */ int32_t m_id;
-    /* 0004 */ int32_t m_flags;
+    /* 0004 */ MODEL_FLAGS m_flags;
     /* 0008 */ const char* m_modelName;
     /* 000C */ int32_t m_sizeClass;
     /* 0010 */ float m_modelScale;

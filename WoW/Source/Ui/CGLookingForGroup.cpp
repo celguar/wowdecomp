@@ -1,4 +1,5 @@
 #include "LFGInfo.h"
+#include "WoW/Common/Types.h"
 #include "Engine/Source/Base/CDataStore.h"
 #include "Engine/Source/lua-5.1/src/lauxlib.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
@@ -12,7 +13,6 @@
 #include "Engine/Source/Os/Time.h"
 #include "WoW/Source/DB/Rec/DungeonEncounterRec.h"
 #include "WoW/Source/DB/Rec/SpellIconRec.h"
-#include "WoW/Source/Ui/LFGInfo.h"
 #include <cstdlib>
 #include "WoW/Source/DB/Rec/AreaTableRec.h"
 #include "WoW/Source/Game/GameClient/NameCache.h"
@@ -25,7 +25,19 @@
 #include "Engine/Source/FrameXML/LoadXML.h"
 
 // STATIC: 0x00A394B0
-static const uint8_t s_classRoles[11] = { 0x0B, 0x0F, 0x09, 0x09, 0x0D, 0x0B, 0x0D, 0x09, 0x09, 0x00, 0x0F };
+static const ROLE_FLAGS_8 s_classRoles[NUM_CLASSES] = {
+    static_cast<ROLE_FLAGS_8>(LEADER | TANK | DAMAGER),          // CLASS_WARRIOR
+    static_cast<ROLE_FLAGS_8>(LEADER | TANK | HEALER | DAMAGER), // CLASS_PALADIN
+    static_cast<ROLE_FLAGS_8>(LEADER | DAMAGER),                 // CLASS_HUNTER
+    static_cast<ROLE_FLAGS_8>(LEADER | DAMAGER),                 // CLASS_ROGUE
+    static_cast<ROLE_FLAGS_8>(LEADER | HEALER | DAMAGER),        // CLASS_PRIEST
+    static_cast<ROLE_FLAGS_8>(LEADER | TANK | DAMAGER),          // CLASS_DEATH_KNIGHT
+    static_cast<ROLE_FLAGS_8>(LEADER | HEALER | DAMAGER),        // CLASS_SHAMAN
+    static_cast<ROLE_FLAGS_8>(LEADER | DAMAGER),                 // CLASS_MAGE
+    static_cast<ROLE_FLAGS_8>(LEADER | DAMAGER),                 // CLASS_WARLOCK
+    ROLE8_NONE,                                               // Unused class ID 10
+    static_cast<ROLE_FLAGS_8>(LEADER | TANK | HEALER | DAMAGER), // CLASS_DRUID
+};
 
 // STATIC: 0x00ACDD6C
 static int32_t s_joinAttempts;
@@ -35,7 +47,7 @@ static float s_lastJoinTime;
 
 // VERIFY: 7da483d6 auto
 // OFFSET: 0x00552940
-uint8_t CGLookingForGroup::GetClassRoles(uint32_t classID) {
+ROLE_FLAGS_8 CGLookingForGroup::GetClassRoles(uint32_t classID) {
     return s_classRoles[classID - 1];
 }
 
@@ -71,7 +83,7 @@ void DungeonEncounterCountMatchingRows(int32_t mapId, int32_t difficulty, uint32
     *total = 0;
     *completed = 0;
 
-    for (int32_t i = 0; i < g_dungeonEncounterDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_dungeonEncounterDB.GetNumRecords(); i++) {
         DungeonEncounterRec* encounter = g_dungeonEncounterDB.GetRecordByIndex(i);
 
         if (encounter->m_mapID == mapId && encounter->m_difficulty == difficulty) {
@@ -87,7 +99,7 @@ void DungeonEncounterCountMatchingRows(int32_t mapId, int32_t difficulty, uint32
 // VERIFY: e291b497 auto
 // OFFSET: 0x005538B0
 int32_t PushDungeonEncounterInfo(lua_State* L, int32_t mapId, int32_t difficulty, int32_t index, uint32_t completedMask) {
-    for (int32_t i = 0; i < g_dungeonEncounterDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_dungeonEncounterDB.GetNumRecords(); i++) {
         DungeonEncounterRec* encounter = g_dungeonEncounterDB.GetRecordByIndex(i);
 
         if (encounter->m_mapID != mapId || encounter->m_difficulty != difficulty) {
@@ -120,15 +132,15 @@ int32_t PushDungeonEncounterInfo(lua_State* L, int32_t mapId, int32_t difficulty
 
 // VERIFY: f5aceb4b auto
 // OFFSET: 0x00553B50
-uint32_t FilterRolesByClass(uint8_t roles) {
+ROLE_FLAGS FilterRolesByClass(ROLE_FLAGS_8 roles) {
     ChrClassesRec* rec = g_chrClassesDB.GetRecord(ClientServices::GetCharacterClass());
-    return roles & s_classRoles[rec->m_id - 1];
+    return static_cast<ROLE_FLAGS>(roles & s_classRoles[rec->m_id - 1]);
 }
 
 // VERIFY: 49ccd8f7 manual
 // OFFSET: 0x00554610
 int32_t CGLookingForGroup::GetLFGRoleUpdate(lua_State* L) {
-    lua_pushboolean(L, CGLookingForGroup::m_roleCheckState == 2);
+    lua_pushboolean(L, CGLookingForGroup::m_roleCheckState == ROLE_CHECK_IN_PROGRESS);
     lua_pushnumber(L, CGLookingForGroup::m_roleCheckSlots.m_count);
     lua_pushnumber(L, CGLookingForGroup::m_roleCheckMembers.m_count);
     return 3;
@@ -148,8 +160,8 @@ int32_t CGLookingForGroup::GetLFGRoleUpdateSlot(lua_State* L) {
         return 0;
     }
 
-    lua_pushnumber(L, CGLookingForGroup::m_roleCheckSlots.m_data[index] >> 24);
-    lua_pushnumber(L, CGLookingForGroup::m_roleCheckSlots.m_data[index] & 0xFFFFFF);
+    lua_pushnumber(L, CGLookingForGroup::m_roleCheckSlots.m_data[index] >> CGLookingForGroup::SLOT_PACKING::SLOT_TYPE_SHIFT);
+    lua_pushnumber(L, CGLookingForGroup::m_roleCheckSlots.m_data[index] & CGLookingForGroup::SLOT_PACKING::SLOT_DUNGEON_ID_MASK);
     return 2;
 }
 
@@ -174,14 +186,14 @@ void CGLookingForGroup::JoinLFG() {
     }
 
     CDataStore msg;
-    uint32_t roles = FilterRolesByClass(static_cast<uint8_t>(s_cvLfgSelectedRoles->m_intValue));
+    ROLE_FLAGS roles = FilterRolesByClass(static_cast<ROLE_FLAGS_8>(s_cvLfgSelectedRoles->m_intValue));
 
-    if (!(roles & ~0x1)) {
+    if (!(roles & ~ROLE_FLAGS::LEADER)) {
         return;
     }
 
     msg.Put(static_cast<uint32_t>(CMSG_LFG_JOIN));
-    msg.Put(roles);
+    msg.Put(static_cast<uint32_t>(roles));
     msg.Put(static_cast<uint8_t>(CGLookingForGroup::m_localInfo.m_noPartial != 0));
     msg.Put(static_cast<uint8_t>(CGLookingForGroup::m_localInfo.m_achievements != 0));
     msg.Put(static_cast<uint8_t>(CGLookingForGroup::m_localInfo.m_numDungeons));
@@ -255,13 +267,13 @@ int32_t CGLookingForGroup::GetLFGProposalMember(lua_State* L) {
     }
 
     LFGProposalMember* member = &CGLookingForGroup::m_proposal.m_members[index];
-    lua_pushboolean(L, member->m_roles & 0x1);
+    lua_pushboolean(L, member->m_roles & ROLE_FLAGS::LEADER);
 
-    if (member->m_roles & 0x2) {
+    if (member->m_roles & ROLE_FLAGS::TANK) {
         lua_pushstring(L, s_roleTokens[0]);
-    } else if (member->m_roles & 0x4) {
+    } else if (member->m_roles & ROLE_FLAGS::HEALER) {
         lua_pushstring(L, s_roleTokens[1]);
-    } else if (member->m_roles & 0x8) {
+    } else if (member->m_roles & ROLE_FLAGS::DAMAGER) {
         lua_pushstring(L, s_roleTokens[2]);
     } else {
         lua_pushstring(L, "UNKNOWN");
@@ -286,7 +298,7 @@ int32_t CGLookingForGroup::GetLFGProposalEncounter(lua_State* L) {
     double index = lua_tonumber(L, 1);
     LfgDungeonsRec* rec;
 
-    if (CGLookingForGroup::m_proposal.m_dungeonId && (rec = g_lfgDungeonsDB.GetRecord(CGLookingForGroup::m_proposal.m_dungeonId & 0xFFFFFF))) {
+    if (CGLookingForGroup::m_proposal.m_dungeonId && (rec = g_lfgDungeonsDB.GetRecord(CGLookingForGroup::m_proposal.m_dungeonId & CGLookingForGroup::SLOT_PACKING::SLOT_DUNGEON_ID_MASK))) {
         return PushDungeonEncounterInfo(L, rec->m_mapID, rec->m_difficulty, static_cast<int32_t>(index - 1.0), CGLookingForGroup::m_proposal.m_completedMask);
     }
 
@@ -363,10 +375,10 @@ int32_t CGLookingForGroup::GetLFGRoleUpdateMember(lua_State* L) {
     }
 
     if (member->m_confirmed) {
-        lua_pushboolean(L, member->m_roles & 0x1);
-        lua_pushboolean(L, member->m_roles & 0x2);
-        lua_pushboolean(L, member->m_roles & 0x4);
-        lua_pushboolean(L, member->m_roles & 0x8);
+        lua_pushboolean(L, member->m_roles & ROLE_FLAGS::LEADER);
+        lua_pushboolean(L, member->m_roles & ROLE_FLAGS::TANK);
+        lua_pushboolean(L, member->m_roles & ROLE_FLAGS::HEALER);
+        lua_pushboolean(L, member->m_roles & ROLE_FLAGS::DAMAGER);
     } else {
         lua_pushnil(L);
         lua_pushnil(L);
@@ -424,11 +436,7 @@ int32_t CGLookingForGroup::GetLFGBootProposal(lua_State* L) {
     if (name) {
         char fullName[256];
 
-        if (name->m_realmName[0]) {
-            SStrPrintf(fullName, sizeof(fullName), "%s-%s", name->m_name, name->m_realmName);
-        } else {
-            SStrCopy(fullName, name->m_name, sizeof(fullName));
-        }
+        name->FullName(fullName, sizeof(fullName));
 
         lua_pushstring(L, fullName);
     } else {
@@ -451,7 +459,7 @@ bool CGLookingForGroup::SetHeaderCollapsed(uint32_t header, bool collapsed) {
     }
 
     CVarArrayWrapper wrapper(s_cvLfdCollapsedHeaders);
-    return wrapper.RawSetValue(header, collapsed != wrapper.m_defaultValue);
+    return wrapper.RawSetValue(header, collapsed != wrapper.GetDefaultValue());
 }
 
 // VERIFY: 4c9a2a42 auto
@@ -462,7 +470,7 @@ bool CGLookingForGroup::SetDungeonEnabled(uint32_t dungeon, bool enabled) {
     }
 
     CVarArrayWrapper wrapper(s_cvLfdSelectedDungeons);
-    return wrapper.RawSetValue(dungeon, enabled != wrapper.m_defaultValue);
+    return wrapper.RawSetValue(dungeon, enabled != wrapper.GetDefaultValue());
 }
 
 // VERIFY: 60bc3b0b manual
@@ -519,8 +527,8 @@ int32_t CGLookingForGroup::GetQueueStatusIndex() {
 void CGLookingForGroup::ClearPartyInfo() {
     CGLookingForGroup::m_partyLockInfo.Clear();
 
-    if (CGLookingForGroup::m_roleCheckState == 2) {
-        CGLookingForGroup::m_roleCheckState = 0;
+    if (CGLookingForGroup::m_roleCheckState == ROLE_CHECK_IN_PROGRESS) {
+        CGLookingForGroup::m_roleCheckState = ROLE_CHECK_NONE;
         CGLookingForGroup::m_roleCheckSlots.m_count = 0;
         CGLookingForGroup::m_roleCheckMembers.m_count = 0;
         FrameScript_SignalEvent(SCRIPT_EVENT_LFG_ROLE_CHECK_HIDE, nullptr);
@@ -537,8 +545,8 @@ void CGLookingForGroup::ClearPartyInfo() {
 static int QSortLFGParty(const void* a, const void* b) {
     LFGListParty* partyA = *static_cast<LFGListParty* const*>(a);
     LFGListParty* partyB = *static_cast<LFGListParty* const*>(b);
-    LFGListPlayer* leaderA = partyA->m_members.m_count ? partyA->m_members.m_data[0] : nullptr;
-    LFGListPlayer* leaderB = partyB->m_members.m_count ? partyB->m_members.m_data[0] : nullptr;
+    LFGListPlayer* leaderA = partyA->GetLeader();
+    LFGListPlayer* leaderB = partyB->GetLeader();
 
     if (!leaderA) {
         return leaderB ? -1 : 0;
@@ -548,11 +556,11 @@ static int QSortLFGParty(const void* a, const void* b) {
         return 1;
     }
 
-    for (uint32_t i = 0; i < 7; i++) {
+    for (uint32_t i = 0; i < CGLookingForGroup::SORT_COLUMN::NUM_SORT_COLUMNS; i++) {
         int32_t result = 0;
 
-        switch (CGLookingForGroup::m_unkBEA820[i].m_id) {
-            case 0: {
+        switch (CGLookingForGroup::m_sortColumns[i].m_id) {
+            case CGLookingForGroup::SORT_COLUMN::ZONE: {
                 AreaTableRec* areaA = g_areaTableDB.GetRecord(leaderA->m_areaID);
                 AreaTableRec* areaB = g_areaTableDB.GetRecord(leaderB->m_areaID);
 
@@ -563,14 +571,14 @@ static int QSortLFGParty(const void* a, const void* b) {
                 break;
             }
 
-            case 1:
+            case CGLookingForGroup::SORT_COLUMN::LEVEL:
                 if (leaderA->m_level != leaderB->m_level) {
                     result = leaderA->m_level < leaderB->m_level ? -1 : 1;
                 }
 
                 break;
 
-            case 2: {
+            case CGLookingForGroup::SORT_COLUMN::CLASS: {
                 NameCache* nameA = g_nameDBCache.GetRecord(leaderA->m_key.m_guid.m_guid, WOWGUID(), nullptr, nullptr, false);
                 NameCache* nameB = g_nameDBCache.GetRecord(leaderB->m_key.m_guid.m_guid, WOWGUID(), nullptr, nullptr, false);
                 ChrClassesRec* classA;
@@ -583,7 +591,7 @@ static int QSortLFGParty(const void* a, const void* b) {
                 break;
             }
 
-            case 3: {
+            case CGLookingForGroup::SORT_COLUMN::NAME: {
                 NameCache* nameA = g_nameDBCache.GetRecord(leaderA->m_key.m_guid.m_guid, WOWGUID(), nullptr, nullptr, false);
                 NameCache* nameB = g_nameDBCache.GetRecord(leaderB->m_key.m_guid.m_guid, WOWGUID(), nullptr, nullptr, false);
 
@@ -599,7 +607,7 @@ static int QSortLFGParty(const void* a, const void* b) {
         }
 
         if (result) {
-            return CGLookingForGroup::m_unkBEA820[i].m_order ? -result : result;
+            return CGLookingForGroup::m_sortColumns[i].m_order ? -result : result;
         }
     }
 
@@ -612,11 +620,11 @@ static int QSortLFGPlayer(const void* a, const void* b) {
     LFGListPlayer* playerA = *static_cast<LFGListPlayer* const*>(a);
     LFGListPlayer* playerB = *static_cast<LFGListPlayer* const*>(b);
 
-    for (uint32_t i = 0; i < 7; i++) {
+    for (uint32_t i = 0; i < CGLookingForGroup::SORT_COLUMN::NUM_SORT_COLUMNS; i++) {
         int32_t result = 0;
 
-        switch (CGLookingForGroup::m_unkBEA820[i].m_id) {
-            case 0: {
+        switch (CGLookingForGroup::m_sortColumns[i].m_id) {
+            case CGLookingForGroup::SORT_COLUMN::ZONE: {
                 AreaTableRec* areaA = g_areaTableDB.GetRecord(playerA->m_areaID);
                 AreaTableRec* areaB = g_areaTableDB.GetRecord(playerB->m_areaID);
 
@@ -627,14 +635,14 @@ static int QSortLFGPlayer(const void* a, const void* b) {
                 break;
             }
 
-            case 1:
+            case CGLookingForGroup::SORT_COLUMN::LEVEL:
                 if (playerA->m_level != playerB->m_level) {
                     result = playerA->m_level < playerB->m_level ? -1 : 1;
                 }
 
                 break;
 
-            case 2: {
+            case CGLookingForGroup::SORT_COLUMN::CLASS: {
                 NameCache* nameA = g_nameDBCache.GetRecord(playerA->m_key.m_guid.m_guid, WOWGUID(), nullptr, nullptr, false);
                 NameCache* nameB = g_nameDBCache.GetRecord(playerB->m_key.m_guid.m_guid, WOWGUID(), nullptr, nullptr, false);
                 ChrClassesRec* classA;
@@ -647,7 +655,7 @@ static int QSortLFGPlayer(const void* a, const void* b) {
                 break;
             }
 
-            case 3: {
+            case CGLookingForGroup::SORT_COLUMN::NAME: {
                 NameCache* nameA = g_nameDBCache.GetRecord(playerA->m_key.m_guid.m_guid, WOWGUID(), nullptr, nullptr, false);
                 NameCache* nameB = g_nameDBCache.GetRecord(playerB->m_key.m_guid.m_guid, WOWGUID(), nullptr, nullptr, false);
 
@@ -658,16 +666,16 @@ static int QSortLFGPlayer(const void* a, const void* b) {
                 break;
             }
 
-            case 4:
-                result = (playerB->m_roles & 0x2) - (playerA->m_roles & 0x2);
+            case CGLookingForGroup::SORT_COLUMN::TANK_ROLE:
+                result = (playerB->m_roles & ROLE_FLAGS::TANK) - (playerA->m_roles & ROLE_FLAGS::TANK);
                 break;
 
-            case 5:
-                result = (playerB->m_roles & 0x4) - (playerA->m_roles & 0x4);
+            case CGLookingForGroup::SORT_COLUMN::HEALER_ROLE:
+                result = (playerB->m_roles & ROLE_FLAGS::HEALER) - (playerA->m_roles & ROLE_FLAGS::HEALER);
                 break;
 
-            case 6:
-                result = (playerB->m_roles & 0x8) - (playerA->m_roles & 0x8);
+            case CGLookingForGroup::SORT_COLUMN::DAMAGE_ROLE:
+                result = (playerB->m_roles & ROLE_FLAGS::DAMAGER) - (playerA->m_roles & ROLE_FLAGS::DAMAGER);
                 break;
 
             default:
@@ -675,7 +683,7 @@ static int QSortLFGPlayer(const void* a, const void* b) {
         }
 
         if (result) {
-            return CGLookingForGroup::m_unkBEA820[i].m_order ? -result : result;
+            return CGLookingForGroup::m_sortColumns[i].m_order ? -result : result;
         }
     }
 

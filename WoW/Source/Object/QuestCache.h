@@ -6,6 +6,39 @@
 
 class CDataStore;
 
+// Quest-template word copied through quest query, dialogue and gossip packets.
+// Bits 0x2/0x4 are only tested together for quest-log completion state in this client.
+enum QUEST_TEMPLATE_FLAGS : uint32_t {
+    QUEST_FLAG_NONE                      = 0x00000000,
+    QUEST_FLAG_COMPLETION_STATE_MASK     = 0x00000006,
+    QUEST_FLAG_SHARABLE                  = 0x00000008,
+    QUEST_FLAG_DAILY                     = 0x00001000,
+    QUEST_FLAG_PVP                       = 0x00002000,
+    QUEST_FLAG_WEEKLY                    = 0x00008000,
+    QUEST_FLAG_AUTO_COMPLETE             = 0x00010000,
+    QUEST_FLAG_DISPLAY_ITEM_IN_TRACKER   = 0x00020000,
+    QUEST_FLAG_USE_OBJECTIVE_TEXT        = 0x00040000,
+    QUEST_FLAG_AUTO_ACCEPT               = 0x00080000,
+};
+
+// TrinityCore 3.3.5 reference names only; their individual meanings are not verified
+// by this client's readers: STAY_ALIVE=0x1, PARTY_ACCEPT=0x2, EXPLORATION=0x4,
+// HAS_CONDITION=0x10, HIDE_REWARD_POI=0x20, RAID=0x40, TBC=0x80,
+// NO_MONEY_FROM_XP=0x100, HIDDEN_REWARDS=0x200, TRACKING=0x400,
+// DEPRECATE_REPUTATION=0x800, UNAVAILABLE=0x4000. Unknown bits stay in the raw word.
+
+// Quest record array sizes (inferred names, from the cache layout).
+static const uint32_t QUEST_REWARD_ITEMS = 4;
+static const uint32_t QUEST_REWARD_CHOICE_ITEMS = 6;
+static const uint32_t QUEST_OBJECTIVES = 4;
+// m_objectiveId high bit marks a game object entry (QUEST_OBJECTS_FOUND text) instead of a
+// creature (QUEST_MONSTERS_KILLED); the low bits hold the entry ID.
+static const uint32_t QUEST_OBJECTIVE_GAMEOBJECT = 0x80000000;
+static const uint32_t QUEST_OBJECTIVE_ID_MASK = 0x7FFFFFFF;
+static const uint32_t QUEST_COLLECT_ITEMS = 6;
+static const uint32_t QUEST_INTERMEDIATE_ITEMS = 4;
+static const uint32_t QUEST_REPUTATION_REWARDS = 5;
+
 class QuestCache {
     public:
     static const uint32_t s_cacheVersion = 3;
@@ -31,10 +64,10 @@ class QuestCache {
     /* 0048 */ float m_rewardHonorBonus;
     /* 004C */ uint32_t m_startingItemId;
     /* 0050 */ uint32_t m_flags;
-    /* 0054 */ uint32_t m_rewardItem[4];
-    /* 0064 */ uint32_t m_rewardItemCount[4];
-    /* 0074 */ uint32_t m_rewardChoiceItem[6];
-    /* 008C */ uint32_t m_rewardChoiceItemCount[6];
+    /* 0054 */ uint32_t m_rewardItem[QUEST_REWARD_ITEMS];
+    /* 0064 */ uint32_t m_rewardItemCount[QUEST_REWARD_ITEMS];
+    /* 0074 */ uint32_t m_rewardChoiceItem[QUEST_REWARD_CHOICE_ITEMS];
+    /* 008C */ uint32_t m_rewardChoiceItemCount[QUEST_REWARD_CHOICE_ITEMS];
     /* 00A4 */ uint32_t m_pointMapId;
     /* 00A8 */ float m_pointX;
     /* 00AC */ float m_pointY;
@@ -43,21 +76,21 @@ class QuestCache {
     /* 02B4 */ char m_objText[3000];
     /* 0E6C */ char m_description[3000];
     /* 1A24 */ char m_endText[512];
-    /* 1C24 */ uint32_t m_objectiveId[4];
-    /* 1C34 */ uint32_t m_objectiveRequiredCount[4];
-    /* 1C44 */ uint32_t m_collectItemId[6];
-    /* 1C5C */ uint32_t m_collectItemCount[6];
-    /* 1C74 */ uint32_t m_intermediateItemId[4];
-    /* 1C84 */ uint32_t m_intermediateItemCount[4];
-    /* 1C94 */ char m_objectiveText[4][256];
+    /* 1C24 */ uint32_t m_objectiveId[QUEST_OBJECTIVES];
+    /* 1C34 */ uint32_t m_objectiveRequiredCount[QUEST_OBJECTIVES];
+    /* 1C44 */ uint32_t m_collectItemId[QUEST_COLLECT_ITEMS];
+    /* 1C5C */ uint32_t m_collectItemCount[QUEST_COLLECT_ITEMS];
+    /* 1C74 */ uint32_t m_intermediateItemId[QUEST_INTERMEDIATE_ITEMS];
+    /* 1C84 */ uint32_t m_intermediateItemCount[QUEST_INTERMEDIATE_ITEMS];
+    /* 1C94 */ char m_objectiveText[QUEST_OBJECTIVES][256];
     /* 2094 */ uint32_t m_rewardTitleId;
     /* 2098 */ uint32_t m_requiredPlayersKilled;
     /* 209C */ uint32_t m_rewardTalentPoints;
     /* 20A0 */ uint32_t m_rewardArenaPoints;
     /* 20A4 */ char m_completionText[2048];
-    /* 28A4 */ uint32_t m_rewardReputationFaction[5];
-    /* 28B8 */ uint32_t m_factionRewardId[5];
-    /* 28CC */ int32_t m_rewardReputationOverride[5];
+    /* 28A4 */ uint32_t m_rewardReputationFaction[QUEST_REPUTATION_REWARDS];
+    /* 28B8 */ uint32_t m_factionRewardId[QUEST_REPUTATION_REWARDS];
+    /* 28CC */ int32_t m_rewardReputationOverride[QUEST_REPUTATION_REWARDS];
     /* 28E0 */ uint32_t m_rewardReputationMask;
 
     QuestCache();

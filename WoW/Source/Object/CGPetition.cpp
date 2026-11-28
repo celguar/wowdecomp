@@ -20,13 +20,13 @@ CGPetition::CGPetition() {
     this->m_allowedMaxLevel = 0;
     this->m_allowedMinLevel = 0;
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < NUM_CHOICES; i++) {
         this->m_choiceText[i][0] = '\0';
     }
 
     this->m_numChoices = 0;
     this->m_muid = 0;
-    this->m_staticType = 0;
+    this->m_staticType = STATIC_TYPE_GUILD;
 }
 
 // VERIFY: ac373b5d auto
@@ -49,7 +49,7 @@ CGPetition& CGPetition::operator=(const CGPetition& source) {
     this->m_muid = source.m_muid;
     this->m_staticType = source.m_staticType;
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < NUM_CHOICES; i++) {
         SStrCopy(this->m_choiceText[i], source.m_choiceText[i], sizeof(this->m_choiceText[i]));
     }
 
@@ -77,7 +77,7 @@ void CGPetition::Pack(CDataStore* msg) {
     msg->Put(this->m_allowedMaxLevel);
     msg->Put(this->m_numChoices);
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < NUM_CHOICES; i++) {
         msg->PutString(this->m_choiceText[i]);
     }
 
@@ -104,7 +104,7 @@ void CGPetition::Unpack(CDataStore* msg) {
     msg->Get(this->m_allowedMaxLevel);
     msg->Get(this->m_numChoices);
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < NUM_CHOICES; i++) {
         msg->GetString(this->m_choiceText[i], sizeof(this->m_choiceText[i]));
     }
 

@@ -325,7 +325,7 @@ static int32_t Script_SetCVar(lua_State* L) {
         return 0;
     }
 
-    if (var->m_flags & 0x4) {
+    if (var->m_flags & CVAR_FLAGS::CVAR_READ_ONLY) {
         luaL_error(L, "\"%s\" is read-only", name);
         return 0;
     }
@@ -428,7 +428,7 @@ static int32_t Script_IsTrialAccount(lua_State* L) {
 // VERIFY: c9c81de1 auto
 // OFFSET: 0x004DD540
 static int32_t Script_IsSystemSupported(lua_State* L) {
-    if (OsGetProcessorFeatures() & 0x4) {
+    if (OsGetProcessorFeatures() & OS_PROCESSOR_FEATURE_SSE) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -582,13 +582,13 @@ static int32_t Script_GetServerName(lua_State* L) {
     REALM_INFO* realm = ClientServices::GetSelectedRealm();
 
     if (realm) {
-        for (int32_t i = 0; i < g_cfg_ConfigsDB.m_numRecords; i++) {
-            Cfg_ConfigsRec* config = i >= 0 && i < g_cfg_ConfigsDB.m_numRecords ? &g_cfg_ConfigsDB.m_records[i] : nullptr;
+        for (int32_t i = 0; i < g_cfg_ConfigsDB.GetNumRecords(); i++) {
+            Cfg_ConfigsRec* config = i >= 0 && i < g_cfg_ConfigsDB.GetNumRecords() ? &g_cfg_ConfigsDB.m_records[i] : nullptr;
 
             if (config->m_realmType == realm->m_type) {
                 pvp = config->m_playerKillingAllowed != 0;
                 rp = config->m_roleplaying != 0;
-                down = realm->m_flags & 0x2;
+                down = realm->m_flags & REALM_FLAG_OFFLINE;
                 break;
             }
         }
@@ -975,7 +975,7 @@ static int32_t Script_PlayCreditsMusic(lua_State* L) {
 static int32_t Script_GetBillingTimeRemaining(lua_State* L) {
     uint32_t remaining = ClientServices::Connection()->m_billingTimeRemaining;
 
-    if (ClientServices::Connection()->m_billingFlags & 0x2) {
+    if (ClientServices::Connection()->m_billingFlags & RealmConnection::BILLING_FLAG_UNKNOWN_1) {
         remaining = 0;
     }
 
@@ -987,22 +987,22 @@ static int32_t Script_GetBillingTimeRemaining(lua_State* L) {
 // OFFSET: 0x004DDC60
 static int32_t Script_GetBillingPlan(lua_State* L) {
     uint32_t flags = ClientServices::Connection()->m_billingFlags;
-    uint32_t plan = flags & 0x16;
-    int32_t type = 0;
+    uint32_t plan = flags & RealmConnection::BILLING_PLAN_MASK;
+    int32_t type = RealmConnection::BILLING_TYPE_UNKNOWN_0;
 
-    if (plan == 0x2) {
-        type = 1;
-    } else if (plan == 0x4) {
-        type = 2;
+    if (plan == RealmConnection::BILLING_FLAG_UNKNOWN_1) {
+        type = RealmConnection::BILLING_TYPE_UNKNOWN_1;
+    } else if (plan == RealmConnection::BILLING_FLAG_UNKNOWN_2) {
+        type = RealmConnection::BILLING_TYPE_UNKNOWN_2;
     } else if (!plan) {
-        type = 3;
-    } else if (plan == 0x10) {
-        type = 4;
+        type = RealmConnection::BILLING_TYPE_UNKNOWN_3;
+    } else if (plan == RealmConnection::BILLING_FLAG_UNKNOWN_4) {
+        type = RealmConnection::BILLING_TYPE_UNKNOWN_4;
     }
 
     lua_pushnumber(L, type);
-    lua_pushnumber(L, (flags & 0x20) != 0);
-    lua_pushnumber(L, (flags & 0x8) != 0);
+    lua_pushnumber(L, (flags & RealmConnection::BILLING_FLAG_UNKNOWN_5) != 0);
+    lua_pushnumber(L, (flags & RealmConnection::BILLING_FLAG_UNKNOWN_3) != 0);
     return 3;
 }
 
@@ -1263,21 +1263,21 @@ static int32_t Script_DeclineName(lua_State* L) {
         }
     }
 
-    char declensions[5][1024];
+    char declensions[NUM_DECLENSIONS][1024];
 
     if (GetNameDeclensions(s_locale, declensions[0], name, sex, static_cast<int32_t>(lua_tonumber(L, 3)) - 1)) {
-        for (uint32_t i = 0; i < 5; i++) {
+        for (uint32_t i = 0; i < NUM_DECLENSIONS; i++) {
             lua_pushstring(L, declensions[i]);
         }
 
-        return 5;
+        return NUM_DECLENSIONS;
     }
 
-    for (uint32_t i = 0; i < 5; i++) {
+    for (uint32_t i = 0; i < NUM_DECLENSIONS; i++) {
         lua_pushnil(L);
     }
 
-    return 5;
+    return NUM_DECLENSIONS;
 }
 
 // VERIFY: 93189456 auto
@@ -1290,7 +1290,7 @@ static int32_t Script_GetNumGameAccounts(lua_State* L) {
         return 0;
     }
 
-    if (login->GetLoginServerType() != 1) {
+    if (login->GetLoginServerType() != LOGIN_SERVER_BATTLENET) {
         luaL_error(L, "Wrong login type");
         return 0;
     }
@@ -1315,7 +1315,7 @@ static int32_t Script_GetGameAccountInfo(lua_State* L) {
         return 0;
     }
 
-    if (login->GetLoginServerType() != 1) {
+    if (login->GetLoginServerType() != LOGIN_SERVER_BATTLENET) {
         luaL_error(L, "Wrong login type");
         return 0;
     }
@@ -1348,7 +1348,7 @@ static int32_t Script_SetGameAccount(lua_State* L) {
         return 0;
     }
 
-    if (login->GetLoginServerType() != 1) {
+    if (login->GetLoginServerType() != LOGIN_SERVER_BATTLENET) {
         luaL_error(L, "Wrong login type");
         return 0;
     }
@@ -1425,7 +1425,7 @@ static int32_t Script_PINEntered(lua_State* L) {
         count++;
     }
 
-    if (static_cast<uint32_t>(count - 4) > 6) {
+    if (count < 4 || count > 10) {
         luaL_error(L, "Usage: PINEntered(4-10 key positions) - bad number of args %d", count);
     }
 

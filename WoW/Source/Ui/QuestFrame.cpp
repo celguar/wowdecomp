@@ -1,4 +1,5 @@
 #include "QuestFrame.h"
+#include "WoW/Source/Object/QuestCache.h"
 #include "Engine/Source/Base/CDataStore.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "WoW/Source/ObjectMgrClient/ObjectMgrClient.h"
@@ -30,13 +31,13 @@
 int32_t CGQuestInfo::m_numRewardFactions;
 
 // STATIC: 0x00ACF160
-static const uint32_t s_rewardFactionMaskBits[5] = { 0x1, 0x2, 0x4, 0x8, 0x10 };
+static const uint32_t s_rewardFactionMaskBits[QUEST_REPUTATION_REWARDS] = { 0x1, 0x2, 0x4, 0x8, 0x10 };
 
 // STATIC: 0x00C01840
-int32_t CGQuestInfo::m_rewardFactionList[10];
+int32_t CGQuestInfo::m_rewardFactionList[MAX_QUEST_REWARD_FACTIONS];
 
 // STATIC: 0x00C01818
-int32_t CGQuestInfo::m_rewardFactionAmounts[10];
+int32_t CGQuestInfo::m_rewardFactionAmounts[MAX_QUEST_REWARD_FACTIONS];
 
 // STATIC: 0x00C0D658
 QUEST_STATE CGQuestInfo::m_state;
@@ -78,13 +79,13 @@ int32_t CGQuestInfo::m_rewardTitle;
 uint32_t CGQuestInfo::m_rewardFactionMask;
 
 // STATIC: 0x00C01728
-int32_t CGQuestInfo::m_rewardFactionIDs[5];
+int32_t CGQuestInfo::m_rewardFactionIDs[QUEST_REPUTATION_REWARDS];
 
 // STATIC: 0x00C01714
-int32_t CGQuestInfo::m_rewardFactionValues[5];
+int32_t CGQuestInfo::m_rewardFactionValues[QUEST_REPUTATION_REWARDS];
 
 // STATIC: 0x00C01700
-int32_t CGQuestInfo::m_rewardFactionOverrides[5];
+int32_t CGQuestInfo::m_rewardFactionOverrides[QUEST_REPUTATION_REWARDS];
 
 // STATIC: 0x00C0D648
 WOWGUID CGQuestInfo::m_npc;
@@ -144,17 +145,17 @@ uint32_t CGQuestInfo::m_questFlags;
 uint32_t CGQuestInfo::m_pendingQuest;
 
 // STATIC: 0x00C01740
-QuestItemSlot CGQuestInfo::m_questItems[6];
+QuestItemSlot CGQuestInfo::m_questItems[MAX_REQUIRED_ITEMS];
 
 // STATIC: 0x00C01868
-QuestGiverQuest CGQuestInfo::m_inProgressQuests[32];
+QuestGiverQuest CGQuestInfo::m_inProgressQuests[QUESTGIVER_MAX_QUEST_COUNT];
 
 // STATIC: 0x00C05AE8
-QuestGiverQuest CGQuestInfo::m_availableQuests[32];
+QuestGiverQuest CGQuestInfo::m_availableQuests[QUESTGIVER_MAX_QUEST_COUNT];
 
 // VERIFY: 63c859fb manual
 // OFFSET: 0x0058CA70
-void CGQuestInfo::QuestGiverFinished(int32_t keepOpen, uint32_t questId, int32_t notify) {
+void CGQuestInfo::QuestGiverFinished(BOOL keepOpen, uint32_t questId, BOOL notify) {
     if (!CGQuestInfo::m_npc) {
         return;
     }
@@ -164,7 +165,7 @@ void CGQuestInfo::QuestGiverFinished(int32_t keepOpen, uint32_t questId, int32_t
         msg.Put(static_cast<uint32_t>(MSG_QUEST_PUSH_RESULT));
         msg.Put(CGQuestInfo::m_npcInform ? CGQuestInfo::m_npcInform.m_guid : CGQuestInfo::m_npc.m_guid);
         msg.Put(questId);
-        msg.Put(static_cast<uint8_t>(3));
+        msg.Put(static_cast<uint8_t>(CGPlayer_C::QUEST_PUSH_RESULT::QP_RESULT_UI_DECLINED));
         msg.Finalize();
         ClientServices::Send2(&msg);
     }
@@ -177,7 +178,7 @@ void CGQuestInfo::QuestGiverFinished(int32_t keepOpen, uint32_t questId, int32_t
     CGQuestInfo::m_npc = WOWGUID();
     CGQuestInfo::m_npcInform = WOWGUID();
 
-    if (!CGGossipInfo::m_gossip) {
+    if (!CGGossipInfo::s_gossip) {
         CGGameUI::ClearInteractTarget(npc, 0);
     }
 
@@ -187,16 +188,16 @@ void CGQuestInfo::QuestGiverFinished(int32_t keepOpen, uint32_t questId, int32_t
 // VERIFY: fa332c43 manual
 // OFFSET: 0x0058B720
 void CGQuestInfo::ClearState() {
-    for (int32_t i = 0; i < 32; i++) {
+    for (int32_t i = 0; i < QUESTGIVER_MAX_QUEST_COUNT; i++) {
         CGQuestInfo::m_availableQuests[i].m_questID = 0;
         CGQuestInfo::m_availableQuests[i].m_level = 0;
-        CGQuestInfo::m_availableQuests[i].m_flags = 0;
+        CGQuestInfo::m_availableQuests[i].m_flags = QUEST_TEMPLATE_FLAGS::QUEST_FLAG_NONE;
         CGQuestInfo::m_availableQuests[i].m_title[0] = 0;
         CGQuestInfo::m_availableQuests[i].m_turnIn = 0;
         CGQuestInfo::m_availableQuests[i].m_repeatable = 0;
         CGQuestInfo::m_inProgressQuests[i].m_questID = 0;
         CGQuestInfo::m_inProgressQuests[i].m_level = 0;
-        CGQuestInfo::m_inProgressQuests[i].m_flags = 0;
+        CGQuestInfo::m_inProgressQuests[i].m_flags = QUEST_TEMPLATE_FLAGS::QUEST_FLAG_NONE;
         CGQuestInfo::m_inProgressQuests[i].m_title[0] = 0;
         CGQuestInfo::m_inProgressQuests[i].m_turnIn = 0;
         CGQuestInfo::m_inProgressQuests[i].m_repeatable = 0;
@@ -212,13 +213,13 @@ void CGQuestInfo::ClearState() {
     CGQuestInfo::m_rewardText[0] = 0;
     CGQuestInfo::m_suggestedGroupNum = 0;
     CGQuestInfo::m_autoLaunched = 0;
-    CGQuestInfo::m_questFlags = 0;
+    CGQuestInfo::m_questFlags = QUEST_TEMPLATE_FLAGS::QUEST_FLAG_NONE;
 }
 
 // VERIFY: d07a48c9 auto
 // OFFSET: 0x0058B7D0
 void CGQuestInfo::ClearQuestItems() {
-    for (int32_t i = 0; i < 6; i++) {
+    for (int32_t i = 0; i < MAX_REQUIRED_ITEMS; i++) {
         CGQuestInfo::m_questItems[i].m_reward.m_itemID = 0;
         CGQuestInfo::m_questItems[i].m_reward.m_displayID = 0;
         CGQuestInfo::m_questItems[i].m_reward.m_count = 0;
@@ -234,6 +235,8 @@ void CGQuestInfo::ClearQuestItems() {
 // VERIFY: 2ce3fb4d manual
 // OFFSET: 0x0058C5A0
 void CGQuestInfo::SetState(WOWGUID npc, WOWGUID inform, QUEST_STATE state, const char* text, int32_t questId, int32_t startCheat) {
+    STORM_ASSERT(state < QUEST_STATE_NUM_TYPES);
+
     CGObject_C* object = ClntObjMgrObjectPtr(npc, TYPE_OBJECT, __FILE__, __LINE__);
 
     if (!object || !(object->m_obj->m_type & (TYPE_ITEM | TYPE_UNIT | TYPE_GAMEOBJECT))) {
@@ -303,17 +306,20 @@ void CGQuestInfo::SetLogDescription(const char* text) {
 
 // VERIFY: 99119eef manual
 // OFFSET: 0x0058DD50
-void CGQuestInfo::AddReward(const char* title, const uint32_t* choiceItems, const uint32_t* choiceDisplays, const uint32_t* choiceCounts, int32_t numChoices, const uint32_t* rewardItems, const uint32_t* rewardDisplays, const uint32_t* rewardCounts, int32_t numRewards, int32_t money, int32_t xp, uint32_t honor, float honorMultiplier, int32_t spell, int32_t spellCast, int32_t autoLaunched, int32_t suggestedGroupNum, int32_t rewardTitle, int32_t talents, int32_t arenaPoints, uint32_t factionMask, const uint32_t* factionIDs, const uint32_t* factionValues, const uint32_t* factionOverrides, uint32_t questFlags) {
+void CGQuestInfo::AddReward(const char* title, const uint32_t* choiceItems, const uint32_t* choiceDisplays, const uint32_t* choiceCounts, int32_t numChoice, const uint32_t* rewardItems, const uint32_t* rewardDisplays, const uint32_t* rewardCounts, int32_t numReward, int32_t money, int32_t xp, uint32_t honor, float honorMultiplier, int32_t spell, int32_t spellCast, int32_t autoLaunched, int32_t suggestedGroupNum, int32_t rewardTitle, int32_t talents, int32_t arenaPoints, uint32_t factionMask, const uint32_t* factionIDs, const uint32_t* factionValues, const uint32_t* factionOverrides, uint32_t questFlags) {
+    STORM_ASSERT(numChoice <= 6);
+    STORM_ASSERT(numReward <= 6);
+
     CGQuestInfo::ClearQuestItems();
     int32_t i = 0;
 
-    for (; i < numChoices; i++) {
+    for (; i < numChoice; i++) {
         CGQuestInfo::m_questItems[i].m_choice.m_itemID = choiceItems[i];
         CGQuestInfo::m_questItems[i].m_choice.m_displayID = choiceDisplays[i];
         CGQuestInfo::m_questItems[i].m_choice.m_count = choiceCounts[i];
     }
 
-    for (; i < 6; i++) {
+    for (; i < MAX_REQUIRED_ITEMS; i++) {
         CGQuestInfo::m_questItems[i].m_choice.m_itemID = 0;
         CGQuestInfo::m_questItems[i].m_choice.m_displayID = 0;
         CGQuestInfo::m_questItems[i].m_choice.m_count = 1;
@@ -321,13 +327,13 @@ void CGQuestInfo::AddReward(const char* title, const uint32_t* choiceItems, cons
 
     i = 0;
 
-    for (; i < numRewards; i++) {
+    for (; i < numReward; i++) {
         CGQuestInfo::m_questItems[i].m_reward.m_itemID = rewardItems[i];
         CGQuestInfo::m_questItems[i].m_reward.m_displayID = rewardDisplays[i];
         CGQuestInfo::m_questItems[i].m_reward.m_count = rewardCounts[i];
     }
 
-    for (; i < 6; i++) {
+    for (; i < MAX_REQUIRED_ITEMS; i++) {
         CGQuestInfo::m_questItems[i].m_reward.m_itemID = 0;
         CGQuestInfo::m_questItems[i].m_reward.m_displayID = 0;
         CGQuestInfo::m_questItems[i].m_reward.m_count = 1;
@@ -364,15 +370,15 @@ void CGQuestInfo::AddReward(const char* title, const uint32_t* choiceItems, cons
     CGQuestInfo::m_rewardArenaPoints = arenaPoints;
     CGQuestInfo::m_rewardFactionMask = factionMask;
 
-    for (uint32_t j = 0; j < 5; j++) {
+    for (uint32_t j = 0; j < QUEST_REPUTATION_REWARDS; j++) {
         CGQuestInfo::m_rewardFactionIDs[j] = factionIDs[j];
     }
 
-    for (uint32_t j = 0; j < 5; j++) {
+    for (uint32_t j = 0; j < QUEST_REPUTATION_REWARDS; j++) {
         CGQuestInfo::m_rewardFactionValues[j] = factionValues[j];
     }
 
-    for (uint32_t j = 0; j < 5; j++) {
+    for (uint32_t j = 0; j < QUEST_REPUTATION_REWARDS; j++) {
         CGQuestInfo::m_rewardFactionOverrides[j] = factionOverrides[j];
     }
 
@@ -390,7 +396,7 @@ void CGQuestInfo::AddReward(const char* title, const uint32_t* choiceItems, cons
 // VERIFY: c5b8f724 auto
 // OFFSET: 0x0058BB60
 void CGQuestInfo::InitRewRepFields(uint32_t index, int32_t faction, int32_t value, int32_t override) {
-    if (index <= 4) {
+    if (index < QUEST_REPUTATION_REWARDS) {
         CGQuestInfo::m_rewardFactionIDs[index] = faction;
         CGQuestInfo::m_rewardFactionValues[index] = value;
         CGQuestInfo::m_rewardFactionOverrides[index] = override;
@@ -441,7 +447,7 @@ void ProcessQuestRewardFactions(int32_t factionId, int32_t amount, int32_t upper
         }
     }
 
-    if (result == current || static_cast<uint32_t>(CGQuestInfo::m_numRewardFactions) >= 10) {
+    if (result == current || static_cast<uint32_t>(CGQuestInfo::m_numRewardFactions) >= MAX_QUEST_REWARD_FACTIONS) {
         return;
     }
 
@@ -489,15 +495,15 @@ void ProcessQuestRewardFactions(int32_t factionId, int32_t amount, int32_t upper
 void CGQuestInfo::ProcessQuestLogRewardFactions() {
     CGQuestInfo::m_numRewardFactions = 0;
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < MAX_QUEST_REWARD_FACTIONS; i++) {
         CGQuestInfo::m_rewardFactionList[i] = 0;
     }
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < MAX_QUEST_REWARD_FACTIONS; i++) {
         CGQuestInfo::m_rewardFactionAmounts[i] = 0;
     }
 
-    for (uint32_t i = 0; i < 5; i++) {
+    for (uint32_t i = 0; i < QUEST_REPUTATION_REWARDS; i++) {
         FactionRec* faction = g_factionDB.GetRecord(CGQuestInfo::m_rewardFactionIDs[i]);
 
         if (!faction) {
@@ -508,7 +514,7 @@ void CGQuestInfo::ProcessQuestLogRewardFactions() {
         QuestFactionRewardRec* reward = g_questFactionRewardDB.GetRecord((value < 0) + 1);
         uint32_t index = abs(value);
 
-        if (!reward || index >= 10 || !reward->m_difficulty[index]) {
+        if (!reward || index >= NUM_QUEST_FACTION_REWARD_DIFFICULTIES || !reward->m_difficulty[index]) {
             continue;
         }
 
@@ -539,6 +545,9 @@ static void QuestItemStatsCallback(int32_t id, const WOWGUID& guid, void* param,
 // VERIFY: 0e16cb6e auto
 // OFFSET: 0x0058B990
 void CGQuestInfo::AddQuest(int32_t questId, const char* title, int32_t level, int32_t flags, int32_t turnIn, int32_t repeatable) {
+    STORM_ASSERT(m_state == QUEST_GREETING);
+    STORM_ASSERT((m_numQuests + m_numInProgress) < (QUESTGIVER_MAX_QUEST_COUNT));
+
     CGQuestInfo::m_availableQuests[CGQuestInfo::m_numQuests].m_questID = questId;
     CGQuestInfo::m_availableQuests[CGQuestInfo::m_numQuests].m_level = level;
     CGQuestInfo::m_availableQuests[CGQuestInfo::m_numQuests].m_flags = flags;
@@ -555,6 +564,9 @@ void CGQuestInfo::AddQuest(int32_t questId, const char* title, int32_t level, in
 // VERIFY: 199b28f6 auto
 // OFFSET: 0x0058BA00
 void CGQuestInfo::AddQuestInProgress(int32_t questId, const char* title, int32_t level, int32_t flags, int32_t repeatable) {
+    STORM_ASSERT(m_state == QUEST_GREETING);
+    STORM_ASSERT((m_numQuests + m_numInProgress) < (QUESTGIVER_MAX_QUEST_COUNT - 1));
+
     CGQuestInfo::m_inProgressQuests[CGQuestInfo::m_numInProgress].m_questID = questId;
     CGQuestInfo::m_inProgressQuests[CGQuestInfo::m_numInProgress].m_level = level;
     CGQuestInfo::m_inProgressQuests[CGQuestInfo::m_numInProgress].m_flags = flags;
@@ -576,7 +588,9 @@ void CGQuestInfo::EndQuestList() {
 
 // VERIFY: 1a14e0c3 manual
 // OFFSET: 0x0058BA80
-void CGQuestInfo::AddItemRequest(const char* title, const uint32_t* itemIds, const uint32_t* itemCounts, const uint32_t* itemDisplays, int32_t numItems, int32_t requiredMoney, int32_t canComplete, int32_t autoLaunched, int32_t suggestedGroupNum, uint32_t questFlags) {
+void CGQuestInfo::AddItemRequest(const char* title, const uint32_t* itemIds, const uint32_t* itemCounts, const uint32_t* itemDisplays, int32_t numItems, int32_t requiredMoney, BOOL canComplete, int32_t autoLaunched, int32_t suggestedGroupNum, uint32_t questFlags) {
+    STORM_ASSERT(numItems <= 6);
+
     int32_t i = 0;
 
     for (; i < numItems; i++) {
@@ -585,7 +599,7 @@ void CGQuestInfo::AddItemRequest(const char* title, const uint32_t* itemIds, con
         CGQuestInfo::m_questItems[i].m_required.m_count = itemCounts[i];
     }
 
-    for (; i < 6; i++) {
+    for (; i < MAX_REQUIRED_ITEMS; i++) {
         CGQuestInfo::m_questItems[i].m_required.m_itemID = 0;
         CGQuestInfo::m_questItems[i].m_required.m_displayID = 0;
         CGQuestInfo::m_questItems[i].m_required.m_count = 1;
@@ -612,7 +626,7 @@ void CGQuestInfo::AddItemRequest(const char* title, const uint32_t* itemIds, con
 int32_t CGQuestInfo::GetNumQuestChoices() {
     int32_t count = 0;
 
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < MAX_REQUIRED_ITEMS; i++) {
         if (!CGQuestInfo::m_questItems[i].m_choice.m_itemID) {
             break;
         }
@@ -626,7 +640,7 @@ int32_t CGQuestInfo::GetNumQuestChoices() {
 // VERIFY: 5df087bb auto
 // OFFSET: 0x0058BBC0
 int32_t CGQuestInfo::GetQuestItemID(const char* type, uint32_t index) {
-    if (index > 6) {
+    if (index > MAX_REQUIRED_ITEMS) {
         return 0;
     }
 
@@ -658,7 +672,7 @@ bool CGQuestInfo::IsQuestCompleteAt(uint32_t index) {
 
 // VERIFY: db67485a manual
 // OFFSET: 0x0058CBB0
-int32_t CGQuestInfo::IsCompletable() {
+BOOL CGQuestInfo::IsCompletable() {
     if (!CGQuestInfo::m_canComplete) {
         return 0;
     }
@@ -669,14 +683,14 @@ int32_t CGQuestInfo::IsCompletable() {
         return 0;
     }
 
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < MAX_REQUIRED_ITEMS; i++) {
         int32_t itemId = CGQuestInfo::m_questItems[i].m_required.m_itemID;
 
         if (!itemId) {
             return 1;
         }
 
-        if (player->m_bag.GetItemTypeCount(itemId, 8) < CGQuestInfo::m_questItems[i].m_required.m_count) {
+        if (player->m_bag.GetItemTypeCount(itemId, BAG_SEARCH_BANK) < CGQuestInfo::m_questItems[i].m_required.m_count) {
             return 0;
         }
     }
@@ -715,7 +729,7 @@ void CGQuestInfo::CompleteQuest(uint32_t index) {
         return;
     }
 
-    CGTutorial::TriggerTutorial(0x21);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_QUEST_COMPLETION);
     CGPlayer_C::CompleteQuest(CGQuestInfo::m_npc, CGQuestInfo::m_inProgressQuests[index].m_questID);
     CGQuestInfo::m_responseSent = 1;
 }
@@ -743,7 +757,7 @@ void CGQuestInfo::AcceptQuest() {
     CGQuestInfo::m_npc = WOWGUID();
     CGQuestInfo::m_npcInform = WOWGUID();
 
-    if (!CGGossipInfo::m_gossip) {
+    if (!CGGossipInfo::s_gossip) {
         CGGameUI::ClearInteractTarget(npc, 0);
     }
 
@@ -763,7 +777,7 @@ void CGQuestInfo::DeclineQuest() {
         return;
     }
 
-    if ((object->m_obj->m_type & TYPE_UNIT) && (static_cast<CGUnit_C*>(object)->m_unit->m_unitNpcFlags & 1) && ClntObjMgrGetActivePlayerObj()) {
+    if ((object->m_obj->m_type & TYPE_UNIT) && (static_cast<CGUnit_C*>(object)->m_unit->m_unitNpcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_GOSSIP) && ClntObjMgrGetActivePlayerObj()) {
         CGPlayer_C::TalkToGossip(CGQuestInfo::m_npc);
         CGQuestInfo::m_responseSent = 1;
         return;
@@ -800,7 +814,7 @@ void CGQuestInfo::GiveQuestItems() {
         return;
     }
 
-    CGTutorial::TriggerTutorial(0x21);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_QUEST_COMPLETION);
     CGPlayer_C::GiveQuestItems(CGQuestInfo::m_npc, CGQuestInfo::m_currentQuest);
     CGQuestInfo::m_responseSent = 1;
 }
@@ -826,7 +840,7 @@ int32_t CGQuestInfo::GetReward(int32_t choice) {
         CGQuestInfo::m_lastChosenItem = CGQuestInfo::m_questItems[choice].m_choice.m_itemID;
     }
 
-    CGTutorial::TriggerTutorial(0x21);
+    CGTutorial::TriggerTutorial(TUTORIAL::TUTORIAL_QUEST_COMPLETION);
     CGPlayer_C::GetQuestReward(CGQuestInfo::m_npc, CGQuestInfo::m_currentQuest, choice <= 0 ? 0 : choice);
     CGQuestInfo::m_responseSent = 1;
     return 1;
@@ -841,7 +855,7 @@ int32_t CGQuestInfo::QuestItemInfo(const char* type, uint32_t index, char* name,
     *quality = 0;
     *usable = 1;
 
-    if (index > 6) {
+    if (index > MAX_REQUIRED_ITEMS) {
         return 0;
     }
 
@@ -871,8 +885,7 @@ int32_t CGQuestInfo::QuestItemInfo(const char* type, uint32_t index, char* name,
         *quality = stats->m_inventoryType ? stats->m_quality : -1;
     }
 
-    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
-    SStrPrintf(s_questItemTexture, sizeof(s_questItemTexture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(displayId));
+    CGItem_C::GetInventoryArtPath(s_questItemTexture, sizeof(s_questItemTexture), displayId);
     SStrCopy(texture, s_questItemTexture, textureSize);
 
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
@@ -896,7 +909,7 @@ void CGQuestInfo::EnterWorld() {
     CGQuestInfo::m_autoLaunched = 0;
     CGQuestInfo::m_requiredMoney = 0;
     CGQuestInfo::m_lastChosenItem = 0;
-    CGQuestInfo::m_questFlags = 0;
+    CGQuestInfo::m_questFlags = QUEST_TEMPLATE_FLAGS::QUEST_FLAG_NONE;
     CGQuestInfo::ClearState();
     CGQuestInfo::ClearQuestItems();
 }
@@ -905,10 +918,12 @@ void CGQuestInfo::EnterWorld() {
 // OFFSET: 0x0058BC50
 void CGQuestInfo::ConfirmAcceptQuest(int32_t questId, const char* title, const WOWGUID* guid) {
     CGQuestInfo::m_pendingQuest = questId;
-    NameCache* name = g_nameDBCache.GetRecord(guid->m_guid, WOWGUID{ 0 }, nullptr, nullptr, false);
+    NameCache* nc = g_nameDBCache.GetRecord(guid->m_guid, WOWGUID{ 0 }, nullptr, nullptr, false);
 
-    if (name) {
-        FrameScript_SignalEvent(SCRIPT_EVENT_QUEST_ACCEPT_CONFIRM, "%s%s", name->m_name, title);
+    STORM_ASSERT(nc);
+
+    if (nc) {
+        FrameScript_SignalEvent(SCRIPT_EVENT_QUEST_ACCEPT_CONFIRM, "%s%s", nc->m_name, title);
     }
 }
 

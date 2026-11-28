@@ -28,7 +28,7 @@ static int32_t Script_IsProtected(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (region->m_layoutFlags & 0x10000) {
+    if (region->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_EXPLICITLY_PROTECTED) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -273,9 +273,7 @@ static int32_t Script_SetWidth(lua_State* L) {
     CScriptRegion* region = static_cast<CScriptRegion*>(FrameScript_GetObjectThis(L, CScriptRegion::GetObjectType()));
 
     if (!region->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(region);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(region);
 
         return 0;
     }
@@ -319,9 +317,7 @@ static int32_t Script_SetHeight(lua_State* L) {
     CScriptRegion* region = static_cast<CScriptRegion*>(FrameScript_GetObjectThis(L, CScriptRegion::GetObjectType()));
 
     if (!region->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(region);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(region);
 
         return 0;
     }
@@ -362,9 +358,7 @@ static int32_t Script_SetSize(lua_State* L) {
     CScriptRegion* region = static_cast<CScriptRegion*>(FrameScript_GetObjectThis(L, CScriptRegion::GetObjectType()));
 
     if (!region->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(region);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(region);
 
         return 0;
     }
@@ -392,7 +386,7 @@ static int32_t Script_GetNumPoints(lua_State* L) {
     for (int32_t i = 0; i < FRAMEPOINT_NUMPOINTS; i++) {
         CFramePoint* framePoint = region->m_framePoints[i];
 
-        if (framePoint && !(framePoint->m_flags & 8)) {
+        if (framePoint && !(framePoint->GetFlags() & CFramePoint::POINT_FLAGS::FLAG_UNUSED)) {
             count++;
         }
     }
@@ -418,7 +412,7 @@ static int32_t Script_GetPoint(lua_State* L) {
     for (point = 0; point < FRAMEPOINT_NUMPOINTS; point++) {
         framePoint = region->m_framePoints[point];
 
-        if (framePoint && !(framePoint->m_flags & 8)) {
+        if (framePoint && !(framePoint->GetFlags() & CFramePoint::POINT_FLAGS::FLAG_UNUSED)) {
             if (found >= index) {
                 break;
             }
@@ -431,14 +425,14 @@ static int32_t Script_GetPoint(lua_State* L) {
         return 0;
     }
 
-    if (framePoint->m_flags & 1) {
+    if (framePoint->GetFlags() & CFramePoint::POINT_FLAGS::FLAG_ABSOLUTE_COORDINATES) {
         lua_pushstring(L, FramePointToString(static_cast<FRAMEPOINT>(point)));
-        lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * framePoint->m_x));
-        lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * framePoint->m_y));
+        lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * framePoint->GetXOffset()));
+        lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * framePoint->GetYOffset()));
         return 3;
     }
 
-    CLayoutFrame* relative = framePoint->m_relative;
+    CLayoutFrame* relative = framePoint->GetRelative();
     lua_pushstring(L, FramePointToString(static_cast<FRAMEPOINT>(point)));
 
     if (relative == CSimpleTop::s_instance) {
@@ -446,16 +440,12 @@ static int32_t Script_GetPoint(lua_State* L) {
     } else {
         CScriptRegion* relativeRegion = static_cast<CScriptRegion*>(relative);
 
-        if (!relativeRegion->m_luaRegistered) {
-            relativeRegion->RegisterScriptObject(nullptr);
-        }
-
-        lua_rawgeti(L, LUA_REGISTRYINDEX, relativeRegion->m_luaObjectRef);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, relativeRegion->GetLuaObjectRef());
     }
 
-    lua_pushstring(L, FramePointToString(framePoint->m_framePoint));
-    lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * framePoint->m_x));
-    lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * framePoint->m_y));
+    lua_pushstring(L, FramePointToString(framePoint->GetFramePoint()));
+    lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * framePoint->GetXOffset()));
+    lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * framePoint->GetYOffset()));
     return 5;
 }
 
@@ -669,11 +659,7 @@ static int32_t Script_GetAnimationGroups(lua_State* L) {
     }
 
     for (CSimpleAnimGroup* group = groups->Head(); group; group = groups->Next(group)) {
-        if (!group->m_luaRegistered) {
-            group->RegisterScriptObject(nullptr);
-        }
-
-        lua_rawgeti(L, LUA_REGISTRYINDEX, group->m_luaObjectRef);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, group->GetLuaObjectRef());
     }
 
     return count;
@@ -722,11 +708,7 @@ static int32_t Script_CreateAnimationGroup(lua_State* L) {
         FrameXML_ReleaseHashNode(lua_tolstring(L, 3, nullptr));
     }
 
-    if (!group->m_luaRegistered) {
-        group->RegisterScriptObject(nullptr);
-    }
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, group->m_luaObjectRef);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, group->GetLuaObjectRef());
     return 1;
 }
 

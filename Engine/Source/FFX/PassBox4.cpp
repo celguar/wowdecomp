@@ -7,10 +7,10 @@
 // VERIFY: 41d87533 auto
 // OFFSET: 0x008C1F70
 PassBox4::PassBox4(FFX::Tex** inputs, uint32_t count, FFX::Tex* output, EGxBlend blend, bool unk) : FFX::Pass(inputs, count, output, blend, unk) {
-    this->m_shaderIndex = 0;
+    this->m_shaderIndex = FFX::SHADER_TEXCOORD::NORMALIZED_COORDS;
 
     if (FFX::s_useRECT) {
-        this->m_shaderIndex = 1;
+        this->m_shaderIndex = FFX::SHADER_TEXCOORD::RECTANGLE_COORDS;
     }
 
     g_theGxDevicePtr->ShaderCreate(this->m_shaders, GxSh_Pixel, "Shaders\\Pixel", "FFXBox4", sizeof(this->m_shaders) / sizeof(this->m_shaders[0]));
@@ -56,10 +56,10 @@ void PassBox4::Execute() {
     g_theGxDevicePtr->PrimVertexMask(0x3D1);
     FFX::SetupIB();
 
-    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture2, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture3, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture2, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture3, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
     g_theGxDevicePtr->RsSet(GxRs_PixelShader, this->m_shaders[this->m_shaderIndex]);
 
     g_theGxDevicePtr->Draw(&FFX::s_quadBatch, 1);

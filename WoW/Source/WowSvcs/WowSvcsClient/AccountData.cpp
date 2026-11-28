@@ -13,7 +13,7 @@
 #include "Engine/Source/Event/Event.h"
 
 // STATIC: 0x00AD94E0
-static AccountDataInfo s_accountData[] = {
+static AccountDataInfo s_accountData[ACCOUNT_DATA_TYPE::NUM_ACCOUNT_DATA_TYPES] = {
     { false, true, nullptr, "config-cache.wtf", "config-cache.old", "synchronizeConfig" },
     { false, false, nullptr, "config-cache.wtf", "config-cache.old", "synchronizeConfig" },
     { false, true, nullptr, "bindings-cache.wtf", "bindings-cache.old", "synchronizeBindings" },
@@ -122,7 +122,7 @@ static void LoadCachedChecksums(bool global) {
     uint32_t count = 0;
 
     for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
-        if (s_accountData[i].m_global == global) {
+        if (s_accountData[i].accountWide == global) {
             count++;
         }
     }
@@ -134,7 +134,7 @@ static void LoadCachedChecksums(bool global) {
             for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
                 AccountDataInfo& info = s_accountData[i];
 
-                if (info.m_global == global) {
+                if (info.accountWide == global) {
                     uint32_t bytesRead;
                     OsReadFile(file, info.m_md5, sizeof(info.m_md5), &bytesRead);
                     OsReadFile(file, &info.m_time, sizeof(info.m_time), &bytesRead);
@@ -148,9 +148,9 @@ static void LoadCachedChecksums(bool global) {
     for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
         AccountDataInfo& info = s_accountData[i];
 
-        if (info.m_global == global) {
+        if (info.accountWide == global) {
             uint8_t digest[16];
-            MD5AccountFile(info.m_cacheFile, digest, info.m_global);
+            MD5AccountFile(info.m_cacheFile, digest, info.accountWide);
             info.m_changed = memcmp(digest, info.m_md5, sizeof(info.m_md5)) != 0;
         }
     }
@@ -168,7 +168,8 @@ static void SaveCachedChecksums(bool global) {
     for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
         AccountDataInfo& info = s_accountData[i];
 
-        if (info.m_global == global) {
+        if (info.accountWide == global) {
+            STORM_ASSERT(s_accountData[i].initialized);
             uint32_t bytesWritten;
             OsWriteFile(file, info.m_md5, sizeof(info.m_md5), &bytesWritten);
             OsWriteFile(file, &info.m_time, sizeof(info.m_time), &bytesWritten);
@@ -181,17 +182,18 @@ static void SaveCachedChecksums(bool global) {
 // VERIFY: f49c9f62 auto
 // OFFSET: 0x006B8F50
 static void UpdateCachedChecksum(int32_t type, int32_t time) {
+    STORM_ASSERT(s_accountData[type].initialized);
     AccountDataInfo& info = s_accountData[type];
 
     uint8_t digest[16];
-    MD5AccountFile(info.m_cacheFile, digest, info.m_global);
+    MD5AccountFile(info.m_cacheFile, digest, info.accountWide);
     memcpy(info.m_md5, digest, sizeof(info.m_md5));
 
     info.m_changed = false;
     info.m_time = time;
     info.m_serverTime = time;
 
-    SaveCachedChecksums(info.m_global);
+    SaveCachedChecksums(info.accountWide);
 }
 
 // VERIFY: 72a9a2be auto
@@ -210,8 +212,9 @@ static int32_t Packet_SMSG_UPDATE_ACCOUNT_DATA_COMPLETE(void* param, NETMESSAGE 
 // OFFSET: 0x006B9020
 void AccountDataDestroy(bool global) {
     for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
-        if (s_accountData[i].m_global == global) {
-            s_accountData[i].m_active = false;
+        if (s_accountData[i].accountWide == global) {
+            STORM_ASSERT(!s_accountData[i].saveTimer);
+            s_accountData[i].initialized = false;
         }
     }
 }
@@ -227,8 +230,8 @@ void LoadAccountData(int32_t type, ACCOUNTDATALOADFUNC func, void* param) {
         return;
     }
 
-    HOSFILE localFile = OpenAccountFile(info.m_global, info.m_localFile, false);
-    HOSFILE cacheFile = OpenAccountFile(info.m_global, info.m_cacheFile, false);
+    HOSFILE localFile = OpenAccountFile(info.accountWide, info.m_localFile, false);
+    HOSFILE cacheFile = OpenAccountFile(info.accountWide, info.m_cacheFile, false);
 
     func(localFile, cacheFile, param);
 
@@ -251,7 +254,9 @@ void SetClearConfigData(int32_t clear) {
 // VERIFY: 61aba3c9 manual
 // OFFSET: 0x006B9100
 void UploadAccountData(int32_t type) {
-    HOSFILE file = OpenAccountFile(s_accountData[type].m_global, s_accountData[type].m_cacheFile, false);
+    STORM_ASSERT(s_accountData[type].initialized);
+
+    HOSFILE file = OpenAccountFile(s_accountData[type].accountWide, s_accountData[type].m_cacheFile, false);
     uint32_t size = file == OS_INVALID_FILE ? 0 : static_cast<uint32_t>(OsGetFileSize(file));
 
     uint32_t time = s_accountDataTime++;
@@ -264,17 +269,20 @@ void UploadAccountData(int32_t type) {
 
     if (size) {
         void* allocated = nullptr;
-        uint8_t* data;
+        uint8_t* uncompressed;
 
         if (size > 0x1000) {
             allocated = SMemAlloc(size, __FILE__, __LINE__, 0);
-            data = static_cast<uint8_t*>(allocated);
+            uncompressed = static_cast<uint8_t*>(allocated);
         } else {
-            data = static_cast<uint8_t*>(alloca(size));
+            uncompressed = static_cast<uint8_t*>(alloca(size));
         }
 
+        STORM_ASSERT(uncompressed);
+
         uint32_t bytesRead;
-        OsReadFile(file, data, size, &bytesRead);
+        OsReadFile(file, uncompressed, size, &bytesRead);
+        STORM_ASSERT(bytesRead == size);
 
         uint32_t compressedSize = compressBound(size);
         uint8_t* compressedAllocated = nullptr;
@@ -287,7 +295,13 @@ void UploadAccountData(int32_t type) {
             compressed = static_cast<uint8_t*>(alloca(compressedSize));
         }
 
-        zlib_compress(compressed, &compressedSize, data, size, 1);
+        STORM_ASSERT(compressed);
+#if defined(WOWDECOMP_ASSERTIONS)
+        int32_t res = zlib_compress(compressed, &compressedSize, uncompressed, size, 1);
+        STORM_ASSERT(res == 0);
+#else
+        zlib_compress(compressed, &compressedSize, uncompressed, size, 1);
+#endif
         msg.PutData(compressed, compressedSize);
 
         if (allocated) {
@@ -312,6 +326,8 @@ void UploadAccountData(int32_t type) {
 // VERIFY: 7b7683e2 manual
 // OFFSET: 0x006B92C0
 void DownloadAccountData(int32_t type) {
+    STORM_ASSERT(s_accountData[type].initialized);
+
     CDataStore msg;
     msg.Put(static_cast<uint32_t>(CMSG_REQUEST_ACCOUNT_DATA));
     msg.Put(static_cast<uint32_t>(type));
@@ -325,25 +341,27 @@ void DownloadAccountData(int32_t type) {
 // OFFSET: 0x006B9340
 static int32_t SaveTimerHandler(const void* data, void* param) {
     int32_t type = static_cast<int32_t>(reinterpret_cast<intptr_t>(param));
+    STORM_ASSERT(s_accountData[type].initialized);
     AccountDataInfo& info = s_accountData[type];
     uint8_t digest[16];
-    MD5AccountFile(info.m_cacheFile, digest, info.m_global);
+    MD5AccountFile(info.m_cacheFile, digest, info.accountWide);
 
     if (!memcmp(digest, info.m_md5, sizeof(digest))) {
         info.m_changed = false;
         info.m_time = info.m_serverTime;
-        SaveCachedChecksums(info.m_global);
+        SaveCachedChecksums(info.accountWide);
     } else {
         UploadAccountData(type);
     }
 
-    info.m_saveTimer = 0;
+    info.saveTimer = 0;
     return 1;
 }
 
 // VERIFY: c002fa95 auto
 // OFFSET: 0x006B9440
 static void ScheduleAccountDataSave(int32_t type) {
+    STORM_ASSERT(s_accountData[type].initialized);
     AccountDataInfo& info = s_accountData[type];
     info.m_changed = true;
 
@@ -357,12 +375,14 @@ static void ScheduleAccountDataSave(int32_t type) {
         return;
     }
 
-    if (info.m_saveTimer) {
-        ClientKillTimer(info.m_saveTimer, SaveTimerHandler, "SaveTimerHandler");
-        info.m_saveTimer = 0;
+    STORM_ASSERT(s_accountData[type].initialized);
+
+    if (info.saveTimer) {
+        ClientKillTimer(info.saveTimer, SaveTimerHandler, "SaveTimerHandler");
+        info.saveTimer = 0;
     }
 
-    info.m_saveTimer = ClientSetTimer(30000, SaveTimerHandler, reinterpret_cast<void*>(static_cast<intptr_t>(type)));
+    info.saveTimer = ClientSetTimer(30000, SaveTimerHandler, reinterpret_cast<void*>(static_cast<intptr_t>(type)));
 }
 
 // VERIFY: fe34ba05 manual
@@ -378,15 +398,19 @@ static int32_t Packet_SMSG_ACCOUNT_DATA_TIMES(void* param, NETMESSAGE msgId, uin
     uint32_t mask;
     msg->Get(mask);
 
-    uint32_t count = 0;
+    uint32_t numTimeBits = 0;
 
     for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
         if (mask & (1 << i)) {
-            count++;
+            numTimeBits++;
         }
     }
 
-    if (msg->m_size - msg->m_read != count * sizeof(uint32_t)) {
+    int32_t remaining = msg->m_size - msg->m_read;
+    STORM_ASSERT(remaining >= 0);
+
+    if (static_cast<uint32_t>(remaining) != numTimeBits * sizeof(uint32_t)) {
+        STORM_ASSERT(uint32_t(remaining) == sizeof(uint32_t) * numTimeBits);  // 12213: "uint(remaining) == sizeof(UINT)*numTimeBits"
         return 1;
     }
 
@@ -408,11 +432,11 @@ static int32_t Packet_SMSG_ACCOUNT_DATA_TIMES(void* param, NETMESSAGE msgId, uin
             info.m_serverTime = typeTime;
         }
 
-        if (!info.m_active) {
+        if (!info.initialized) {
             continue;
         }
 
-        if (!unk && info.m_global && info.m_serverTime < info.m_time) {
+        if (!unk && info.accountWide && info.m_serverTime < info.m_time) {
             info.m_serverTime = info.m_time;
         }
 
@@ -446,10 +470,12 @@ static int32_t Packet_SMSG_UPDATE_ACCOUNT_DATA(void* param, NETMESSAGE msgId, ui
 
     uint32_t type;
     msg->Get(type);
+    STORM_ASSERT(type >= 0 && type < NUM_ACCOUNT_DATA_TYPES);
+    STORM_ASSERT(s_accountData[type].initialized);
 
     AccountDataInfo& info = s_accountData[type];
 
-    if ((guid != CGlueMgr::GetActive() && !info.m_global) || !info.m_downloading) {
+    if ((guid != CGlueMgr::GetActive() && !info.accountWide) || !info.m_downloading) {
         msg->m_read = msg->m_size;
         return 1;
     }
@@ -458,7 +484,7 @@ static int32_t Packet_SMSG_UPDATE_ACCOUNT_DATA(void* param, NETMESSAGE msgId, ui
     msg->Get(serverTime);
 
     if (info.m_changed || info.m_time < static_cast<int32_t>(serverTime)) {
-        HOSFILE file = OpenAccountFile(info.m_global, info.m_cacheFile, true);
+        HOSFILE file = OpenAccountFile(info.accountWide, info.m_cacheFile, true);
 
         if (file != OS_INVALID_FILE) {
             uint32_t size;
@@ -480,11 +506,12 @@ static int32_t Packet_SMSG_UPDATE_ACCOUNT_DATA(void* param, NETMESSAGE msgId, ui
                     stackBuffer = true;
                 }
 
-                uint32_t uncompressedSize = size;
+                uint32_t destSize = size;
 
-                if (!zlib_uncompress(buffer, &uncompressedSize, static_cast<const uint8_t*>(compressed), compressedSize)) {
+                if (!zlib_uncompress(buffer, &destSize, static_cast<const uint8_t*>(compressed), compressedSize)) {
                     uint32_t bytesWritten;
-                    OsWriteFile(file, buffer, uncompressedSize, &bytesWritten);
+                    OsWriteFile(file, buffer, destSize, &bytesWritten);
+                    STORM_ASSERT(bytesWritten == destSize);
                 }
 
                 if (!stackBuffer) {
@@ -508,10 +535,23 @@ static int32_t Packet_SMSG_UPDATE_ACCOUNT_DATA(void* param, NETMESSAGE msgId, ui
     return 1;
 }
 
+#if defined(WOWDECOMP_ASSERTIONS)
+// INLINED
+static bool IsAccountWideData(ACCOUNT_DATA_TYPE type) {
+    return type == ACCOUNT_DATA_GLOBAL_CONFIG || type == ACCOUNT_DATA_GLOBAL_BINDINGS || type == ACCOUNT_DATA_GLOBAL_MACROS;
+}
+#endif
+
 // VERIFY: d11d72c6 auto
 // OFFSET: 0x006B9900
 void AccountDataInitializeBasicSystem() {
-    s_cvSynchronizeSettings = CVar::Register("synchronizeSettings", "Whether client settings should be stored on the server", 0, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
+#if defined(WOWDECOMP_ASSERTIONS)
+    for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
+        STORM_ASSERT(s_accountData[i].accountWide == IsAccountWideData((ACCOUNT_DATA_TYPE)i)); // 12213: "s_accountData[i].accountWide == IsAccountWideData((ACCOUNT_DATA)i)"
+    }
+#endif
+
+    s_cvSynchronizeSettings = CVar::Register("synchronizeSettings", "Whether client settings should be stored on the server", CVAR_FLAGS::CVAR_NONE, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
     ClientServices::SetMessageHandler(SMSG_ACCOUNT_DATA_TIMES, Packet_SMSG_ACCOUNT_DATA_TIMES, nullptr);
     ClientServices::SetMessageHandler(SMSG_UPDATE_ACCOUNT_DATA, Packet_SMSG_UPDATE_ACCOUNT_DATA, nullptr);
     ClientServices::SetMessageHandler(SMSG_UPDATE_ACCOUNT_DATA_COMPLETE, Packet_SMSG_UPDATE_ACCOUNT_DATA_COMPLETE, nullptr);
@@ -531,18 +571,18 @@ void AccountDataShutdownBasicSystem() {
 // OFFSET: 0x006B9970
 void AccountDataInitialize(bool global) {
     for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
-        CVar::Register(s_accountData[i].m_cvarName, nullptr, 0, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
+        CVar::Register(s_accountData[i].m_cvarName, nullptr, CVAR_FLAGS::CVAR_NONE, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
     }
 
     for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
         AccountDataInfo& info = s_accountData[i];
 
-        if (info.m_global == global) {
+        if (info.accountWide == global) {
             info.m_downloading = true;
             memset(info.m_md5, 0, sizeof(info.m_md5));
             info.m_time = 0;
             info.m_serverTime = 0;
-            info.m_active = true;
+            info.initialized = true;
         }
     }
 
@@ -551,14 +591,14 @@ void AccountDataInitialize(bool global) {
     for (uint32_t i = 0; i < sizeof(s_accountData) / sizeof(s_accountData[0]); i++) {
         AccountDataInfo& info = s_accountData[i];
 
-        if (info.m_global != global) {
+        if (info.accountWide != global) {
             continue;
         }
 
-        HOSFILE file = OpenAccountFile(info.m_global, info.m_oldFile, false);
+        HOSFILE file = OpenAccountFile(info.accountWide, info.m_oldFile, false);
 
         if (file == OS_INVALID_FILE) {
-            CopyAccountFile(info.m_global, info.m_cacheFile, info.m_oldFile);
+            CopyAccountFile(info.accountWide, info.m_cacheFile, info.m_oldFile);
         } else {
             OsCloseFile(file);
         }
@@ -568,7 +608,7 @@ void AccountDataInitialize(bool global) {
 
     if (global) {
         if (s_clearGlobalConfig) {
-            HOSFILE file = OpenAccountFile(s_accountData[0].m_global, s_accountData[0].m_cacheFile, true);
+            HOSFILE file = OpenAccountFile(s_accountData[0].accountWide, s_accountData[0].m_cacheFile, true);
 
             if (file != OS_INVALID_FILE) {
                 OsWriteFile(file, "", 0, &bytesWritten);
@@ -579,7 +619,7 @@ void AccountDataInitialize(bool global) {
             s_accountData[0].m_downloading = false;
         }
     } else if (s_clearCharacterConfig) {
-        HOSFILE file = OpenAccountFile(s_accountData[1].m_global, s_accountData[1].m_cacheFile, true);
+        HOSFILE file = OpenAccountFile(s_accountData[1].accountWide, s_accountData[1].m_cacheFile, true);
 
         if (file != OS_INVALID_FILE) {
             OsWriteFile(file, "", 0, &bytesWritten);
@@ -595,8 +635,8 @@ void AccountDataInitialize(bool global) {
 // OFFSET: 0x006B9B90
 void AccountDataFlush() {
     for (int32_t i = 0; i < static_cast<int32_t>(sizeof(s_accountData) / sizeof(s_accountData[0])); i++) {
-        if (s_accountData[i].m_saveTimer) {
-            ClientKillTimer(s_accountData[i].m_saveTimer, SaveTimerHandler, "SaveTimerHandler");
+        if (s_accountData[i].saveTimer) {
+            ClientKillTimer(s_accountData[i].saveTimer, SaveTimerHandler, "SaveTimerHandler");
             SaveTimerHandler(nullptr, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
         }
     }
@@ -611,8 +651,8 @@ void SaveAccountData(int32_t type, ACCOUNTDATALOADFUNC func, void* param) {
         return;
     }
 
-    HOSFILE localFile = OpenAccountFile(info.m_global, info.m_localFile, true);
-    HOSFILE cacheFile = OpenAccountFile(info.m_global, info.m_cacheFile, true);
+    HOSFILE localFile = OpenAccountFile(info.accountWide, info.m_localFile, true);
+    HOSFILE cacheFile = OpenAccountFile(info.accountWide, info.m_cacheFile, true);
     func(localFile, cacheFile, param);
 
     if (localFile != OS_INVALID_FILE) {

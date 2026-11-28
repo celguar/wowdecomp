@@ -534,6 +534,16 @@ static int32_t ConvertKeyCode(uint32_t vkey, KEY* key) {
             return 1;
 
         default: {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+            // Debug feature: the key left of 1 (scan code 0x29: ` on US layouts, ² on AZERTY) is the console key on
+            // every layout. The release client maps keys by their unshifted character, so layouts without an
+            // unshifted ` (AZERTY, where it is the AltGr+7 dead key) cannot reach KEY_TILDE.
+            if (MapVirtualKeyA(vkey, MAPVK_VK_TO_VSC) == 0x29) {
+                *key = KEY_TILDE;
+                return 1;
+            }
+#endif
+
             uint32_t ch = MapVirtualKeyA(vkey, MAPVK_VK_TO_CHAR) & 0xFFFF;
             *key = static_cast<KEY>(ch);
             if (ch == 0 || ch > 0xFF) {
@@ -1200,7 +1210,7 @@ static void CenterMouse() {
 // VERIFY: 0ffe5fb1 auto
 // OFFSET: 0x00869E00
 int32_t OsInputGet(OSINPUT* id, int32_t* param0, int32_t* param1, int32_t* param2, int32_t* param3) {
-    *id = static_cast<OSINPUT>(-1);
+    *id = OS_INPUT_NONE;
 
     if (s_windowSize && !IsIconic(static_cast<HWND>(OsGuiGetWindow(OSGUI_WINDOW_TYPE_GX)))) {
         s_windowSize = 0;
@@ -1513,6 +1523,13 @@ intptr_t OsWindowProc(void* window, uint32_t message, uintptr_t wparam, intptr_t
         }
 
         case WM_NCLBUTTONDOWN:
+#ifdef WOWDECOMP_TOOL_FEATURES
+            // Tool features: the game window has no menu bar, so it keeps every non-client click for its own drag. A
+            // tool's menu bar (OsSetWindowProc, WowEdit) opens in DefWindowProcA, at the end of the chain.
+            if (s_chainWindowProc && wparam == HTMENU) {
+                break;
+            }
+#endif
             BeginDrag(static_cast<int32_t>(wparam), hwnd, static_cast<int32_t>(lparam));
             return 0;
 
@@ -1698,7 +1715,20 @@ intptr_t OsWindowProc(void* window, uint32_t message, uintptr_t wparam, intptr_t
     return result;
 }
 
-void OsInputEnableSecureMode(int32_t enable) {
+void OsInputEnableSecureMode(BOOL enable) {
 }
+
+#ifdef WOWDECOMP_TOOL_FEATURES
+// Tool features: 0.5.3 0x0046AF90 (compiled out of 3.3.5): the procedure OsWindowProc hands every message it does not
+// keep to, instead of DefWindowProcA. 0.5.3 OsGuiInitialize set it to OsGuiWindowProc and OsGuiDestroy cleared it;
+// here a tool sets it itself (WowEdit/Source/App/WowEditApp.cpp). The procedure must end with DefWindowProcA.
+void OsSetWindowProc(intptr_t (*windowProc)(void* window, uint32_t message, uintptr_t wparam, intptr_t lparam)) {
+    if (windowProc && s_chainWindowProc) {
+        SErrDisplayError(STORM_ERROR_ASSERTION, __FILE__, __LINE__, "!(windowproc && s_windowProc)", 0, 1, 0);
+    }
+
+    s_chainWindowProc = windowProc;
+}
+#endif
 
 #endif

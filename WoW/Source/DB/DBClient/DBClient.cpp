@@ -15,10 +15,10 @@ int32_t g_clientDbPerformCompress;
 static int32_t s_physicalDamageClassID = -1;
 
 // STATIC: 0x00C5D660
-static const ItemSubClassRec* s_unarmedWeapon;
+static const ItemSubClassRec* s_unarmedWeaponSubclass;
 
 // STATIC: 0x00C5D664
-static const ItemClassRec* s_weaponItemClass;
+static const ItemClassRec* s_weaponClassRecPtr;
 
 // STATIC: 0x00C5D668
 static TSFixedArray<const ResistancesRec*> s_resistances;
@@ -991,6 +991,8 @@ static void StaticDBLoadAll(void (WowClientDB_Base::*loadFunction)(const char*, 
 // VERIFY: 45af3496 auto
 // OFFSET: 0x006337A0
 int32_t GetPhysicalDamageClassID() {
+    STORM_ASSERT(s_physicalDamageClassID != 0xffffffff);
+
     return s_physicalDamageClassID;
 }
 
@@ -1003,26 +1005,39 @@ uint32_t GetPhysicalDamageClassMask() {
 // VERIFY: f122e16d auto
 // OFFSET: 0x006337C0
 int32_t ClientDBGetUnarmedWeapon() {
-    return s_unarmedWeapon->m_subClassID;
+    STORM_ASSERT(s_unarmedWeaponSubclass);
+
+    return s_unarmedWeaponSubclass->m_subClassID;
 }
 
 // VERIFY: 88034703 manual
 // OFFSET: 0x006348C0
 static void LocateWeaponSubclass() {
-    s_weaponItemClass = nullptr;
+    s_weaponClassRecPtr = nullptr;
 
-    for (int32_t i = g_itemClassDB.m_numRecords - 1; i >= 0; i--) {
-        const ItemClassRec* rec = i >= 0 && i < g_itemClassDB.m_numRecords ? &g_itemClassDB.m_records[i] : nullptr;
+    for (int32_t i = g_itemClassDB.GetNumRecords() - 1; i >= 0; i--) {
+        const ItemClassRec* rec = i >= 0 && i < g_itemClassDB.GetNumRecords() ? &g_itemClassDB.m_records[i] : nullptr;
 
-        if (rec->m_flags & 1) {
-            s_weaponItemClass = rec;
+        if (rec->m_flags & ITEM_CLASS_FLAG_WEAPON) {
+#if defined(WOWDECOMP_ASSERTIONS)
+            if (s_weaponClassRecPtr) {
+                STORM_ASSERT(!"Error, only one entry in the ItemClass can be a weapon!");
+            }
+#endif
+            s_weaponClassRecPtr = rec;
         }
     }
+
+#if defined(WOWDECOMP_ASSERTIONS)
+    if (!s_weaponClassRecPtr) {
+        STORM_ASSERT(!"Error, at least one entry in the ItemClass has to be a weapon!");
+    }
+#endif
 }
 
 // VERIFY: d0f3ca01 auto
 // OFFSET: 0x00634940
-int32_t ClientDBGetNumWeaponSubClasses() {
+uint32_t ClientDBGetNumWeaponSubclasses() {
     return s_weaponSubclasses.Count();
 }
 
@@ -1041,7 +1056,7 @@ int32_t GetMapResetTime(int32_t mapId, uint32_t difficulty) {
 // VERIFY: d0ca7548 manual
 // OFFSET: 0x00634AE0
 void InitResistances() {
-    uint32_t count = g_resistancesDB.m_numRecords;
+    uint32_t count = g_resistancesDB.GetNumRecords();
     s_physicalDamageClassID = -1;
 
     if (count != 7) {
@@ -1055,9 +1070,9 @@ void InitResistances() {
     s_resistances.SetCount(count);
 
     for (int32_t i = 0; static_cast<uint32_t>(i) < count; i++) {
-        const ResistancesRec* rec = i >= 0 && i < g_resistancesDB.m_numRecords ? &g_resistancesDB.m_records[i] : nullptr;
+        const ResistancesRec* rec = i >= 0 && i < g_resistancesDB.GetNumRecords() ? &g_resistancesDB.m_records[i] : nullptr;
 
-        if (rec->m_flags & 1) {
+        if (rec->m_flags & RESISTANCE_FLAG_PHYSICAL) {
             s_physicalDamageClassID = i;
         }
 
@@ -1068,7 +1083,7 @@ void InitResistances() {
 // VERIFY: 88c5149f manual
 // OFFSET: 0x00634BA0
 void InitTerrainTypeFlags() {
-    uint32_t count = g_terrainTypeDB.m_maxID + 1;
+    uint32_t count = g_terrainTypeDB.GetMaxID() + 1;
     s_terrainTypeSoundIDs.SetCount(count);
 
     for (uint32_t i = 0; i < count; i++) {
@@ -1091,16 +1106,23 @@ void ClientDBShutdown() {
 
 // VERIFY: e620a1d6 manual
 // OFFSET: 0x00634CC0
-void InitWeaponSubclasses() {
+static void InitWeaponSubclasses() {
     s_weaponSubclasses.SetCount(0);
-    s_unarmedWeapon = nullptr;
+    s_unarmedWeaponSubclass = nullptr;
     LocateWeaponSubclass();
 
-    int32_t weaponClass = s_weaponItemClass->m_classID;
+    STORM_ASSERT(s_weaponClassRecPtr);
+    ITEM_CLASS weaponClass = s_weaponClassRecPtr->m_classID;
     int32_t count = 0;
 
-    for (int32_t i = g_itemSubClassDB.m_numRecords - 1; i >= 0; i--) {
-        const ItemSubClassRec* rec = i >= 0 && i < g_itemSubClassDB.m_numRecords ? &g_itemSubClassDB.m_records[i] : nullptr;
+    for (int32_t i = g_itemSubClassDB.GetNumRecords() - 1; i >= 0; i--) {
+        const ItemSubClassRec* rec = i >= 0 && i < g_itemSubClassDB.GetNumRecords() ? &g_itemSubClassDB.m_records[i] : nullptr;
+
+#if defined(WOWDECOMP_ARCH_64)
+        if (rec->m_subClassID < 0 || rec->m_subClassID == INT32_MAX) {
+            continue;
+        }
+#endif
 
         if (rec->m_classID == weaponClass && count <= rec->m_subClassID + 1) {
             count = rec->m_subClassID + 1;
@@ -1109,17 +1131,40 @@ void InitWeaponSubclasses() {
 
     s_weaponSubclasses.SetCount(count);
 
-    for (int32_t i = g_itemSubClassDB.m_numRecords - 1; i >= 0; i--) {
-        const ItemSubClassRec* rec = i >= 0 && i < g_itemSubClassDB.m_numRecords ? &g_itemSubClassDB.m_records[i] : nullptr;
+    for (int32_t i = g_itemSubClassDB.GetNumRecords() - 1; i >= 0; i--) {
+        const ItemSubClassRec* rec = i >= 0 && i < g_itemSubClassDB.GetNumRecords() ? &g_itemSubClassDB.m_records[i] : nullptr;
 
         if (rec->m_classID == weaponClass) {
+#if defined(WOWDECOMP_ARCH_64)
+            if (static_cast<uint32_t>(rec->m_subClassID) >= s_weaponSubclasses.Count()) {
+                continue;
+            }
+#endif
+
             s_weaponSubclasses[rec->m_subClassID] = rec;
 
-            if (rec->m_flags & 4) {
-                s_unarmedWeapon = rec;
+            if (rec->m_flags & ITEM_SUBCLASS_FLAG_UNARMED) {
+#if defined(WOWDECOMP_ASSERTIONS)
+                if (s_unarmedWeaponSubclass) {
+                    STORM_ASSERT(!"Error, only one weapon subclass can be unarmed!");
+                }
+#endif
+                s_unarmedWeaponSubclass = rec;
             }
         }
     }
+
+#if defined(WOWDECOMP_ASSERTIONS)
+    if (!s_unarmedWeaponSubclass) {
+        STORM_ASSERT(!"Error, there has to be one weapon subclass that's marked as unarmed!");
+    }
+
+    for (uint32_t i = s_weaponSubclasses.Count(); i > 0; --i) {
+        if (!s_weaponSubclasses[i - 1]) {
+            STORM_ASSERT(!"Error, weapon subclasses in the ItemSubClass table have to be contiguous!");
+        }
+    }
+#endif
 }
 
 // VERIFY: f26ccc9b auto
@@ -1164,6 +1209,8 @@ DB_LOCALE_INDEX LocaleNameToIndex(const char* locale) {
 // VERIFY: d0d3fe1b auto
 // OFFSET: 0x00634910
 const char* ClientDBStringLookup(STRINGLOOKUP lookup) {
+    STORM_ASSERT(lookup < NUM_STRINGLOOKUPS);
+
     StringLookupsRec* rec = g_stringLookupsDB.GetRecord(lookup);
     return rec ? rec->m_string : nullptr;
 }
@@ -1171,15 +1218,15 @@ const char* ClientDBStringLookup(STRINGLOOKUP lookup) {
 // VERIFY: 3260ed78 manual
 // OFFSET: 0x00634950
 MapDifficultyRec* GetMapDifficultyEntryByMapIdAndDifficulty(int32_t mapId, uint32_t difficulty, int32_t* index) {
-    for (int32_t i = 0; i < g_mapDifficultyDB.m_numRecords; i++) {
-        MapDifficultyRec* rec = i < 0 || i >= g_mapDifficultyDB.m_numRecords ? nullptr : &g_mapDifficultyDB.m_records[i];
+    for (int32_t i = 0; i < g_mapDifficultyDB.GetNumRecords(); i++) {
+        MapDifficultyRec* rec = i < 0 || i >= g_mapDifficultyDB.GetNumRecords() ? nullptr : &g_mapDifficultyDB.m_records[i];
 
         if (rec->m_mapID != mapId) {
             continue;
         }
 
-        for (int32_t j = i; j < g_mapDifficultyDB.m_numRecords; j++) {
-            MapDifficultyRec* entry = j < 0 || j >= g_mapDifficultyDB.m_numRecords ? nullptr : &g_mapDifficultyDB.m_records[j];
+        for (int32_t j = i; j < g_mapDifficultyDB.GetNumRecords(); j++) {
+            MapDifficultyRec* entry = j < 0 || j >= g_mapDifficultyDB.GetNumRecords() ? nullptr : &g_mapDifficultyDB.m_records[j];
 
             if (entry->m_mapID != mapId) {
                 break;

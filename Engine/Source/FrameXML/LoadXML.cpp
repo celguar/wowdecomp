@@ -63,12 +63,12 @@ static const XMLENUMVALUE s_blendModes[] = {
 
 // STATIC: 0x00A44010
 static const XMLENUMVALUE s_justify[] = {
-    { 0x1, "LEFT" },
-    { 0x2, "CENTER" },
-    { 0x4, "RIGHT" },
-    { 0x8, "TOP" },
-    { 0x10, "MIDDLE" },
-    { 0x20, "BOTTOM" },
+    { TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_LEFT, "LEFT" },
+    { TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_CENTER, "CENTER" },
+    { TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_RIGHT, "RIGHT" },
+    { TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_TOP, "TOP" },
+    { TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_MIDDLE, "MIDDLE" },
+    { TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_BOTTOM, "BOTTOM" },
 };
 
 // STATIC: 0x00A44040
@@ -79,9 +79,9 @@ static const XMLENUMVALUE s_orientations[] = {
 
 // STATIC: 0x00A44050
 static const XMLENUMVALUE s_fontFlags[] = {
-    { 0x1, "OUTLINE" },
-    { 0x4, "THICKOUTLINE" },
-    { 0x2, "MONOCHROME" },
+    { TEXTBLOCK_FONT_OUTLINE, "OUTLINE" },
+    { TEXTBLOCK_FONT_THICKOUTLINE, "THICKOUTLINE" },
+    { TEXTBLOCK_FONT_MONOCHROME, "MONOCHROME" },
 };
 
 // STATIC: 0x00A44068
@@ -772,7 +772,7 @@ int32_t LoadXML_AnimOrigin(XMLNode* node, FRAMEPOINT& point, C2Vector& offset, C
 // VERIFY: dea072e9 auto
 // OFFSET: 0x00815F40
 CSimpleTexture* LoadXML_Texture(XMLNode* node, CSimpleFrame* frame, CStatus* status) {
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     CSimpleTexture* texture = data ? new (data) CSimpleTexture(frame, 2, 1) : nullptr;
 
     texture->PreLoadXML(node, status);
@@ -785,7 +785,7 @@ CSimpleTexture* LoadXML_Texture(XMLNode* node, CSimpleFrame* frame, CStatus* sta
 // VERIFY: 437bdf6e auto
 // OFFSET: 0x00815FA0
 CSimpleFontString* LoadXML_String(XMLNode* node, CSimpleFrame* frame, CStatus* status) {
-    void* data = CSimpleFontString::s_allocator.GetData(0, typeid(CSimpleFontString).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleFontString::Allocate(sizeof(CSimpleFontString));
     CSimpleFontString* string = data ? new (data) CSimpleFontString(frame, 2, true) : nullptr;
 
     string->PreLoadXML(node, status);
@@ -1071,7 +1071,7 @@ static int32_t VerifySignature(const uint8_t* data, uint32_t size, const uint8_t
 int32_t FrameXML_CheckSignature(const char* tocFile, const char* extraFile, const uint8_t* modulus, uint8_t* digest) {
 #ifdef DISABLE_SIGNATURE_CHECKS
     CalculateSignatureMD5(tocFile, extraFile, digest);
-    return 3;
+    return XML_SIGNATURE_VALID;
 #endif
 
     char sigFile[260];
@@ -1081,12 +1081,12 @@ int32_t FrameXML_CheckSignature(const char* tocFile, const char* extraFile, cons
     uint32_t size;
 
     if (!SFile::ReadFile(nullptr, sigFile, &data, &size, 0, 1, nullptr)) {
-        return 0;
+        return XML_SIGNATURE_MISSING;
     }
 
     if (size != 276) {
         SFile::Unload(data);
-        return 1;
+        return XML_SIGNATURE_CORRUPT;
     }
 
     char* name = SStrChrR(sigFile, '\\');
@@ -1095,7 +1095,7 @@ int32_t FrameXML_CheckSignature(const char* tocFile, const char* extraFile, cons
 
     if (!VerifySignature(static_cast<const uint8_t*>(data), size, modulus, name)) {
         SFile::Unload(data);
-        return 1;
+        return XML_SIGNATURE_CORRUPT;
     }
 
     uint8_t signedDigest[16];
@@ -1104,5 +1104,5 @@ int32_t FrameXML_CheckSignature(const char* tocFile, const char* extraFile, cons
 
     CalculateSignatureMD5(tocFile, extraFile, digest);
 
-    return memcmp(signedDigest, digest, sizeof(signedDigest)) ? 2 : 3;
+    return memcmp(signedDigest, digest, sizeof(signedDigest)) ? XML_SIGNATURE_MODIFIED : XML_SIGNATURE_VALID;
 }

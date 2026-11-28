@@ -3,10 +3,14 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "Engine/Source/Gx/CGxDevice/Types.h"
+#include <windows.h>
+#include "Engine/Source/Gx/CGxBuf.h"
+#include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
+#include "Engine/Source/Gx/CGxPool.h"
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Gx/CGxTex.h"
 #include "Engine/Source/Storm/H/stpl.h"
+#include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Tempest/C2iVector.h"
 
 static const float oo255 = (1.0f / 255.0f);
@@ -17,7 +21,8 @@ class C44Matrix;
 class CGxBatch;
 class CGxDevice;
 class CGxFormat;
-struct CGxBuf;
+class CGxLight;
+struct CGxPool;
 class CGxQuery;
 class CGxTex;
 class CGxTexParms;
@@ -55,6 +60,11 @@ CGxDevice* CreateCGxDeviceD3d();
 CGxDevice* CreateCGxDeviceD3d9Ex();
 CGxDevice* CreateCGxDeviceOpenGl();
 CGxDevice* CreateGxDevice(EGxApi api, GxWindowProc windowProc, const CGxFormat& format);
+// INLINED
+inline const CGxCaps& GxCaps() {
+    return g_theGxDevicePtr->Caps();
+}
+
 int32_t GxAdapterDesktopMode(CGxMonitorMode& mode);
 int32_t GxAdapterID(uint16_t& vendorID, uint16_t& deviceID, uint32_t& driverVersionHi, uint32_t& driverVersionLo);
 int32_t GxAdapterInfer(uint16_t& deviceID);
@@ -62,9 +72,55 @@ int32_t GxAdapterMonitorModes(TSGrowableArray<CGxMonitorMode>& modes);
 void GxReadPixels(CiRect& rect, TSGrowableArray<CImVector>& pixels);
 int32_t GxVertexHasAttrib(EGxVertexBufferFormat format, EGxVertexAttrib attrib);
 void GxXformSet(EGxXform xf, const C44Matrix& matrix);
+void GxLightSet(uint32_t whichLight, const CGxLight& lightInfo, const C3Vector& pos, BOOL enable);
+void GxLightEnable(uint32_t whichLight, BOOL enable);
 char* GxBufLock(CGxBuf* buf);
 void GxBufUnlock(CGxBuf* buf, uint32_t size);
 void GxBufDestroy(CGxBuf* buf);
+
+// INLINED
+inline bool GxBufValid(const CGxBuf* buf) {
+    STORM_ASSERT(buf);
+    return buf->m_hasData && buf->m_valid;
+}
+
+// INLINED
+inline CGxPool* GxBufPool(const CGxBuf* buf) {
+    STORM_ASSERT(buf);
+    return buf->m_pool;
+}
+
+// INLINED
+inline uint32_t GxPoolSize(const CGxPool* pool) {
+    STORM_ASSERT(pool);
+    return static_cast<uint32_t>(pool->m_size);
+}
+
+// INLINED
+inline CGxBuf* GxBufCreate(CGxPool* pool, uint32_t itemSize, uint32_t itemCount, uint32_t base) {
+    STORM_ASSERT(pool);
+    STORM_ASSERT(itemSize * itemCount);
+    STORM_ASSERT(itemSize * itemCount <= (32 * 1024 * 1024));
+    STORM_ASSERT(itemSize * itemCount <= GxPoolSize(pool));
+    return g_theGxDevicePtr->BufCreate(pool, itemSize, itemCount, base);
+}
+
+// INLINED
+inline void GxBufSizeSet(CGxBuf* buf, uint32_t itemSize, uint32_t itemCount) {
+    STORM_ASSERT(buf);
+    STORM_ASSERT(itemSize * itemCount);
+    STORM_ASSERT(itemSize * itemCount <= (32 * 1024 * 1024));
+    STORM_ASSERT(itemSize * itemCount <= GxPoolSize(GxBufPool(buf)));
+    g_theGxDevicePtr->BufSizeSet(buf, itemSize, itemCount);
+}
+
+// INLINED
+inline void GxBufBaseSet(CGxBuf* buf, uint32_t base) { // (inferred)
+    STORM_ASSERT(buf);
+    STORM_ASSERT(base < 0x7FFFFFFF);
+    buf->m_index = base;
+}
+
 void GxRenderTargetSet(EGxBuffer buffer, CGxTex* texture, uint32_t plane);
 void GxBufData(CGxBuf* buf, const void* data, uint32_t size, uint32_t offset);
 CGxBuf* GxBufStream(EGxPoolTarget target, uint32_t itemSize, uint32_t itemCount);
@@ -78,8 +134,8 @@ void GxTexParameters(const CGxTex* texId, CGxTexParms& parms);
 void GxTexSetCannotUpdate(CGxTex* texId);
 void GxTexSetDataFormat(CGxTex* texId, EGxTexFormat dataFormat);
 void GxTexSetUserData(CGxTex* texId, GxTexUserFunc userFunc, void* userArg);
-void GxTexUpdate(CGxTex* texId, int32_t minX, int32_t minY, int32_t maxX, int32_t maxY, int32_t immediate);
-void GxTexUpdate(CGxTex* texId, CiRect& updateRect, int32_t immediate);
+void GxTexUpdate(CGxTex* texId, int32_t minX, int32_t minY, int32_t maxX, int32_t maxY, BOOL immediate);
+void GxTexUpdate(CGxTex* texId, CiRect& updateRect, BOOL immediate);
 int32_t GxTexCreate(const CGxTexParms& parms, CGxTex*& texId);
 int32_t GxTexCreate(EGxTexTarget target, uint32_t width, uint32_t height, uint32_t depth, EGxTexFormat format, EGxTexFormat dataFormat, CGxTexFlags flags, void* userArg, GxTexUserFunc userFunc, const char* name, CGxTex*& texId);
 int32_t GxTexStretch(CGxTex* dest, const CiRect* destRect, const CiRect* sourceRect, uint32_t level, uint32_t face);
@@ -104,13 +160,14 @@ void GxLogCrashInfo(char* buffer, uint32_t size);
 void GxLogOpen();
 int32_t GxIsWindowVisible();
 int32_t GxMasterEnable(EGxMasterEnables state);
-void GxMasterEnableSet(EGxMasterEnables state, int32_t enable);
+void GxMasterEnableSet(EGxMasterEnables state, BOOL enable);
 bool GxQueryBegin(CGxQuery* query);
 void GxQueryCreate(CGxQuery*& query, EGxQueryType type);
 void GxQueryDestroy(CGxQuery*& query);
 bool GxQueryEnd(CGxQuery* query);
 bool GxQueryGetData(CGxQuery* query, uint32_t* data);
 bool GxQueryGetParam(CGxQuery* query, EGxQueryParam param, uint32_t* data);
+inline uint32_t GxRsStackOffset() { return g_theGxDevicePtr->RsStackOffset(); }
 void GxRsSet(EGxRenderState which, void* value);
 void GxRsSet(EGxRenderState which, int32_t value);
 void GxRsSet(EGxRenderState which, float value);

@@ -15,7 +15,7 @@
 
 // INLINED
 GruntLogin::MATRIXINPUT::MATRIXINPUT() {
-    this->m_valid = false;
+    this->m_prepared = false;
 }
 
 // VERIFY: 7676960d manual
@@ -34,7 +34,7 @@ bool GruntLogin::Connected(const NETADDR& address) {
 // OFFSET: 0x008CA140
 bool GruntLogin::CantConnect() {
     this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_SERVER_DOWN, nullptr, 0);
-    this->m_logonStatus = 1;
+    this->m_logonStatus = LOGON_STATUS_FAILED;
     this->LogonResult(Grunt::GRUNT_RESULT_CANT_CONNECT, nullptr, 0, 0);
     this->m_loggedOn = false;
     this->m_online = false;
@@ -48,7 +48,7 @@ bool GruntLogin::Disconnected() {
     this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_DISCONNECTED, LOGIN_OK, nullptr, 0);
 
     if (!this->m_online) {
-        this->m_logonStatus = 1;
+        this->m_logonStatus = LOGON_STATUS_FAILED;
         this->LogonResult(Grunt::GRUNT_RESULT_DISCONNECTED, nullptr, 0, 0);
     }
 
@@ -103,7 +103,7 @@ void GruntLogin::Logon(const char* loginServer, const char* portal) {
     }
 
     this->m_reconnect = false;
-    this->m_logonStatus = -1;
+    this->m_logonStatus = LOGON_STATUS_PENDING;
     this->m_pinEnabled = false;
     this->m_matrixEnabled = false;
     this->m_tokenEnabled = false;
@@ -168,7 +168,7 @@ void GruntLogin::LogonResult(Grunt::Result result, const uint8_t* sessionKey, ui
     }
 
     if (result == Grunt::GRUNT_RESULT_SUCCESS || result == Grunt::GRUNT_RESULT_SUCCESS_SURVEY) {
-        this->m_logonStatus = 0;
+        this->m_logonStatus = LOGON_STATUS_SUCCESS;
         this->m_pinFailures = 0;
         memcpy(this->m_sessionKey, sessionKey, sessionKeyLength >= sizeof(this->m_sessionKey) ? sizeof(this->m_sessionKey) : sessionKeyLength);
 
@@ -181,7 +181,7 @@ void GruntLogin::LogonResult(Grunt::Result result, const uint8_t* sessionKey, ui
         return;
     }
 
-    this->m_logonStatus = 1;
+    this->m_logonStatus = LOGON_STATUS_FAILED;
 
     switch (result) {
         case Grunt::GRUNT_RESULT_BANNED:
@@ -273,11 +273,11 @@ void GruntLogin::LogonResult(Grunt::Result result, const uint8_t* sessionKey, ui
 void GruntLogin::Update() {
 }
 
-void GruntLogin::JoinRealm(uint32_t a1, uint32_t a2, uint32_t a3) {
+void GruntLogin::JoinRealm(uint32_t region, uint32_t battlegroup, uint32_t id) {
 }
 
-int32_t GruntLogin::GetLoginServerType() {
-    return 0;
+LOGIN_SERVER_TYPE GruntLogin::GetLoginServerType() {
+    return LOGIN_SERVER_GRUNT;
 }
 
 // VERIFY: d9686987 auto
@@ -326,17 +326,21 @@ void GruntLogin::SetPinInfo(bool enabled, uint32_t seed, const uint8_t* salt) {
 
 // VERIFY: 49a3ec8d auto
 // OFFSET: 0x008CA3B0
-void GruntLogin::GetPinInfo(bool* enabled, uint8_t** salt, uint8_t** hash) {
-    *enabled = this->m_pinEnabled;
-    *salt = this->m_pinClientSalt;
-    *hash = this->m_pinHash;
+void GruntLogin::GetPinInfo(bool* required, uint8_t** clientSalt, uint8_t** clientProof) {
+    STORM_ASSERT(required && clientSalt && clientProof);
+
+    *required = this->m_pinEnabled;
+    *clientSalt = this->m_pinClientSalt;
+    *clientProof = this->m_pinHash;
 }
 
 // VERIFY: 00c628e1 auto
 // OFFSET: 0x008CA3E0
-void GruntLogin::GetMatrixProof(bool* enabled, const uint8_t** proof) const {
-    *enabled = this->m_matrixEnabled;
-    *proof = this->m_matrixProof;
+void GruntLogin::GetMatrixProof(bool* required, const uint8_t** clientProof) const {
+    STORM_ASSERT(required && clientProof);
+
+    *required = this->m_matrixEnabled;
+    *clientProof = this->m_matrixProof;
 }
 
 // VERIFY: 42ddcf82 auto
@@ -348,9 +352,11 @@ void GruntLogin::SetTokenInfo(bool enabled, uint8_t required) {
 
 // VERIFY: 7861663c auto
 // OFFSET: 0x008CA420
-void GruntLogin::GetTokenInfo(bool* enabled, char* token) {
-    *enabled = this->m_tokenEnabled;
-    SStrCopy(token, this->m_token, sizeof(this->m_token));
+void GruntLogin::GetTokenInfo(bool* required, char* tokenString) {
+    STORM_ASSERT(required && tokenString);
+
+    *required = this->m_tokenEnabled;
+    SStrCopy(tokenString, this->m_token, sizeof(this->m_token));
 }
 
 // VERIFY: af8b5075 manual
@@ -402,7 +408,7 @@ void GruntLogin::CommitMatrix() {
     GruntLogin::MATRIXINPUT* committed = this->m_matrixCommitted;
     GruntLogin::MATRIXINPUT* input = this->m_matrixInput;
 
-    input->m_valid = committed->m_valid;
+    input->m_prepared = committed->m_prepared;
     memcpy(&input->m_hmac, &committed->m_hmac, sizeof(input->m_hmac));
     memcpy(&input->m_key, &committed->m_key, sizeof(input->m_key));
 }
@@ -422,19 +428,19 @@ const uint8_t* GruntLogin::GetVersionChallenge() {
 // VERIFY: e2adbcde auto
 // OFFSET: 0x008CAAF0
 bool GruntLogin::IsTrialAccount() {
-    return (this->m_clientLink->m_accountFlags >> 3) & 1;
+    return (this->m_clientLink->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_TRIAL) != 0;
 }
 
 // VERIFY: d289ac5b auto
 // OFFSET: 0x008CAB10
 bool GruntLogin::IsProPassAccount() {
-    return (this->m_clientLink->m_accountFlags >> 23) & 1;
+    return (this->m_clientLink->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_PRO_PASS) != 0;
 }
 
 // VERIFY: 431ffacd auto
 // OFFSET: 0x008CAB30
 bool GruntLogin::IsGMAccount() {
-    return this->m_clientLink->m_accountFlags & 1;
+    return (this->m_clientLink->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_GAME_MASTER) != 0;
 }
 
 // VERIFY: cc6621fa auto
@@ -501,7 +507,7 @@ void GruntLogin::SetMatrixInfo(bool enabled, uint8_t width, uint8_t height, uint
     input->m_hmac.m_hash.Prepare();
     input->m_hmac.m_hash.Process(input->m_hmac.m_innerPad, sizeof(input->m_hmac.m_innerPad));
     ARC4PrepareKey(this->m_matrixKey, sizeof(this->m_matrixKey), &input->m_key);
-    input->m_valid = true;
+    input->m_prepared = true;
 
     this->CommitMatrix();
 
@@ -519,7 +525,7 @@ int32_t GruntLogin::GetSurveyId() {
 void GruntLogin::RevertMatrix() {
     GruntLogin::MATRIXINPUT* input = this->m_matrixInput;
     GruntLogin::MATRIXINPUT* committed = this->m_matrixCommitted;
-    committed->m_valid = input->m_valid;
+    committed->m_prepared = input->m_prepared;
     committed->m_hmac = input->m_hmac;
     committed->m_key = input->m_key;
 }
@@ -534,15 +540,17 @@ void GruntLogin::EnterToken(const char* token) {
 
 // VERIFY: d42deb51 auto
 // OFFSET: 0x008CAA30
-bool GruntLogin::GetMatrixInfo(uint32_t* width, uint32_t* height, uint32_t* minDigits, uint32_t* maxDigits, bool* flipCoords, uint32_t* challengeCount) {
+bool GruntLogin::GetMatrixInfo(uint32_t* width, uint32_t* height, uint32_t* minDigitCount, uint32_t* maxDigitCount, bool* flipCoords, uint32_t* challengeCount) {
+    STORM_ASSERT(width && height && minDigitCount && maxDigitCount && flipCoords && challengeCount);
+
     if (!this->m_matrixEnabled) {
         return false;
     }
 
     *width = this->m_matrixWidth;
     *height = this->m_matrixHeight;
-    *minDigits = this->m_matrixMinDigitCount;
-    *maxDigits = this->m_matrixMaxDigitCount;
+    *minDigitCount = this->m_matrixMinDigitCount;
+    *maxDigitCount = this->m_matrixMaxDigitCount;
     *flipCoords = this->m_matrixFlipCoords;
     *challengeCount = this->m_matrixChallengeCount;
     return true;
@@ -551,6 +559,8 @@ bool GruntLogin::GetMatrixInfo(uint32_t* width, uint32_t* height, uint32_t* minD
 // VERIFY: ab7f843b auto
 // OFFSET: 0x008CAA90
 bool GruntLogin::GetMatrixCoordinates(uint32_t index, uint32_t* x, uint32_t* y) {
+    STORM_ASSERT(x && y);
+
     if (!this->m_matrixEnabled || !this->m_matrixCoordinates || index >= this->m_matrixChallengeCount) {
         return false;
     }
@@ -558,14 +568,18 @@ bool GruntLogin::GetMatrixCoordinates(uint32_t index, uint32_t* x, uint32_t* y) 
     uint32_t coordinate = this->m_matrixCoordinates[index];
     *x = coordinate % this->m_matrixWidth;
     *y = coordinate / this->m_matrixWidth;
+    STORM_ASSERT(*y < this->m_matrixHeight);
+
     return true;
 }
 
 // VERIFY: 10ae7b25 manual
 // OFFSET: 0x00465870
 void GruntLogin::MATRIXINPUT::Finish(SHA1::Digest& digest) {
+    STORM_ASSERT(this->m_prepared);
+
     this->m_hmac.Finish(digest);
-    this->m_valid = false;
+    this->m_prepared = false;
 }
 
 // VERIFY: b49b6056 manual
@@ -585,6 +599,14 @@ static void ProcessMatrixRC4(uint8_t* data, uint32_t length, SARC4Key* key) {
 
     key->m_x = x;
     key->m_y = y;
+}
+
+// INLINED
+void GruntLogin::MATRIXINPUT::Process(uint8_t value) {
+    STORM_ASSERT(this->m_prepared);
+
+    ProcessMatrixRC4(&value, 1, &this->m_key);
+    this->m_hmac.Process(&value, 1);
 }
 
 // VERIFY: d046e16b auto
@@ -614,11 +636,11 @@ void GruntLogin::FileComplete(bool success) {
 // VERIFY: 20c829de manual
 // OFFSET: 0x008CA7F0
 int32_t GruntLogin::Wait(const char* message, LoginData& loginData) {
-    while (this->m_logonStatus == -1) {
+    while (this->m_logonStatus == LOGON_STATUS_PENDING) {
         OsSleep(100);
     }
 
-    if (this->m_logonStatus) {
+    if (this->m_logonStatus != LOGON_STATUS_SUCCESS) {
         memset(&loginData, 0, sizeof(loginData));
     } else {
         loginData.m_loginServerID = 0;
@@ -626,7 +648,7 @@ int32_t GruntLogin::Wait(const char* message, LoginData& loginData) {
         memcpy(loginData.m_sessionKey, this->m_sessionKey, sizeof(loginData.m_sessionKey));
     }
 
-    return this->m_logonStatus == 0;
+    return this->m_logonStatus == LOGON_STATUS_SUCCESS;
 }
 
 // VERIFY: 66d294df manual
@@ -661,8 +683,7 @@ void GruntLogin::EnterPIN(int32_t count, uint8_t* digits) {
 // OFFSET: 0x008CAFA0
 void GruntLogin::EnterMatrix(uint8_t value) {
     GruntLogin::MATRIXINPUT* input = this->m_matrixCommitted;
-    ProcessMatrixRC4(&value, 1, &input->m_key);
-    input->m_hmac.Process(&value, 1);
+    input->Process(value);
 }
 
 // VERIFY: be3941c2 auto
@@ -676,7 +697,7 @@ void GruntLogin::FinalizeMatrix() {
 // OFFSET: 0x008CB020
 void GruntLogin::ReconnectResult(Grunt::Result result, const uint8_t* sessionKey, uint32_t sessionKeyLength, uint16_t flags) {
     if (!this->IsReconnect()) {
-        this->m_logonStatus = 1;
+        this->m_logonStatus = LOGON_STATUS_FAILED;
         this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_FAILED, nullptr, 0);
         return;
     }

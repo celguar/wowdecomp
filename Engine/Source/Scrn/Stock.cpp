@@ -1,6 +1,7 @@
 #include <cstdint>
 #include "Engine/Source/Base/Coordinate.h"
 #include "Engine/Source/Base/Handle.h"
+#include "Engine/Source/Gxu/GxuDebugDraw.h"
 #include "Engine/Source/Gxu/GxuFont.h"
 #include "Engine/Source/Os/Path.h"
 #include "Engine/Source/Scrn/Scrn.h"
@@ -22,6 +23,7 @@ void ScrnSetStockFont(SCRNSTOCK stockID, const char* fontTexturePath) {
     }
 
     s_stockObjects[stockID] = TextBlockGenerateFont(fontTexturePath, 0, NDCToDDCHeight(s_stockObjectHeights[stockID]));
+    STORM_ASSERT(s_stockObjects[stockID]);
 }
 
 // VERIFY: f91e1722 auto
@@ -78,6 +80,11 @@ void IStockDestroy() {
 
         s_stockObjects[i] = nullptr;
     }
+
+#ifdef WOWDECOMP_GXU_DEBUG_DRAW
+    // Debug/tool features: the debug-draw text drawer holds a font and strings, so it goes before GxuFontShutdown.
+    GxuShutdownDebugDraw();
+#endif
 
     GxuFontShutdown();
 }

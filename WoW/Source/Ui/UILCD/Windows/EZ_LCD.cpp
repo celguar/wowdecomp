@@ -27,7 +27,7 @@ CEzLcd::CEzLcd() {
     this->unk_01A8 = 0;
     this->m_currentColorPageIndex = 0;
     this->m_currentMonoPageIndex = 0;
-    this->m_lcdType = 3;
+    this->m_lcdType = LCD_TYPE_NONE;
     this->m_buttonsPending = 0;
     this->m_buttonsCurrent = 0;
     InitializeCriticalSection(&this->m_buttonLock);
@@ -89,7 +89,7 @@ void CEzLcd::OnSoftButtons(uint32_t buttons) {
 
 // VERIFY: 3a32c162 auto
 // OFFSET: 0x009592F0
-int32_t CEzLcd::Initialize(const char* friendlyName, int32_t lcdType, int32_t isAutoStartable, int32_t isPersistent, lgLcdConfigureContext* configContext, lgLcdSoftbuttonsChangedContext* softbuttonsChangedContext) {
+int32_t CEzLcd::Initialize(const char* friendlyName, LCD_TYPE lcdType, BOOL isAutoStartable, BOOL isPersistent, lgLcdConfigureContext* configContext, lgLcdSoftbuttonsChangedContext* softbuttonsChangedContext) {
     if (this->unk_01A8 || this->unused_01AC) {
         return E_FAIL;
     }
@@ -121,17 +121,17 @@ int32_t CEzLcd::Initialize(const char* friendlyName, int32_t lcdType, int32_t is
     }
 
     switch (lcdType) {
-        case 0: {
+        case LCD_TYPE_MONO: {
             connectContext.dwAppletCapabilitiesSupported = LGLCD_APPLET_CAP_BW;
             break;
         }
 
-        case 1: {
+        case LCD_TYPE_COLOR: {
             connectContext.dwAppletCapabilitiesSupported = LGLCD_APPLET_CAP_QVGA;
             break;
         }
 
-        case 2: {
+        case LCD_TYPE_DUAL: {
             connectContext.dwAppletCapabilitiesSupported = LGLCD_APPLET_CAP_BW | LGLCD_APPLET_CAP_QVGA;
             break;
         }
@@ -156,11 +156,11 @@ int32_t CEzLcd::Initialize(const char* friendlyName, int32_t lcdType, int32_t is
 
     this->m_initialized = 1;
 
-    if (this->m_lcdType == 1 || this->m_lcdType == 2) {
+    if (this->m_lcdType == LCD_TYPE_COLOR || this->m_lcdType == LCD_TYPE_DUAL) {
         this->m_output = this->m_connection.ColorOutput();
     }
 
-    if (this->m_lcdType == 0 || this->m_lcdType == 2) {
+    if (this->m_lcdType == LCD_TYPE_MONO || this->m_lcdType == LCD_TYPE_DUAL) {
         this->m_output = this->m_connection.MonoOutput();
     }
 
@@ -185,18 +185,18 @@ void CEzLcd::Update() {
 
 // VERIFY: 23e6b3c3 manual
 // OFFSET: 0x00959240
-int32_t CEzLcd::IsConnected() {
+BOOL CEzLcd::IsConnected() {
     return this->m_connection.IsConnected();
 }
 
 // VERIFY: f18f64d0 manual
 // OFFSET: 0x00958E30
-int32_t CEzLcd::IsDeviceAvailable(int32_t type) {
+BOOL CEzLcd::IsDeviceAvailable(LCD_TYPE type) {
     CLCDOutput* output;
 
-    if (type == 0) {
+    if (type == LCD_TYPE_MONO) {
         output = this->m_connection.MonoOutput();
-    } else if (type == 1) {
+    } else if (type == LCD_TYPE_COLOR) {
         output = this->m_connection.ColorOutput();
     } else {
         return 0;
@@ -228,8 +228,8 @@ HRESULT CEzLcd::SetText(void* handle, const WCHAR* text) {
         return E_FAIL;
     }
 
-    if (object->GetObjectType() == 1 || object->GetObjectType() == 0) {
-        if (object->GetObjectType() == 1) {
+    if (object->GetObjectType() == LCD_OBJECT_TYPE_TEXT || object->GetObjectType() == LCD_OBJECT_TYPE_UNKNOWN_0) {
+        if (object->GetObjectType() == LCD_OBJECT_TYPE_TEXT) {
             static_cast<CLCDText*>(object)->SetText(text);
             return S_OK;
         }
@@ -243,7 +243,7 @@ HRESULT CEzLcd::SetText(void* handle, const WCHAR* text) {
 HRESULT CEzLcd::SetTextWordWrap(void* handle, bool enable) {
     CLCDBase* object = static_cast<CLCDBase*>(handle);
 
-    if (!object || object->GetObjectType() != 1) {
+    if (!object || object->GetObjectType() != LCD_OBJECT_TYPE_TEXT) {
         return E_FAIL;
     }
 
@@ -291,7 +291,7 @@ HRESULT CEzLcd::SetOrigin(void* handle, int32_t x, int32_t y) {
 
 // VERIFY: 7bb16566 manual
 // OFFSET: 0x00958FE0
-HRESULT CEzLcd::SetVisible(void* handle, int32_t visible) {
+HRESULT CEzLcd::SetVisible(void* handle, BOOL visible) {
     CLCDBase* object = static_cast<CLCDBase*>(handle);
 
     if (!object) {
@@ -317,27 +317,27 @@ HRESULT CEzLcd::SetAlpha(void* handle, int32_t alpha) {
 // OFFSET: 0x00959040
 int32_t CEzLcd::ButtonReleased(int32_t button) {
     switch (button) {
-        case 0:
+        case BUTTON_0:
             return (this->m_buttonsPrevious & LGLCDBUTTON_BUTTON0) && !(this->m_buttonsCurrent & LGLCDBUTTON_BUTTON0);
-        case 1:
+        case BUTTON_1:
             return (this->m_buttonsPrevious & LGLCDBUTTON_BUTTON1) && !(this->m_buttonsCurrent & LGLCDBUTTON_BUTTON1);
-        case 2:
+        case BUTTON_2:
             return (this->m_buttonsPrevious & LGLCDBUTTON_BUTTON2) && !(this->m_buttonsCurrent & LGLCDBUTTON_BUTTON2);
-        case 3:
+        case BUTTON_3:
             return (this->m_buttonsPrevious & LGLCDBUTTON_BUTTON3) && !(this->m_buttonsCurrent & LGLCDBUTTON_BUTTON3);
-        case 4:
+        case BUTTON_LEFT:
             return (this->m_buttonsPrevious & LGLCDBUTTON_LEFT) && !(this->m_buttonsCurrent & LGLCDBUTTON_LEFT);
-        case 5:
+        case BUTTON_RIGHT:
             return (this->m_buttonsPrevious & LGLCDBUTTON_RIGHT) && !(this->m_buttonsCurrent & LGLCDBUTTON_RIGHT);
-        case 6:
+        case BUTTON_UP:
             return (this->m_buttonsPrevious & LGLCDBUTTON_UP) && !(this->m_buttonsCurrent & LGLCDBUTTON_UP);
-        case 7:
+        case BUTTON_DOWN:
             return (this->m_buttonsPrevious & LGLCDBUTTON_DOWN) && !(this->m_buttonsCurrent & LGLCDBUTTON_DOWN);
-        case 8:
+        case BUTTON_OK:
             return (this->m_buttonsPrevious & LGLCDBUTTON_OK) && !(this->m_buttonsCurrent & LGLCDBUTTON_OK);
-        case 9:
+        case BUTTON_CANCEL:
             return (this->m_buttonsPrevious & LGLCDBUTTON_CANCEL) && !(this->m_buttonsCurrent & LGLCDBUTTON_CANCEL);
-        case 10:
+        case BUTTON_MENU:
             return (this->m_buttonsPrevious & LGLCDBUTTON_MENU) && !(this->m_buttonsCurrent & LGLCDBUTTON_MENU);
         default:
             return 0;
@@ -370,6 +370,15 @@ void CEzLcd::ShowSubscreen(int32_t subscreen) {
 // VERIFY: 6e0acd1e manual
 // OFFSET: 0x009594A0
 int32_t CEzLcd::AddNewPage(int32_t page) {
+#if defined(WOWDECOMP_ARCH_64)
+    {
+        auto* pages = this->m_output == this->m_connection.MonoOutput() ? &this->m_monoPages : &this->m_colorPages;
+        if (static_cast<uint32_t>(page) >= pages->Count()) {
+            return -1;
+        }
+    }
+#endif
+
     CEzLcdPage* newPage = new CEzLcdPage(this);
     newPage->Initialize();
     newPage->SetExpiration(INFINITE);
@@ -396,17 +405,23 @@ int32_t CEzLcd::ShowPage(int32_t page) {
         pages = &this->m_colorPages;
     }
 
+#if defined(WOWDECOMP_ARCH_64)
+    if (static_cast<uint32_t>(page) >= pages->Count()) {
+#else
     if (page > static_cast<int32_t>(pages->Count()) || page < -1) {
+#endif
         return E_FAIL;
     }
 
     CEzLcdPage* newPage = (*pages)[page];
 
-    if (this->m_connection.MonoOutput() == this->m_output) {
-        this->m_currentMonoPage = newPage;
-    } else {
-        this->m_currentColorPage = newPage;
+#if defined(WOWDECOMP_ARCH_64)
+    if (!newPage) {
+        return E_FAIL;
     }
+#endif
+
+    this->SetCurrentPage(newPage);
 
     CLCDOutput* output = this->m_output;
     CEzLcdPage* currentPage;
@@ -452,7 +467,7 @@ void CEzLcd::SetBackground(COLORREF color) {
 
 // VERIFY: c0fc03e2 manual
 // OFFSET: 0x00959680
-CLCDText* CEzLcd::AddText(int32_t type, int32_t size, int32_t alignment, int32_t maxLengthPixels, int32_t userData, int32_t numberOfLines, int32_t fontWeight) {
+CLCDText* CEzLcd::AddText(LCD_OBJECT_TYPE type, int32_t size, int32_t alignment, int32_t maxLengthPixels, int32_t userData, int32_t numberOfLines, int32_t fontWeight) {
     CEzLcdPage* page;
 
     if (this->m_output == this->m_connection.MonoOutput()) {
@@ -554,11 +569,7 @@ HRESULT CEzLcd::ModifyControlsOnPage(int32_t page) {
     if (page == -1) {
         CEzLcdPage* globalPage = this->GetGlobalPage();
 
-        if (this->m_connection.MonoOutput() == this->m_output) {
-            this->m_currentMonoPage = globalPage;
-        } else {
-            this->m_currentColorPage = globalPage;
-        }
+        this->SetCurrentPage(globalPage);
 
         return S_OK;
     }
@@ -569,7 +580,11 @@ HRESULT CEzLcd::ModifyControlsOnPage(int32_t page) {
         pages = &this->m_colorPages;
     }
 
+#if defined(WOWDECOMP_ARCH_64)
+    if (static_cast<uint32_t>(page) >= pages->Count()) {
+#else
     if (page > static_cast<int32_t>(pages->Count()) || page < -1) {
+#endif
         return E_FAIL;
     }
 

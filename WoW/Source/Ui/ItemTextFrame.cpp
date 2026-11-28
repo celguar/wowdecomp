@@ -92,7 +92,7 @@ void CGItemText::DisplayText(const WOWGUID& guid, int32_t translate) {
     QuestParserParseText(page->m_text, buffer, sizeof(buffer), player, nullptr, 0);
 
     if (object->m_obj->m_type & TYPE_ITEM) {
-        if (static_cast<CGItem_C*>(object)->m_item->m_itemFieldFlags & ITEM_DFLAG_TRANSLATED) {
+        if (static_cast<CGItem_C*>(object)->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_TRANSLATED) {
             SStrCopy(CGItemText::m_text, buffer, sizeof(CGItemText::m_text));
         } else {
             WOWGUID none = WOWGUID();
@@ -129,7 +129,7 @@ void CGItemText::DisplayText(const WOWGUID& guid, int32_t translate) {
 
 // VERIFY: 71021321 manual
 // OFFSET: 0x0058A1A0
-void CGItemText::SetItem(const WOWGUID& guid, int32_t a2) {
+void CGItemText::SetItem(const WOWGUID& guid, BOOL refresh) {
     if (guid != CGItemText::m_itemGUID) {
         CGGameUI::ClearInteractTarget(CGItemText::m_itemGUID, 0);
         CGItemText::m_itemGUID = guid;
@@ -143,7 +143,7 @@ void CGItemText::SetItem(const WOWGUID& guid, int32_t a2) {
             FrameScript_SignalEvent(SCRIPT_EVENT_ITEM_TEXT_CLOSED, nullptr);
             return;
         }
-    } else if (!a2 && guid) {
+    } else if (!refresh && guid) {
         CGGameUI::ClearInteractTarget(CGItemText::m_itemGUID, 0);
         FrameScript_SignalEvent(SCRIPT_EVENT_ITEM_TEXT_CLOSED, nullptr);
         return;
@@ -157,7 +157,7 @@ void CGItemText::SetItem(const WOWGUID& guid, int32_t a2) {
     }
 
     int32_t page = object->GetPageTextID(CGItemText::ItemTextCallback);
-    bool hasText = (object->m_obj->m_type & TYPE_ITEM) && (static_cast<CGItem_C*>(object)->m_item->m_itemFieldFlags & 0x200);
+    bool hasText = (object->m_obj->m_type & TYPE_ITEM) && (static_cast<CGItem_C*>(object)->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_HAS_ITEM_TEXT);
     CGItemText::m_hasItemText = hasText;
 
     if (!page && !hasText) {
@@ -181,7 +181,7 @@ void CGItemText::SetItem(const WOWGUID& guid, int32_t a2) {
     CGGameUI::SetInteractTarget(guid);
     FrameScript_SignalEvent(SCRIPT_EVENT_ITEM_TEXT_BEGIN, nullptr);
 
-    if (!(object->m_obj->m_type & TYPE_ITEM) || CGItemText::m_hasItemText || (static_cast<CGItem_C*>(object)->m_item->m_itemFieldFlags & ITEM_DFLAG_TRANSLATED)) {
+    if (!(object->m_obj->m_type & TYPE_ITEM) || CGItemText::m_hasItemText || (static_cast<CGItem_C*>(object)->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_TRANSLATED)) {
         CGItemText::DisplayText(guid, 1);
         return;
     }

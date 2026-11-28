@@ -12,6 +12,7 @@
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Model2/M2Shared.h"
 #include "Engine/Source/Model2/CM2SceneRender.h"
+#include "Engine/Source/Os/Processor.h"
 #include "Engine/Source/Services/GfxSingletonManager.h"
 #include "Engine/Source/Services/ParticleSystem2.h"
 #include "Engine/Source/Services/RibbonEmitter.h"
@@ -21,6 +22,7 @@
 #include "Engine/Source/Tempest/C33Matrix.h"
 #include "Engine/Source/Tempest/C3Ray.h"
 #include "Engine/Source/Tempest/NTempest.h"
+#include "Engine/Source/Tempest/CMath.h"
 
 // STATIC: 0x00A45374
 const uint32_t s_localLighting[M2BLEND_COUNT] = { 1, 1, 1, 1, 1, 0, 0 };
@@ -51,7 +53,7 @@ void CM2Scene::AdvanceTime(uint32_t delta) {
     this->m_time += delta;
     this->m_cache->UpdateShared();
     this->m_cache->GarbageCollect(0);
-    this->m_flags |= 4;
+    this->m_flags |= CM2Scene::SCENE_FLAGS::PROCESSING_CALLBACKS;
     this->m_timeDelta = delta;
 
     if (delta) {
@@ -64,7 +66,7 @@ void CM2Scene::AdvanceTime(uint32_t delta) {
         }
     }
 
-    this->m_flags &= ~4u;
+    this->m_flags &= ~CM2Scene::SCENE_FLAGS::PROCESSING_CALLBACKS;
 }
 
 // VERIFY: 19239262 auto
@@ -77,19 +79,22 @@ void CM2Scene::SetFloat18(float value) {
 // OFFSET: 0x0081CA20
 uint32_t ParticleBlendToM2Blend(uint32_t blend) {
     switch (blend) {
-        case 1:
+        case EGxBlend::GxBlend_AlphaKey:
             return M2BLEND_ALPHA_KEY;
-        case 2:
+        case EGxBlend::GxBlend_Alpha:
             return M2BLEND_ALPHA;
-        case 3:
+        case EGxBlend::GxBlend_Add:
             return M2BLEND_ADD;
-        case 4:
+        case EGxBlend::GxBlend_Mod:
             return M2BLEND_MOD;
-        case 5:
+        case EGxBlend::GxBlend_Mod2x:
             return M2BLEND_MOD2X;
-        case 10:
+        case EGxBlend::GxBlend_NoAlphaAdd:
             return M2BLEND_NO_ALPHA_ADD;
         default:
+            STORM_ASSERT(0);
+            [[fallthrough]];
+        case EGxBlend::GxBlend_Opaque:
             return M2BLEND_OPAQUE;
     }
 }
@@ -97,18 +102,18 @@ uint32_t ParticleBlendToM2Blend(uint32_t blend) {
 // VERIFY: 26bf08dc manual
 // OFFSET: 0x0081CA80
 uint32_t ParticleFlagsToM2Flags(uint32_t flags) {
-    uint32_t result = 4;
+    uint32_t result = M2Material::FLAGS::TWO_SIDED;
 
-    if (!(flags & 1)) {
-        result = 5;
+    if (!(flags & CParticleMat::FLAGS::LIT)) {
+        result = M2Material::FLAGS::UNLIT_TWO_SIDED;
     }
 
-    if (!(flags & 2)) {
-        result |= 2;
+    if (!(flags & CParticleMat::FLAGS::FOGGED)) {
+        result |= M2Material::FLAGS::UNFOGGED;
     }
 
-    if (!(flags & 4)) {
-        result |= 0x10;
+    if (!(flags & CParticleMat::FLAGS::DEPTH_WRITE)) {
+        result |= M2Material::FLAGS::NO_DEPTH_WRITE;
     }
 
     return result;
@@ -125,7 +130,10 @@ void CM2Scene::PurgeModelCache() {
 // VERIFY: e5d07ffa auto
 // OFFSET: 0x0081CAC0
 void CM2Scene::BeginHitTest() {
-    this->m_flags |= 2;
+    STORM_ASSERT(!IsHitTesting());
+    STORM_ASSERT(!m_hitList);
+
+    this->m_flags |= CM2Scene::SCENE_FLAGS::HIT_TEST_ACTIVE;
 }
 
 // VERIFY: fec263be manual
@@ -133,7 +141,7 @@ void CM2Scene::BeginHitTest() {
 void CM2Scene::AllocateSpaceForHitList() {
     uint32_t count = 0;
 
-    for (CM2Model* model = this->m_hitTestList; model; model = model->m_hitTestNext) {
+    for (CM2Model* model = this->m_hitList; model; model = model->m_hitTestNext) {
         count++;
     }
 
@@ -163,19 +171,19 @@ int32_t CM2Scene::SortHitNear(uint32_t a, uint32_t b, const void* param) {
     const M2HitRec* recA = &recs[a];
     const M2HitRec* recB = &recs[b];
 
-    if (recB->m_tNear > recA->m_tNear) {
+    if (recB->m_interval.m_l > recA->m_interval.m_l) {
         return -1;
     }
 
-    if (recB->m_tNear < recA->m_tNear) {
+    if (recB->m_interval.m_l < recA->m_interval.m_l) {
         return 1;
     }
 
-    if (recB->m_tFar > recA->m_tFar) {
+    if (recB->m_interval.m_h > recA->m_interval.m_h) {
         return -1;
     }
 
-    if (recB->m_tFar < recA->m_tFar) {
+    if (recB->m_interval.m_h < recA->m_interval.m_h) {
         return 1;
     }
 
@@ -246,7 +254,7 @@ void CM2Scene::AnimateThread(void* param) {
             continue;
         }
 
-        if (model->m_fFlags & 0x1000) {
+        if (model->m_runtimeFlags & M2_FLAGS::M2_STATIC_SINGLE_BONE_OPTIMIZED) {
             model->AnimateMTSimple(&scene->m_view, C3Vector(1.0f, 1.0f, 1.0f), C3Vector(0.0f, 0.0f, 0.0f), 1.0f, 1.0f);
         } else {
             model->AnimateMT(&scene->m_view, C3Vector(1.0f, 1.0f, 1.0f), C3Vector(0.0f, 0.0f, 0.0f), 1.0f, 1.0f);
@@ -273,12 +281,13 @@ int32_t CM2Scene::ComputeRayDirAndLen(const C3Vector& start, const C3Vector& end
         }
     }
 
-    for (CM2Model* model = this->m_hitTestList; model; model = model->m_hitTestNext) {
+    for (CM2Model* model = this->m_hitList; model; model = model->m_hitTestNext) {
         *model->m_hitTestPrev = nullptr;
         model->m_hitTestPrev = nullptr;
     }
 
-    this->m_flags &= ~2u;
+    STORM_ASSERT(!m_hitList);
+    this->m_flags &= ~CM2Scene::SCENE_FLAGS::HIT_TEST_ACTIVE;
 
     return 0;
 }
@@ -288,16 +297,16 @@ int32_t CM2Scene::ComputeRayDirAndLen(const C3Vector& start, const C3Vector& end
 uint32_t CM2Scene::SphereTestModels(const C3Vector& start, const C3Vector& dir, float length, int32_t frameCheck) {
     uint32_t count = 0;
 
-    for (CM2Model* model = this->m_hitTestList; model; model = model->m_hitTestNext) {
+    for (CM2Model* model = this->m_hitList; model; model = model->m_hitTestNext) {
         *model->m_hitTestPrev = nullptr;
         model->m_hitTestPrev = nullptr;
 
-        if (!(model->m_fFlags & 1) || model->m_frameStamp == 0xFFFFFFFF) {
+        if (!(model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED) || model->m_frameStamp == 0xFFFFFFFF) {
             continue;
         }
 
         if (frameCheck && model->m_frameStamp != this->m_frameStamp) {
-            if (model->m_hitTestMode != 3 || model->m_attachParent) {
+            if (model->m_hitTestMode != CM2Model::HIT_TEST_COLLISION || model->m_attachParent) {
                 continue;
             }
 
@@ -305,7 +314,7 @@ uint32_t CM2Scene::SphereTestModels(const C3Vector& start, const C3Vector& dir, 
         }
 
         M2Data* data = model->m_shared->m_data;
-        const M2Bounds* bounds = model->m_hitTestMode == 3 ? &data->m_collisionBounds : &data->m_sequences[model->m_bones->m_sequence.m_sequenceIndex].m_bounds;
+        const M2Bounds* bounds = model->m_hitTestMode == CM2Model::HIT_TEST_COLLISION ? &data->m_collisionBounds : &data->m_sequences[model->m_bones->m_sequence.m_sequenceIndex].m_bounds;
 
         if (fabsf(bounds->m_radius) < 0.00000023841858f) {
             continue;
@@ -358,9 +367,9 @@ uint32_t CM2Scene::SphereTestModels(const C3Vector& start, const C3Vector& dir, 
         }
 
         M2HitRec* rec = &this->m_hitRecs[count];
-        rec->m_tNear = tNear;
+        rec->m_interval.m_l = tNear;
         rec->m_model = model;
-        rec->m_tFar = tFar;
+        rec->m_interval.m_h = tFar;
         rec->m_priority = model->m_hitTestGroup;
         this->m_hitOrder[count] = count;
         count++;
@@ -373,7 +382,7 @@ uint32_t CM2Scene::SphereTestModels(const C3Vector& start, const C3Vector& dir, 
 // OFFSET: 0x0081D2C0
 void M2BlendBoneMatricesSSE(const C44Matrix* bones, ubyte4 weights, ubyte4 indices, C44Matrix* result) {
     const float* bone = reinterpret_cast<const float*>(&bones[indices.b[0]]);
-    __m128 weight = _mm_set1_ps(weights.b[0] * 0.0039215689f);
+    __m128 weight = _mm_set1_ps(weights.b[0] * ONE_OVER_255);
     __m128 row0 = _mm_mul_ps(_mm_loadu_ps(&bone[0]), weight);
     __m128 row1 = _mm_mul_ps(_mm_loadu_ps(&bone[4]), weight);
     __m128 row2 = _mm_mul_ps(_mm_loadu_ps(&bone[8]), weight);
@@ -385,7 +394,7 @@ void M2BlendBoneMatricesSSE(const C44Matrix* bones, ubyte4 weights, ubyte4 indic
         }
 
         bone = reinterpret_cast<const float*>(&bones[indices.b[i]]);
-        weight = _mm_set1_ps(weights.b[i] * 0.0039215689f);
+        weight = _mm_set1_ps(weights.b[i] * ONE_OVER_255);
         row0 = _mm_add_ps(_mm_mul_ps(_mm_loadu_ps(&bone[0]), weight), row0);
         row1 = _mm_add_ps(_mm_mul_ps(_mm_loadu_ps(&bone[4]), weight), row1);
         row2 = _mm_add_ps(_mm_mul_ps(_mm_loadu_ps(&bone[8]), weight), row2);
@@ -407,7 +416,7 @@ void M2BlendBoneMatricesSSE(const C44Matrix* bones, ubyte4 weights, ubyte4 indic
 // OFFSET: 0x0081D3D0
 void M2BlendBoneMatrices(const C44Matrix* bones, ubyte4 weights, ubyte4 indices, C44Matrix* result) {
     const C44Matrix* bone = &bones[indices.b[0]];
-    float weight = weights.b[0] * 0.0039215689f;
+    float weight = weights.b[0] * ONE_OVER_255;
     result->a0 = bone->a0 * weight;
     result->a1 = bone->a1 * weight;
     result->a2 = bone->a2 * weight;
@@ -427,7 +436,7 @@ void M2BlendBoneMatrices(const C44Matrix* bones, ubyte4 weights, ubyte4 indices,
         }
 
         bone = &bones[indices.b[i]];
-        weight = weights.b[i] * 0.0039215689f;
+        weight = weights.b[i] * ONE_OVER_255;
         result->a0 = bone->a0 * weight + result->a0;
         result->a1 = bone->a1 * weight + result->a1;
         result->a2 = bone->a2 * weight + result->a2;
@@ -500,9 +509,9 @@ void CM2Scene::TransformHitTestVerticesBlendSSE(const CM2Model* model, const M2S
     C44Matrix matrix;
     uint32_t weights = 0;
     uint32_t indices = 0;
-    uint32_t end = section->m_vertexStart + section->m_vertexCount;
+    uint32_t end = section->vertexStart + section->vertexCount;
 
-    for (uint32_t i = section->m_vertexStart; i < end; i++) {
+    for (uint32_t i = section->vertexStart; i < end; i++) {
         M2Vertex* vertex = &data->m_vertices[skinData->m_vertices[i]];
 
         if (*reinterpret_cast<uint32_t*>(&vertex->m_weights) != weights || *reinterpret_cast<uint32_t*>(&vertex->m_indices) != indices) {
@@ -535,9 +544,9 @@ void CM2Scene::TransformHitTestVerticesBlend(const CM2Model* model, const M2Skin
     C44Matrix matrix;
     uint32_t weights = 0;
     uint32_t indices = 0;
-    uint32_t end = section->m_vertexStart + section->m_vertexCount;
+    uint32_t end = section->vertexStart + section->vertexCount;
 
-    for (uint32_t i = section->m_vertexStart; i < end; i++) {
+    for (uint32_t i = section->vertexStart; i < end; i++) {
         M2Vertex* vertex = &data->m_vertices[skinData->m_vertices[i]];
 
         if (*reinterpret_cast<uint32_t*>(&vertex->m_weights) != weights || *reinterpret_cast<uint32_t*>(&vertex->m_indices) != indices) {
@@ -567,9 +576,9 @@ void CM2Scene::TransformHitTestVerticesBlend(const CM2Model* model, const M2Skin
 void CM2Scene::TransformHitTestVertices(const CM2Model* model, const M2SkinProfile* skinData, const M2SkinSection* section, int32_t normals, const C3Vector& dir, float d) {
     M2Data* data = model->m_shared->m_data;
     C3Vector* out = this->m_hitVerts;
-    uint32_t end = section->m_vertexStart + section->m_vertexCount;
+    uint32_t end = section->vertexStart + section->vertexCount;
 
-    for (uint32_t i = section->m_vertexStart; i < end; i++) {
+    for (uint32_t i = section->vertexStart; i < end; i++) {
         M2Vertex* vertex = &data->m_vertices[skinData->m_vertices[i]];
         const C44Matrix& matrix = model->m_boneMatrices[vertex->m_indices.b[0]];
         C3Vector p = vertex->m_position * matrix;
@@ -597,17 +606,17 @@ M2HitRec* CM2Scene::HitTestGeometry(const CM2Model* model, uint32_t pass, const 
     for (uint32_t i = 0; i < skinData->m_batches.m_count; i++) {
         M2Batch* batch = &skinData->m_batches[i];
 
-        if (batch->m_materialLayer || (batch->m_flags & 8)) {
+        if (batch->m_materialLayer || (batch->m_flags & M2Batch::FLAGS::NO_HIT_TEST)) {
             continue;
         }
 
         M2Material* material = &data->m_materials[batch->m_materialIndex];
 
-        if (model->m_hitTestMode == 2 && material->m_blendMode == M2BLEND_OPAQUE) {
+        if (model->m_hitTestMode == CM2Model::HIT_TEST_NON_OPAQUE && material->m_blendMode == M2BLEND_OPAQUE) {
             continue;
         }
 
-        if (model->m_hitTestMode == 1 && material->m_blendMode && !(material->m_flags & 0x20)) {
+        if (model->m_hitTestMode == CM2Model::HIT_TEST_OPAQUE && material->m_blendMode && !(material->m_flags & M2Material::FLAGS::HIT_TEST_NON_OPAQUE)) {
             continue;
         }
 
@@ -631,30 +640,30 @@ M2HitRec* CM2Scene::HitTestGeometry(const CM2Model* model, uint32_t pass, const 
 
         M2SkinSection* section = &skinData->m_skinSections[batch->m_skinSectionIndex];
 
-        if (section->m_vertexCount > this->m_hitVertCapacity) {
+        if (section->vertexCount > this->m_hitVertCapacity) {
             delete[] this->m_hitVerts;
 
             if (!this->m_hitVertCapacity) {
                 this->m_hitVertCapacity = 1;
             }
 
-            while (this->m_hitVertCapacity < section->m_vertexCount) {
+            while (this->m_hitVertCapacity < section->vertexCount) {
                 this->m_hitVertCapacity *= 2;
             }
 
             this->m_hitVerts = new (__FILE__, __LINE__) C3Vector[this->m_hitVertCapacity];
         }
 
-        if (section->m_boneInfluences == 1) {
+        if (section->boneInfluences == 1) {
             this->TransformHitTestVertices(model, skinData, section, pass, dir, d);
-        } else if (CM2Cache::s_processorFeatures & 4) {
+        } else if (CM2Cache::s_processorFeatures & OS_PROCESSOR_FEATURE_SSE) {
             this->TransformHitTestVerticesBlendSSE(model, skinData, section, pass, dir, d);
         } else {
             this->TransformHitTestVerticesBlend(model, skinData, section, pass, dir, d);
         }
 
         const uint16_t* indices = &skinData->m_indices[section->m_indexStart];
-        best = this->IntersectHitTestTriangles(indices, indices + section->m_indexCount, section->m_vertexStart, start, pass, rec, t, best);
+        best = this->IntersectHitTestTriangles(indices, indices + section->m_indexCount, section->vertexStart, start, pass, rec, t, best);
     }
 
     return best;
@@ -696,6 +705,8 @@ M2HitRec* CM2Scene::HitTestCollision(const CM2Model* model, uint32_t pass, const
 // VERIFY: eaeb7d7b manual
 // OFFSET: 0x0081DF10
 void* CM2Scene::EndHitTest(const C3Vector& start, const C3Vector& end, float& t, int32_t twoPass) {
+    STORM_ASSERT(IsHitTesting());
+
     C3Vector dir(0.0f, 0.0f, 0.0f);
     float length;
 
@@ -721,14 +732,14 @@ void* CM2Scene::EndHitTest(const C3Vector& start, const C3Vector& end, float& t,
             M2HitRec* rec = &this->m_hitRecs[this->m_hitOrder[i]];
 
             if (pass) {
-                if (best && (best->m_priority > rec->m_priority || (best->m_priority == rec->m_priority && tMax <= rec->m_tNear))) {
+                if (best && (best->m_priority > rec->m_priority || (best->m_priority == rec->m_priority && tMax <= rec->m_interval.m_l))) {
                     continue;
                 }
-            } else if (tMax <= rec->m_tNear) {
+            } else if (tMax <= rec->m_interval.m_l) {
                 break;
             }
 
-            if (rec->m_model->m_hitTestMode == 3) {
+            if (rec->m_model->m_hitTestMode == CM2Model::HIT_TEST_COLLISION) {
                 best = this->HitTestCollision(rec->m_model, pass, dir, d, start, rec, tMax, best);
             } else {
                 best = this->HitTestGeometry(rec->m_model, pass, dir, d, start, rec, tMax, best);
@@ -742,7 +753,8 @@ void* CM2Scene::EndHitTest(const C3Vector& start, const C3Vector& end, float& t,
         tMax = length;
     }
 
-    this->m_flags &= ~2u;
+    STORM_ASSERT(!m_hitList);
+    this->m_flags &= ~CM2Scene::SCENE_FLAGS::HIT_TEST_ACTIVE;
 
     if (!best) {
         return nullptr;
@@ -768,6 +780,8 @@ void* CM2Scene::EndHitTest(const C3Vector& start, const C3Vector& end, float& t,
 // VERIFY: 9a48c159 manual
 // OFFSET: 0x0081E110
 void* CM2Scene::EndHitTestCollisionWorld(const C3Vector& start, const C3Vector& end, float& t) {
+    STORM_ASSERT(IsHitTesting());
+
     C3Vector dir(0.0f, 0.0f, 0.0f);
     float length;
 
@@ -796,14 +810,14 @@ void* CM2Scene::EndHitTestCollisionWorld(const C3Vector& start, const C3Vector& 
     for (uint32_t i = 0; i < count; i++) {
         M2HitRec* rec = &this->m_hitRecs[this->m_hitOrder[i]];
 
-        if (tMax <= rec->m_tNear) {
+        if (tMax <= rec->m_interval.m_l) {
             break;
         }
 
         CM2Model* model = rec->m_model;
         M2Data* data = model->m_shared->m_data;
 
-        if (model->m_hitTestMode != 3) {
+        if (model->m_hitTestMode != CM2Model::HIT_TEST_COLLISION) {
             continue;
         }
 
@@ -838,7 +852,8 @@ void* CM2Scene::EndHitTestCollisionWorld(const C3Vector& start, const C3Vector& 
         }
     }
 
-    this->m_flags &= ~2u;
+    STORM_ASSERT(!m_hitList);
+    this->m_flags &= ~CM2Scene::SCENE_FLAGS::HIT_TEST_ACTIVE;
 
     if (!best) {
         return nullptr;
@@ -898,8 +913,7 @@ void CM2Scene::SelectLights(CM2Lighting* lighting) {
 void CM2Scene::SetProjectPositionCallback(int32_t (*callback)(const C3Vector&, float&, void*), void* param) {
     this->m_projectPositionCallback = callback;
     this->m_projectPositionParam = param;
-    ParticleSystemManager::sm_projectCallback = callback;
-    ParticleSystemManager::sm_projectParam = param;
+    ParticleSystemManager::SetProjectCallback(callback, param);
 }
 
 // VERIFY: 00778290 manual
@@ -1041,7 +1055,7 @@ int32_t CM2Scene::SortOpaqueGeoBatches(M2Element* a, M2Element* b) {
     M2Data* dataB = b->m_model->m_shared->m_data;
     M2Batch* batchB = b->m_batch;
 
-    if (a->m_type == 0) {
+    if (a->m_type == M2_ELEMENT_BATCH) {
         if (batchA->m_materialLayer < batchB->m_materialLayer) {
             return -1;
         }
@@ -1051,10 +1065,10 @@ int32_t CM2Scene::SortOpaqueGeoBatches(M2Element* a, M2Element* b) {
         }
 
         if (a->m_effect && b->m_effect) {
-            CGxShader* vertexA = a->m_effect->m_vertexShaders[a->m_vertexPermute];
-            CGxShader* pixelA = a->m_effect->m_pixelShaders[a->m_pixelPermute];
-            CGxShader* vertexB = b->m_effect->m_vertexShaders[b->m_vertexPermute];
-            CGxShader* pixelB = b->m_effect->m_pixelShaders[b->m_pixelPermute];
+            CGxShader* vertexA = a->m_effect->GetVertexShader(a->m_vertexPermute);
+            CGxShader* pixelA = a->m_effect->GetPixelShader(a->m_pixelPermute);
+            CGxShader* vertexB = b->m_effect->GetVertexShader(b->m_vertexPermute);
+            CGxShader* pixelB = b->m_effect->GetPixelShader(b->m_pixelPermute);
 
             if (vertexA < vertexB) {
                 return -1;
@@ -1081,8 +1095,8 @@ int32_t CM2Scene::SortOpaqueGeoBatches(M2Element* a, M2Element* b) {
             return 1;
         }
 
-        int32_t optimizedA = a->m_flags & 4;
-        int32_t optimizedB = b->m_flags & 4;
+        int32_t optimizedA = a->m_flags & M2Element::FLAGS::OPTIMIZED;
+        int32_t optimizedB = b->m_flags & M2Element::FLAGS::OPTIMIZED;
 
         if (optimizedA < optimizedB) {
             return -1;
@@ -1120,8 +1134,8 @@ int32_t CM2Scene::SortOpaqueGeoBatches(M2Element* a, M2Element* b) {
         return 1;
     }
 
-    uint32_t flagsA = materialA->m_flags & 0x1F;
-    uint32_t flagsB = materialB->m_flags & 0x1F;
+    uint32_t flagsA = materialA->m_flags & M2Material::FLAGS::RENDER_STATE_MASK;
+    uint32_t flagsB = materialB->m_flags & M2Material::FLAGS::RENDER_STATE_MASK;
 
     if (flagsA < flagsB) {
         return -1;
@@ -1202,11 +1216,14 @@ int32_t CM2Scene::SortOpaqueRibbons(M2Element* a, M2Element* b) {
 
 // VERIFY: b3646c2c manual
 // OFFSET: 0x0081EDF0
-int32_t CM2Scene::SortOpaqueParticles(M2Element* a, M2Element* b) {
-    CParticleEmitter2* emitterA = a->m_emitter;
-    CParticleEmitter2* emitterB = b->m_emitter;
-    int32_t blendA = emitterA->m_params.m_materialBlend;
-    int32_t blendB = emitterB->m_params.m_materialBlend;
+int32_t CM2Scene::SortOpaqueParticles(M2Element* A, M2Element* B) {
+    STORM_ASSERT(!A->emitter->IsModelEmitter());
+    STORM_ASSERT(!B->emitter->IsModelEmitter());
+
+    CParticleEmitter2* emitterA = A->emitter;
+    CParticleEmitter2* emitterB = B->emitter;
+    int32_t blendA = emitterA->m_particle.m_material.m_blendMode;
+    int32_t blendB = emitterB->m_particle.m_material.m_blendMode;
 
     if (blendA < blendB) {
         return -1;
@@ -1216,8 +1233,8 @@ int32_t CM2Scene::SortOpaqueParticles(M2Element* a, M2Element* b) {
         return 1;
     }
 
-    uint32_t flagsA = ParticleFlagsToM2Flags(emitterA->m_params.m_materialFlags);
-    uint32_t flagsB = ParticleFlagsToM2Flags(emitterB->m_params.m_materialFlags);
+    uint32_t flagsA = ParticleFlagsToM2Flags(emitterA->m_particle.m_material.m_flags);
+    uint32_t flagsB = ParticleFlagsToM2Flags(emitterB->m_particle.m_material.m_flags);
 
     if (flagsA < flagsB) {
         return -1;
@@ -1246,12 +1263,12 @@ int32_t CM2Scene::SortOpaque(uint32_t a, uint32_t b, const void* param) {
     }
 
     switch (elementA->m_type) {
-        case 0:
-        case 1:
+        case M2_ELEMENT_BATCH:
+        case M2_ELEMENT_PROJECTED_BATCH:
             return CM2Scene::SortOpaqueGeoBatches(elementA, elementB);
-        case 3:
+        case M2_ELEMENT_RIBBON:
             return CM2Scene::SortOpaqueRibbons(elementA, elementB);
-        case 4:
+        case M2_ELEMENT_PARTICLE:
             return CM2Scene::SortOpaqueParticles(elementA, elementB);
         default:
             return 0;
@@ -1273,8 +1290,8 @@ int32_t CM2Scene::SortTransparent(uint32_t a, uint32_t b, const void* param) {
         return 1;
     }
 
-    uint32_t splitB = elementB->m_flags & 1;
-    uint32_t splitA = elementA->m_flags & 1;
+    uint32_t splitB = elementB->m_flags & M2Element::FLAGS::DEPTH_ONLY;
+    uint32_t splitA = elementA->m_flags & M2Element::FLAGS::DEPTH_ONLY;
 
     if (splitA > splitB) {
         return -1;
@@ -1300,13 +1317,13 @@ int32_t CM2Scene::SortTransparent(uint32_t a, uint32_t b, const void* param) {
         return 1;
     }
 
-    uint32_t shaderSort = CM2Scene::s_optFlags & 0x4000;
+    uint32_t shaderSort = CM2Scene::s_optFlags & CM2Cache::CACHE_FLAGS::CACHE_OPT_SHADER_SORT;
 
     if (shaderSort && (elementA->m_type != elementB->m_type || elementA->m_model != elementB->m_model) && elementA->m_effect && elementB->m_effect) {
-        CGxShader* vertexA = elementA->m_effect->m_vertexShaders[elementA->m_vertexPermute];
-        CGxShader* vertexB = elementB->m_effect->m_vertexShaders[elementB->m_vertexPermute];
-        CGxShader* pixelA = elementA->m_effect->m_pixelShaders[elementA->m_pixelPermute];
-        CGxShader* pixelB = elementB->m_effect->m_pixelShaders[elementB->m_pixelPermute];
+        CGxShader* vertexA = elementA->m_effect->GetVertexShader(elementA->m_vertexPermute);
+        CGxShader* vertexB = elementB->m_effect->GetVertexShader(elementB->m_vertexPermute);
+        CGxShader* pixelA = elementA->m_effect->GetPixelShader(elementA->m_pixelPermute);
+        CGxShader* pixelB = elementB->m_effect->GetPixelShader(elementB->m_pixelPermute);
 
         if (vertexA < vertexB) {
             return -1;
@@ -1324,7 +1341,7 @@ int32_t CM2Scene::SortTransparent(uint32_t a, uint32_t b, const void* param) {
             return 1;
         }
 
-        shaderSort = CM2Scene::s_optFlags & 0x4000;
+        shaderSort = CM2Scene::s_optFlags & CM2Cache::CACHE_FLAGS::CACHE_OPT_SHADER_SORT;
     }
 
     if (elementA->m_model < elementB->m_model) {
@@ -1343,7 +1360,7 @@ int32_t CM2Scene::SortTransparent(uint32_t a, uint32_t b, const void* param) {
         return 1;
     }
 
-    if (elementA->m_type <= 2) {
+    if (elementA->m_type <= M2_ELEMENT_DOODAD_BATCH) {
         if (elementA->m_batch->m_materialLayer < elementB->m_batch->m_materialLayer) {
             return -1;
         }
@@ -1357,10 +1374,10 @@ int32_t CM2Scene::SortTransparent(uint32_t a, uint32_t b, const void* param) {
         return CM2Scene::SortOpaque(a, b, param);
     }
 
-    CGxShader* vertexA = elementA->m_effect->m_vertexShaders[elementA->m_vertexPermute];
-    CGxShader* vertexB = elementB->m_effect->m_vertexShaders[elementB->m_vertexPermute];
-    CGxShader* pixelA = elementA->m_effect->m_pixelShaders[elementA->m_pixelPermute];
-    CGxShader* pixelB = elementB->m_effect->m_pixelShaders[elementB->m_pixelPermute];
+    CGxShader* vertexA = elementA->m_effect->GetVertexShader(elementA->m_vertexPermute);
+    CGxShader* vertexB = elementB->m_effect->GetVertexShader(elementB->m_vertexPermute);
+    CGxShader* pixelA = elementA->m_effect->GetPixelShader(elementA->m_pixelPermute);
+    CGxShader* pixelB = elementB->m_effect->GetPixelShader(elementB->m_pixelPermute);
 
     if (vertexA < vertexB) {
         return -1;
@@ -1396,7 +1413,7 @@ int32_t CM2Scene::SortAdditiveParticles(uint32_t a, uint32_t b, const void* para
         return -1;
     }
 
-    if (elementA->m_type == 4 || elementB->m_type == 4) {
+    if (elementA->m_type == M2_ELEMENT_PARTICLE || elementB->m_type == M2_ELEMENT_PARTICLE) {
         if (elementA->m_type > elementB->m_type) {
             return -1;
         }
@@ -1406,14 +1423,14 @@ int32_t CM2Scene::SortAdditiveParticles(uint32_t a, uint32_t b, const void* para
         }
     }
 
-    if (elementA->m_type != 4) {
+    if (elementA->m_type != M2_ELEMENT_PARTICLE) {
         return CM2Scene::SortTransparent(a, b, param);
     }
 
-    CParticleEmitter2* emitterA = elementA->m_emitter;
-    CParticleEmitter2* emitterB = elementB->m_emitter;
-    int32_t blendA = emitterA->m_params.m_materialBlend;
-    int32_t blendB = emitterB->m_params.m_materialBlend;
+    CParticleEmitter2* emitterA = elementA->emitter;
+    CParticleEmitter2* emitterB = elementB->emitter;
+    int32_t blendA = emitterA->m_particle.m_material.m_blendMode;
+    int32_t blendB = emitterB->m_particle.m_material.m_blendMode;
 
     if (blendA < blendB) {
         return -1;
@@ -1423,8 +1440,8 @@ int32_t CM2Scene::SortAdditiveParticles(uint32_t a, uint32_t b, const void* para
         return 1;
     }
 
-    uint32_t flagsA = ParticleFlagsToM2Flags(emitterA->m_params.m_materialFlags);
-    uint32_t flagsB = ParticleFlagsToM2Flags(emitterB->m_params.m_materialFlags);
+    uint32_t flagsA = ParticleFlagsToM2Flags(emitterA->m_particle.m_material.m_flags);
+    uint32_t flagsB = ParticleFlagsToM2Flags(emitterB->m_particle.m_material.m_flags);
 
     if (flagsA < flagsB) {
         return -1;
@@ -1446,11 +1463,11 @@ void __stdcall CM2Scene::ComputeElementShaders(M2Element* element) {
     uint32_t lightCount;
     uint32_t shadow;
 
-    if ((material->m_flags & 1) || s_localLighting[material->m_blendMode] == (material->m_flags & 1u)) {
+    if ((material->m_flags & M2Material::FLAGS::UNLIT) || s_localLighting[material->m_blendMode] == (material->m_flags & M2Material::FLAGS::UNLIT)) {
         shadow = 0;
         specular = 0;
 
-        if (material->m_flags & 1) {
+        if (material->m_flags & M2Material::FLAGS::UNLIT) {
             lightCount = 0;
         } else {
             lightCount = lighting->m_lightCount;
@@ -1461,7 +1478,7 @@ void __stdcall CM2Scene::ComputeElementShaders(M2Element* element) {
         shadow = 0;
     }
 
-    uint32_t boneInfluences = element->m_skinSection->m_boneInfluences;
+    uint32_t boneInfluences = element->m_skinSection->boneInfluences;
     int32_t alphaTest;
 
     if (material->m_blendMode == M2BLEND_OPAQUE) {
@@ -1472,18 +1489,18 @@ void __stdcall CM2Scene::ComputeElementShaders(M2Element* element) {
         alphaTest = 1;
     }
 
-    if (!(material->m_flags & 1) && (lighting->m_flags & 0x10)) {
-        if (material->m_flags & 0x100) {
+    if (!(material->m_flags & M2Material::FLAGS::UNLIT) && (lighting->m_flags & CM2Lighting::SHADOW_MAP_ALLOWED)) {
+        if (material->m_flags & M2Material::FLAGS::NO_SHADOW_RECEIVE) {
             shadow = 0;
         } else {
             shadow = CShadowCache::GetShadowValue();
 
             if (shadow) {
-                if (lighting->m_flags & 8) {
+                if (lighting->m_flags & CM2Lighting::INTERIOR) {
                     shadow = 1;
                 }
 
-                if (element->m_type == 1) {
+                if (element->m_type == M2_ELEMENT_PROJECTED_BATCH) {
                     shadow = 0;
                 }
             }
@@ -1522,6 +1539,7 @@ CM2Model* CM2Scene::CreateModel(const char* fileName, uint32_t flags) {
     CM2Model* model = nullptr;
 
     if (shared) {
+        STORM_ASSERT(g_modelPool);
         model = g_modelPool->New();
 
         if (model && !model->Initialize(this, shared, nullptr, flags)) {
@@ -1542,6 +1560,7 @@ CM2Model* CM2Scene::DuplicateModel(CM2Model* source, uint32_t flags) {
         return nullptr;
     }
 
+    STORM_ASSERT(g_modelPool);
     CM2Model* model = g_modelPool->New();
 
     if (model && !model->Initialize(this, source->m_shared, source, flags)) {
@@ -1567,17 +1586,20 @@ void CM2Scene::SortAdditiveParticleElements(uint32_t pass) {
         uint32_t blend = M2BLEND_OPAQUE;
 
         switch (element->m_type) {
-            case 0:
-            case 1:
-            case 2:
+            case M2_ELEMENT_BATCH:
+            case M2_ELEMENT_PROJECTED_BATCH:
+            case M2_ELEMENT_DOODAD_BATCH:
                 blend = data->m_materials[element->m_batch->m_materialIndex].m_blendMode;
                 break;
-            case 3:
+            case M2_ELEMENT_RIBBON:
                 blend = data->m_materials[data->m_ribbons[element->m_index].m_materialIndices[0]].m_blendMode;
                 break;
-            case 4:
-                blend = (this->m_cache->m_flags & 0x100) ? M2BLEND_ADD : ParticleBlendToM2Blend(element->m_emitter->m_params.m_materialBlend);
+            case M2_ELEMENT_PARTICLE: {
+                CParticleEmitter2* emitter = element->emitter;
+                STORM_ASSERT(!emitter->IsModelEmitter());
+                blend = (this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_FORCE_ADDITIVE_PARTICLE_SORT) ? M2BLEND_ADD : ParticleBlendToM2Blend(emitter->m_particle.m_material.m_blendMode);
                 break;
+            }
             default:
                 break;
         }
@@ -1605,7 +1627,7 @@ CM2Scene::CM2Scene(CM2Cache* cache) {
     this->m_modelList = nullptr;
     this->m_time = 0;
     this->m_frameStamp = 0;
-    this->m_flags = 0;
+    this->m_flags = CM2Scene::SCENE_FLAGS::NONE;
     this->m_lightList = nullptr;
     this->m_lightGrid = nullptr;
     this->m_animateList = nullptr;
@@ -1613,7 +1635,7 @@ CM2Scene::CM2Scene(CM2Cache* cache) {
     this->m_particleList = nullptr;
     this->m_projectTextureCallback = nullptr;
     this->m_projectPositionCallback = nullptr;
-    this->m_hitTestList = nullptr;
+    this->m_hitList = nullptr;
     this->m_hitRecs = nullptr;
     this->m_hitOrder = nullptr;
     this->m_hitCapacity = 0;
@@ -1641,7 +1663,7 @@ CM2Scene::~CM2Scene() {
 // VERIFY: 7bb79c57 manual
 // OFFSET: 0x00821930
 M2Element* CM2Scene::AddParticleElement(CParticleEmitter2* emitter, CM2Model* model, float depth, float alpha, int32_t split, uint32_t& index, uint32_t& additiveCount) {
-    if (!emitter->HasLiveParticles() || emitter->m_params.m_hasModel == CParticleEmitter2::PT_MODEL) {
+    if (!emitter->HasLiveParticles() || emitter->m_particle.m_particleType == CParticleEmitter2::PARTICLE_TYPE::PT_MODEL) {
         return nullptr;
     }
 
@@ -1653,9 +1675,9 @@ M2Element* CM2Scene::AddParticleElement(CParticleEmitter2* emitter, CM2Model* mo
 
     element->m_alpha = alpha;
     element->m_model = model;
-    element->m_type = 4;
-    element->m_flags = 0;
-    element->m_emitter = emitter;
+    element->m_type = M2_ELEMENT_PARTICLE;
+    element->m_flags = M2Element::FLAGS::NONE;
+    element->emitter = emitter;
     element->m_priorityPlane = emitter->m_priorityPlane;
     element->m_sortDepth = model->m_scaleSq;
     element->m_effect = nullptr;
@@ -1664,14 +1686,14 @@ M2Element* CM2Scene::AddParticleElement(CParticleEmitter2* emitter, CM2Model* mo
     element->m_pixelPermute = 0xFFFFFFFF;
     element->m_shadowValue = 0;
 
-    int32_t blend = emitter->m_params.m_materialBlend;
+    int32_t blend = emitter->m_particle.m_material.m_blendMode;
 
     if (blend == 10 || blend == 3) {
         additiveCount++;
     }
 
-    if (blend > 1 || alpha < 0.99998999f) {
-        TSGrowableArray<uint32_t>* list = (!split || (emitter->m_flags & 0x40000)) ? &this->m_passElements[2] : &this->m_passElements[1];
+    if (blend > 1 || alpha < 0.99999f) {
+        TSGrowableArray<uint32_t>* list = (!split || (emitter->m_flags & CParticleEmitter2::RUNTIME_FLAGS::PROJECT)) ? &this->m_passElements[2] : &this->m_passElements[1];
         list->New(index);
     } else {
         this->m_passElements[0].New(index);
@@ -1687,7 +1709,7 @@ M2Element* CM2Scene::AddParticleElement(CParticleEmitter2* emitter, CM2Model* mo
 int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
     this->m_frameStamp++;
 
-    uint32_t optFlags = this->m_cache->m_flags & 0xE000;
+    uint32_t optFlags = this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_OPT_TIER3_MASK;
 
     if (CM2Scene::s_optFlags != optFlags) {
         CM2Scene::s_optFlags = optFlags;
@@ -1699,12 +1721,12 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
     this->m_view.Translate(move);
     this->m_viewInv = this->m_view.Inverse(this->m_view.Determinant());
 
-    if (this->m_cache->m_flags & 4) {
+    if (this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_ANIMATION_THREADS) {
         this->m_cache->BeginThread(&CM2Scene::AnimateThread, this);
 
         for (CM2Model* model = this->m_animateList; model; ) {
             if (!model->m_attachParent) {
-                if (model->m_fFlags & 0x1000) {
+                if (model->m_runtimeFlags & M2_FLAGS::M2_STATIC_SINGLE_BONE_OPTIMIZED) {
                     model->AnimateMTSimple(&this->m_view, C3Vector(1.0f, 1.0f, 1.0f), C3Vector(0.0f, 0.0f, 0.0f), 1.0f, 1.0f);
                 } else {
                     model->AnimateMT(&this->m_view, C3Vector(1.0f, 1.0f, 1.0f), C3Vector(0.0f, 0.0f, 0.0f), 1.0f, 1.0f);
@@ -1727,7 +1749,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
                 continue;
             }
 
-            if (model->m_fFlags & 0x1000) {
+            if (model->m_runtimeFlags & M2_FLAGS::M2_STATIC_SINGLE_BONE_OPTIMIZED) {
                 model->AnimateMTSimple(&this->m_view, C3Vector(1.0f, 1.0f, 1.0f), C3Vector(0.0f, 0.0f, 0.0f), 1.0f, 1.0f);
             } else {
                 model->AnimateMT(&this->m_view, C3Vector(1.0f, 1.0f, 1.0f), C3Vector(0.0f, 0.0f, 0.0f), 1.0f, 1.0f);
@@ -1762,18 +1784,24 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
     while (this->m_drawList) {
         CM2Model* model = this->m_drawList;
         this->m_drawList = model->m_drawNext;
-        model->m_fFlags &= ~0x10008u;
+        model->m_runtimeFlags &= ~M2_FLAGS::M2_DRAW_AND_PARTICLES_MASK;
         model->m_drawPrev = nullptr;
         model->m_drawNext = nullptr;
 
-        if (!model->IsDrawable(0, 0) || (model->m_fFlags & 0x4000)) {
+        if (!model->IsDrawable(0, 0) || (model->m_runtimeFlags & M2_FLAGS::M2_UNKNOWN_4000)) {
             continue;
         }
 
+#ifdef WOWDECOMP_DEBUG_FEATURES
+        // Debug feature: model bounds and collision displays (CM2Model::ShowBoundingSphere / ShowBoundingBox /
+        // ShowCollision / ShowCollisionAaBox), queued once per frame for each model that draws.
+        model->DebugDraw(this->m_viewInv);
+#endif
+
         CM2Lighting* lighting = model->m_currentLighting;
         M2Data* data = model->m_shared->m_data;
-        int32_t above = lighting->m_flags & 0x20;
-        int32_t below = lighting->m_flags & 0x40;
+        int32_t above = lighting->m_flags & CM2Lighting::ABOVE_LIQUID;
+        int32_t below = lighting->m_flags & CM2Lighting::BELOW_LIQUID;
 
         if (above && below) {
             C3Vector center((data->m_bounds.m_extent.b.x + data->m_bounds.m_extent.t.x) * 0.5f, (data->m_bounds.m_extent.t.y + data->m_bounds.m_extent.b.y) * 0.5f, 0.5f * (data->m_bounds.m_extent.t.z + data->m_bounds.m_extent.b.z));
@@ -1791,7 +1819,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
             below = radius >= dist;
 
-            if (!(this->m_cache->m_flags & 2) && above && radius >= dist) {
+            if (!(this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_CLIP_PLANES) && above && radius >= dist) {
                 below = this->m_liquidTypeId != 0;
                 above = this->m_liquidTypeId == 0;
             }
@@ -1800,7 +1828,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
         M2ModelOptGeo* optGeo = model->m_optGeo;
         M2SkinProfile* skinData = model->m_shared->m_skinData;
         int32_t optimized = optGeo != nullptr;
-        int32_t depthSort = (this->m_cache->m_flags & 1) && !(model->m_flags & 1) && (model->m_fFlags & 0x40);
+        int32_t depthSort = (this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_Z_FILL) && !(model->m_creationFlags & CM2Model::INSTANCE_FLAGS::INSTANCE_DISABLE_DEPTH_SORT_AND_CHILD_INHERITANCE) && (model->m_runtimeFlags & M2_FLAGS::M2_DEPTH_SORT_ALLOWED);
         uint32_t batchCount = optGeo ? optGeo->m_batchCount : skinData->m_batches.m_count;
 
         for (uint32_t i = 0; i < batchCount; i++) {
@@ -1819,7 +1847,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
                 }
             }
 
-            if (batch->m_shader == 0x8000) {
+            if (batch->m_shader == M2Batch::SHADER_ID::SPECIAL_COMBINED) {
                 continue;
             }
 
@@ -1833,14 +1861,14 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
                 alpha *= model->m_textureWeights[data->m_textureWeightCombos[batch->m_textureWeightComboIndex]].m_currentValue;
             }
 
-            if (alpha < 0.000099999997f) {
+            if (alpha < 0.0001f) {
                 continue;
             }
 
             M2Material* material = &data->m_materials[batch->m_materialIndex];
-            int32_t projected = (batch->m_flags & 4) && this->m_projectTextureCallback;
+            BOOL projected = (batch->m_flags & M2Batch::FLAGS::PROJECTED_TEXTURE) && this->m_projectTextureCallback;
             M2Material* baseMaterial = batch->m_materialLayer ? &data->m_materials[batch->m_materialIndex - batch->m_materialLayer] : material;
-            int32_t transparent = baseMaterial->m_blendMode > M2BLEND_ALPHA_KEY || alpha < 0.99998999f;
+            int32_t transparent = baseMaterial->m_blendMode > M2BLEND_ALPHA_KEY || alpha < 0.99999f;
             CShaderEffect* effect = optimized ? model->m_optGeo->m_effects[i] : model->m_shared->m_effects[i];
 
             if (!effect) {
@@ -1854,22 +1882,22 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
             }
 
             if (projected) {
-                element->m_type = 1;
+                element->m_type = M2_ELEMENT_PROJECTED_BATCH;
             } else if (!model->IsBatchDoodadCompatible(batch) || transparent) {
-                element->m_type = 0;
+                element->m_type = M2_ELEMENT_BATCH;
             } else {
-                element->m_type = 2;
+                element->m_type = M2_ELEMENT_DOODAD_BATCH;
             }
 
             element->m_model = model;
-            element->m_flags = 0;
+            element->m_flags = M2Element::FLAGS::NONE;
 
             if (transparent == 1 && above && below && !projected) {
-                element->m_flags = 2;
+                element->m_flags = M2Element::FLAGS::LIQUID_CLIP;
             }
 
             if (optimized) {
-                element->m_flags |= 4;
+                element->m_flags |= M2Element::FLAGS::OPTIMIZED;
             }
 
             element->m_alpha = alpha;
@@ -1885,7 +1913,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
             if (transparent < 1) {
                 element->m_depth = model->m_scaleSq;
                 sortDepth = model->m_scaleSq;
-            } else if (data->m_flags & 0x10) {
+            } else if (data->m_flags & M2Data::FLAGS::SORT_BY_DISTANCE) {
                 C3Vector position = section->m_sortCenterPosition * model->m_boneMatrices[section->m_centerBoneIndex];
                 element->m_depth = position.z * position.z + position.y * position.y + position.x * position.x;
                 sortDepth = model->m_scaleSq;
@@ -1893,7 +1921,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
                 const C44Matrix& bone = model->m_boneMatrices[section->m_centerBoneIndex];
                 float depth;
 
-                if (batch->m_flags & 3) {
+                if (batch->m_flags & M2Batch::FLAGS::SURFACE_SORT_MASK) {
                     C3Vector position = section->m_sortCenterPosition * bone;
                     C3Vector normal = position;
                     float lengthSq = position.x * position.x + position.z * position.z + position.y * position.y;
@@ -1907,7 +1935,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
                     float radius = sqrtf(bone.a2 * bone.a2 + bone.a1 * bone.a1 + bone.a0 * bone.a0) * section->m_sortRadius;
 
-                    if (batch->m_flags & 1) {
+                    if (batch->m_flags & M2Batch::FLAGS::SORT_NEAR_SURFACE) {
                         position.x = position.x - normal.x * radius;
                         position.y = position.y - normal.y * radius;
                         position.z = position.z - normal.z * radius;
@@ -1929,7 +1957,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
                 element->m_depth = depth;
 
-                if (!depthSort || projected || (material->m_flags & 0x10)) {
+                if (!depthSort || projected || (material->m_flags & M2Material::FLAGS::NO_DEPTH_WRITE)) {
                     sortDepth = element->m_depth;
                 } else {
                     sortDepth = model->m_scaleSq;
@@ -1938,7 +1966,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
             element->m_sortDepth = sortDepth;
 
-            if (element->m_type == 2) {
+            if (element->m_type == M2_ELEMENT_DOODAD_BATCH) {
                 this->m_doodadElements.New(elementIndex);
             } else if (transparent == 1) {
                 if (projected) {
@@ -1962,7 +1990,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
             elementIndex++;
 
-            if (depthSort && !projected && transparent >= 1 && !(material->m_flags & 0x10)) {
+            if (depthSort && !projected && transparent >= 1 && !(material->m_flags & M2Material::FLAGS::NO_DEPTH_WRITE)) {
                 element->m_depth = FLT_MAX;
 
                 M2Element* copy = this->m_elements.New();
@@ -1972,7 +2000,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
                 }
 
                 *copy = this->m_elements.m_data[elementIndex - 1];
-                copy->m_flags |= 1;
+                copy->m_flags |= M2Element::FLAGS::DEPTH_ONLY;
 
                 if (above) {
                     this->m_passElements[1].New(elementIndex);
@@ -2007,9 +2035,9 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
             element->m_alpha = alpha;
             element->m_index = i;
-            element->m_type = 3;
+            element->m_type = M2_ELEMENT_RIBBON;
             element->m_model = model;
-            element->m_flags = 0;
+            element->m_flags = M2Element::FLAGS::NONE;
             element->m_priorityPlane = ribbon->m_priorityPlane;
             element->m_sortDepth = model->m_scaleSq;
             element->m_effect = nullptr;
@@ -2018,7 +2046,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
             element->m_pixelPermute = 0xFFFFFFFF;
             element->m_shadowValue = 0;
 
-            if (material->m_blendMode > M2BLEND_ALPHA_KEY || alpha < 0.99998999f) {
+            if (material->m_blendMode > M2BLEND_ALPHA_KEY || alpha < 0.99999f) {
                 if (above) {
                     this->m_passElements[1].New(elementIndex);
                 } else {
@@ -2035,10 +2063,10 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
             M2Element* element = this->m_elements.New();
 
             if (element) {
-                element->m_type = 5;
+                element->m_type = M2_ELEMENT_CALLBACK;
                 element->m_alpha = 1.0f;
                 element->m_model = model;
-                element->m_flags = 0;
+                element->m_flags = M2Element::FLAGS::NONE;
                 element->m_index = 0;
                 element->m_priorityPlane = 0;
                 element->m_sortDepth = model->m_scaleSq;
@@ -2048,7 +2076,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
                 element->m_pixelPermute = 0xFFFFFFFF;
                 element->m_shadowValue = 0;
 
-                if (model->m_fFlags & 0x20) {
+                if (model->m_runtimeFlags & M2_FLAGS::M2_UNKNOWN_20) {
                     this->m_passElements[0].New(elementIndex);
                 } else if (above) {
                     this->m_passElements[1].New(elementIndex);
@@ -2075,9 +2103,9 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
         CM2Lighting* lighting = model->m_currentLighting;
         M2Data* data = model->m_shared->m_data;
-        int32_t split = lighting->m_flags & 0x20;
+        int32_t split = lighting->m_flags & CM2Lighting::ABOVE_LIQUID;
 
-        if ((lighting->m_flags & 0x20) && (lighting->m_flags & 0x40)) {
+        if ((lighting->m_flags & CM2Lighting::ABOVE_LIQUID) && (lighting->m_flags & CM2Lighting::BELOW_LIQUID)) {
             C3Vector center((data->m_bounds.m_extent.t.x + data->m_bounds.m_extent.b.x) * 0.5f, (data->m_bounds.m_extent.t.y + data->m_bounds.m_extent.b.y) * 0.5f, 0.5f * (data->m_bounds.m_extent.t.z + data->m_bounds.m_extent.b.z));
             const C44Matrix& matrix = model->m_matrixF4;
             float radius = sqrtf(matrix.a2 * matrix.a2 + matrix.a1 * matrix.a1 + matrix.a0 * matrix.a0) * data->m_bounds.m_radius;
@@ -2089,11 +2117,11 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
         for (uint32_t i = 0; i < data->m_particles.m_count; i++) {
             CParticleEmitter2* emitter = model->m_particleEmitters[i];
 
-            if ((model->m_fFlags & 0x2000) && (emitter->m_flags & 0x200)) {
+            if ((model->m_runtimeFlags & M2_FLAGS::M2_CULLED) && (emitter->m_flags & CParticleEmitter2::RUNTIME_FLAGS::LOCAL_SPACE)) {
                 continue;
             }
 
-            if (emitter->m_flags & 0x2000000) {
+            if (emitter->m_flags & CParticleEmitter2::RUNTIME_FLAGS::UNKNOWN_02000000) {
                 continue;
             }
 
@@ -2103,7 +2131,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
             float alpha = model->m_effectiveAlpha;
 
-            if (alpha < 0.000099999997f) {
+            if (alpha < 0.0001f) {
                 continue;
             }
 
@@ -2113,8 +2141,8 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
             this->AddParticleElement(emitter, model, depth, alpha, split, elementIndex, additiveCount);
 
-            for (uint32_t j = 0; j < emitter->m_childEmitterCount; j++) {
-                this->AddParticleElement(emitter->m_childEmitters[j], model, depth, alpha, split, elementIndex, additiveCount);
+            for (uint32_t j = 0; j < emitter->GetChildEmitterCount(); j++) {
+                this->AddParticleElement(emitter->GetChildEmitter(j), model, depth, alpha, split, elementIndex, additiveCount);
             }
         }
     }
@@ -2177,7 +2205,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
         }
 
         if (j - i <= 1) {
-            this->m_elements.m_data[index].m_type = 0;
+            this->m_elements.m_data[index].m_type = M2_ELEMENT_BATCH;
             CM2Scene::ComputeElementShaders(&this->m_elements.m_data[index]);
             this->m_passElements[0].New(index);
             out--;
@@ -2194,7 +2222,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
     M2HeapSort(&CM2Scene::SortTransparent, this->m_passElements[1].m_data, this->m_passElements[1].m_count, this);
     M2HeapSort(&CM2Scene::SortTransparent, this->m_passElements[2].m_data, this->m_passElements[2].m_count, this);
 
-    if ((this->m_cache->m_flags & 0x80) && additiveCount > 1) {
+    if ((this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_BATCH_PARTICLES) && additiveCount > 1) {
         this->SortAdditiveParticleElements(1);
         this->SortAdditiveParticleElements(2);
     }
@@ -2205,6 +2233,8 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 // VERIFY: 651a4228 auto
 // OFFSET: 0x00823040
 void CM2Scene::Release() {
+    STORM_ASSERT((int) m_refCount > 0);
+
     if (this->m_refCount-- == 1) {
         delete this;
     }
@@ -2219,7 +2249,7 @@ void CM2Scene::Draw(M2PASS pass) {
 
     DebugLog("Model2 Pass %d", pass);
 
-    uint32_t optFlags = this->m_cache->m_flags & 0xE000;
+    uint32_t optFlags = this->m_cache->m_flags & CM2Cache::CACHE_FLAGS::CACHE_OPT_TIER3_MASK;
 
     if (CM2Scene::s_optFlags != optFlags) {
         CM2Scene::s_optFlags = optFlags;

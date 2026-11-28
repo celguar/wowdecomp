@@ -1,4 +1,6 @@
+#include "Engine/Source/Tempest/CMath.h"
 #include <cmath>
+#include "WoW/Source/Object/Types.h"
 #include <cstdint>
 #include <new>
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
@@ -56,23 +58,24 @@ float s_vehicleAimNormPower;
 // VERIFY: 13a95e59 auto
 // OFFSET: 0x005F95D0
 CGInputControl* CGInputControl::GetActive() {
+    STORM_ASSERT(s_inputControl);
     return CGInputControl::s_inputControl;
 }
 
 // VERIFY: b2b6f3af auto
 // OFFSET: 0x005F9670
 void CGInputControl::UpdateJoystickMouseMode() {
-    int32_t enable = s_joystickMouseEnabled && !s_cvCinematicJoystick->m_intValue && (this->m_joystickMouseFlags & 0x2) && (this->m_mouseModeFlags & 0x1);
+    int32_t enable = s_joystickMouseEnabled && !s_cvCinematicJoystick->m_intValue && (this->m_joystickMouseFlags & CGInputControl::JOYSTICK_MOUSE_FLAGS::JOYSTICK_MOUSE_ALLOWED) && (this->m_mouseModeFlags & INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_CURSOR_ON);
 
-    if (enable == (this->m_joystickMouseFlags & 0x1)) {
+    if (enable == (this->m_joystickMouseFlags & CGInputControl::JOYSTICK_MOUSE_FLAGS::JOYSTICK_MOUSE_ACTIVE)) {
         return;
     }
 
     if (enable) {
-        this->m_joystickMouseFlags |= 0x1;
+        this->m_joystickMouseFlags |= CGInputControl::JOYSTICK_MOUSE_FLAGS::JOYSTICK_MOUSE_ACTIVE;
         OsJoystickSetMouseMode(s_joystick, enable);
     } else {
-        this->m_joystickMouseFlags &= ~0x1;
+        this->m_joystickMouseFlags &= ~CGInputControl::JOYSTICK_MOUSE_FLAGS::JOYSTICK_MOUSE_ACTIVE;
         OsJoystickSetMouseMode(s_joystick, 0);
     }
 }
@@ -92,49 +95,57 @@ void CGInputControl::SetMouseCVarHandler(bool enable) {
 
 // VERIFY: 36bc2098 auto
 // OFFSET: 0x005FD1D0
-CGInputControl::CGInputControl() : m_flags(INPUT_NONE), m_lookStartTime(0), m_pendingDefaultAction(INPUT_RELEASE_NONE), m_facingOverrideActive(0), m_facingOverride(0.0f), m_vehicleAimValid(0), m_vehicleAim(0.0f), m_mouseModeFlags(3), m_forceCursorOn(0), m_joystickMouseFlags(3), m_joystickLookX(0.0f), m_joystickLookY(0.0f), m_wowMouse(nullptr) {
+CGInputControl::CGInputControl() : m_flags(INPUT_NONE), m_lookStartTime(0), m_pendingDefaultAction(INPUT_RELEASE_NONE), m_facingOverrideActive(0), m_facingOverride(0.0f), m_vehicleAimValid(0), m_vehicleAim(0.0f), m_mouseModeFlags(INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_INITIAL_FLAGS), m_forceCursorOn(0), m_joystickMouseFlags(CGInputControl::JOYSTICK_MOUSE_FLAGS::JOYSTICK_MOUSE_INITIAL_FLAGS), m_joystickLookX(0.0f), m_joystickLookY(0.0f), m_wowMouse(nullptr) {
     this->m_time = OsGetAsyncTimeMs();
 }
 
 // VERIFY: 67293d46 manual
 // OFFSET: 0x005FD2C0
 void InputControlInitialize() {
-    CVar::Register("Joystick", "enable joystick control", 0, "0", JoystickCallback, 5, false, nullptr, false);
-    s_cvCinematicJoystick = CVar::Register("CinematicJoystick", "enable cinematic joystick control", 0, "0", nullptr, 5, false, nullptr, false);
+    CVar::Register("Joystick", "enable joystick control", CVAR_FLAGS::CVAR_NONE, "0", JoystickCallback, 5, false, nullptr, false);
+    s_cvCinematicJoystick = CVar::Register("CinematicJoystick", "enable cinematic joystick control", CVAR_FLAGS::CVAR_NONE, "0", nullptr, 5, false, nullptr, false);
+    STORM_ASSERT(!CGInputControl::s_inputControl); // 12213: "!s_inputControl"
     CGInputControl::s_inputControl = new (SMemAlloc(sizeof(CGInputControl), __FILE__, __LINE__, 0)) CGInputControl();
-    s_cvEnableWowMouse = CVar::Register("enableWowMouse", "Enable Steelseries World of Warcraft Mouse", 1, "0", WowMouseCVarCallback, 5, false, nullptr, false);
+    s_cvEnableWowMouse = CVar::Register("enableWowMouse", "Enable Steelseries World of Warcraft Mouse", CVAR_FLAGS::CVAR_ARCHIVE, "0", WowMouseCVarCallback, 5, false, nullptr, false);
 }
 
 // VERIFY: f53f4378 auto
 // OFFSET: 0x005FA890
-void CGInputControl::UpdateMouseMode(int32_t force) {
+void CGInputControl::UpdateMouseMode(BOOL force) {
     uint32_t flags = this->m_mouseModeFlags;
     uint32_t cursorOn;
 
-    if (flags & 0x20) {
+    if (flags & INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_FORCE_CURSOR_ON) {
         cursorOn = 1;
-    } else if (flags & 0x40) {
+    } else if (flags & INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_FORCE_CURSOR_OFF) {
         cursorOn = 0;
-    } else if (s_cvCinematicJoystick->m_intValue || (flags & 0x10) || this->m_forceCursorOn) {
+    } else if (s_cvCinematicJoystick->m_intValue || (flags & INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_SPELL_TARGETING) || this->m_forceCursorOn) {
         cursorOn = 1;
     } else {
-        cursorOn = flags & 0x6;
+        cursorOn = flags & INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_CURSOR_REQUEST_MASK;
     }
 
-    if (force || cursorOn != (flags & 0x1)) {
+    if (force || cursorOn != (flags & INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_CURSOR_ON)) {
         if (cursorOn) {
-            this->m_mouseModeFlags = flags | 0x1;
+            this->m_mouseModeFlags = flags | INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_CURSOR_ON;
 
             if (!(this->m_flags & INPUT_MOUSE_LOOK_MASK)) {
                 g_theGxDevicePtr->CursorSetVisible(1);
             }
         } else {
-            this->m_mouseModeFlags = flags & ~0x1;
+            this->m_mouseModeFlags = flags & ~INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_CURSOR_ON;
             g_theGxDevicePtr->CursorSetVisible(0);
         }
     }
 
     this->UpdateJoystickMouseMode();
+}
+
+// INLINED
+MOUSELOOKBINDING::~MOUSELOOKBINDING() {
+    if (this->m_binding) {
+        SMemFree(this->m_binding, __FILE__, __LINE__, 0);
+    }
 }
 
 // INLINED
@@ -144,6 +155,7 @@ CGInputControl::~CGInputControl() {
     }
 
     this->m_wowMouse = nullptr;
+    this->m_mouseLookBindings.Clear();
 }
 
 // VERIFY: e79550cf manual
@@ -176,7 +188,7 @@ void CGInputControl::UpdateMoveStopped() {
 
 // VERIFY: 4f6c9ca3 manual
 // OFFSET: 0x005F9600
-int32_t CGInputControl::IsMouseDrag(uint32_t time) const {
+BOOL CGInputControl::IsMouseDrag(uint32_t time) const {
     uint32_t elapsed = time - this->m_lookStartTime;
 
     if (static_cast<int32_t>(elapsed - 800) >= 0) {
@@ -227,7 +239,7 @@ bool CGInputControl::DetectWowMouse() {
 
 // VERIFY: 7c49134b auto
 // OFFSET: 0x005F9830
-int32_t CGInputControl::IsMouseDragging() const {
+BOOL CGInputControl::IsMouseDragging() const {
     uint32_t flags = this->m_flags;
 
     return (flags & INPUT_TURN_PLAYER_MASK) && !(flags & INPUT_PLAYER_LOOK_MASK);
@@ -235,7 +247,7 @@ int32_t CGInputControl::IsMouseDragging() const {
 
 // VERIFY: f9f95644 manual
 // OFFSET: 0x005F9850
-int32_t CGInputControl::IsIdle() const {
+BOOL CGInputControl::IsIdle() const {
     uint32_t flags = this->m_flags;
 
     return !(flags & INPUT_MOVE_WITH_AUTORUN_MASK) && !(flags & INPUT_STRAFE_PLAYER_MASK) && (!(flags & INPUT_PLAYER_LOOK_MASK) || !(flags & INPUT_TURN_PLAYER_MASK)) && (!(flags & INPUT_TURN_PLAYER_MASK) || (flags & INPUT_PLAYER_LOOK_MASK)) && !(flags & INPUT_TRACKING_MASK);
@@ -306,7 +318,7 @@ CGUnit_C* GetVehicleUnitPtr() {
         return nullptr;
     }
 
-    if (!mover->m_vehiclePassenger || mover->m_vehiclePassenger->m_state != 3) {
+    if (!mover->m_vehiclePassenger || mover->m_vehiclePassenger->m_state != CVehiclePassenger_C::TRANSITION_STATE::STATE_RIDING) {
         return mover;
     }
 
@@ -318,7 +330,7 @@ CGUnit_C* GetVehicleUnitPtr() {
 
     VehicleSeatRec* seat = vehicle->m_vehicle->GetVehicleSeatRec(mover->m_movementData.m_transportSeat);
 
-    if (!seat || !(seat->m_flags & 0x800)) {
+    if (!seat || !(seat->m_flags & VEHICLE_SEAT_FLAGS::VEHICLE_SEAT_FLAG_CAN_CONTROL)) {
         return mover;
     }
 
@@ -327,18 +339,18 @@ CGUnit_C* GetVehicleUnitPtr() {
 
 // VERIFY: 1144f12f auto
 // OFFSET: 0x005FA060
-int32_t __stdcall CGInputControl::CanControl(CGUnit_C* unit) {
+BOOL __stdcall CGInputControl::CanControl(CGUnit_C* unit) {
     if (!unit || unit->m_unit->m_unitFieldHealth <= 0) {
         return 0;
     }
 
     CMoveSpline* spline = unit->m_movement->m_spline;
 
-    if (spline && !(spline->m_flags & 0x400)) {
+    if (spline && !(spline->flags & SPLINEFLAG_NO_SPLINE)) {
         return 0;
     }
 
-    return !unit->AnimSuppressesMovement() && (!unit->IsActivePlayer() || !(static_cast<CGPlayer_C*>(unit)->m_combatModeFlags & 0x1)) && !unit->IsAlteredFormTransitionPreventingMovement();
+    return !unit->AnimSuppressesMovement() && (!unit->IsActivePlayer() || !(static_cast<CGPlayer_C*>(unit)->m_combatModeFlags & CGPlayer_C::COMBAT_MODE_FLAGS::COMBAT_MODE_FAR_SIGHT)) && !unit->IsAlteredFormTransitionPreventingMovement();
 }
 
 // VERIFY: 44c9ffc3 manual
@@ -359,11 +371,11 @@ int32_t CGInputControl::CameraCanTurnPlayer() const {
 
         CMoveSpline* spline = mover->m_movement->m_spline;
 
-        if (spline && !(spline->m_flags & 0x400)) {
+        if (spline && !(spline->flags & SPLINEFLAG_NO_SPLINE)) {
             return 0;
         }
 
-        if ((mover->m_unit->m_unitFieldFlags & 0x40000) || mover->IsAlteredFormTransitionPreventingMovement() || mover->GetClientStandState()) {
+        if ((mover->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_STUNNED) || mover->IsAlteredFormTransitionPreventingMovement() || (mover->GetClientStandState() != UNIT_STANDING)) {
             return 0;
         }
 
@@ -372,7 +384,7 @@ int32_t CGInputControl::CameraCanTurnPlayer() const {
         }
     }
 
-    if (!(camera->m_state & 0x1)) {
+    if (!(camera->m_state & CGCamera::STATE_FLAGS::STATE_FREE_LOOK)) {
         return 0;
     }
 
@@ -397,23 +409,23 @@ void CGInputControl::SendUIVehicleAngleUpdate(float angle) {
     float pitchMin;
     float pitchMax;
 
-    if (rec->m_flags & 0x40) {
+    if (rec->m_flags & VehicleRec::FLAGS::USE_PITCH_LIMITS) {
         pitchMin = rec->m_pitchMin;
         pitchMax = rec->m_pitchMax;
     } else {
-        pitchMin = -1.5707964f;
-        pitchMax = 1.5707964f;
+        pitchMin = -HALF_PI;
+        pitchMax = HALF_PI;
     }
 
     float range = pitchMax - pitchMin;
-    float normalized = fabsf(range) <= 0.000099999997f ? 0.0f : (angle - pitchMin) / range;
+    float normalized = fabsf(range) <= 0.0001f ? 0.0f : (angle - pitchMin) / range;
 
     FrameScript_SignalEvent(SCRIPT_EVENT_VEHICLE_ANGLE_UPDATE, "%f%f", static_cast<double>(normalized), static_cast<double>(angle));
 }
 
 // VERIFY: 6da9c237 manual
 // OFFSET: 0x005FB560
-int32_t CGInputControl::IsVehicleSeatFlagSet(uint32_t flags) const {
+BOOL CGInputControl::IsVehicleSeatFlagSet(uint32_t flags) const {
     CGUnit_C* mover = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGUnit_C::s_activeMover, TYPE_UNIT, __FILE__, __LINE__));
 
     if (!mover) {
@@ -422,7 +434,7 @@ int32_t CGInputControl::IsVehicleSeatFlagSet(uint32_t flags) const {
 
     CGUnit_C* player = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (!player || !player->m_vehiclePassenger || player->m_vehiclePassenger->m_state != 3) {
+    if (!player || !player->m_vehiclePassenger || player->m_vehiclePassenger->m_state != CVehiclePassenger_C::TRANSITION_STATE::STATE_RIDING) {
         return 0;
     }
 
@@ -469,19 +481,19 @@ void CGInputControl::SetMouselookOverrideBinding(const char* key, const char* bi
 
 // VERIFY: 82de0c4b manual
 // OFFSET: 0x005FA0D0
-int32_t __stdcall CGInputControl::CanTurn(CGUnit_C* unit) {
-    return CGInputControl::CanControl(unit) && !(unit->m_unit->m_unitFieldFlags & 0x40000) && !unit->IsVehiclePreventingTurning();
+BOOL __stdcall CGInputControl::CanTurn(CGUnit_C* unit) {
+    return CGInputControl::CanControl(unit) && !(unit->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_STUNNED) && !unit->IsVehiclePreventingTurning();
 }
 
 // VERIFY: feb80d65 manual
 // OFFSET: 0x005FA110
-int32_t CGInputControl::CanSyncFreeLookFacing(CGUnit_C* unit) const {
-    return CGInputControl::CanControl(unit) && !(unit->m_unit->m_unitFieldFlags & 0x40000) && !unit->IsVehiclePreventingTurning() && (this->m_flags & INPUT_PLAYER_LOOK_MASK) && !unit->GetClientStandState();
+BOOL CGInputControl::CanSyncFreeLookFacing(CGUnit_C* unit) const {
+    return CGInputControl::CanControl(unit) && !(unit->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_STUNNED) && !unit->IsVehiclePreventingTurning() && (this->m_flags & INPUT_PLAYER_LOOK_MASK) && (unit->GetClientStandState() == UNIT_STANDING);
 }
 
 // VERIFY: 83a6aa8d manual
 // OFFSET: 0x005FA420
-int32_t CGInputControl::IsMouseDragMoving() const {
+BOOL CGInputControl::IsMouseDragMoving() const {
     int32_t result = this->IsMouseDrag(OsGetAsyncTimeMs());
 
     if (result) {
@@ -512,20 +524,20 @@ int32_t CGInputControl::CameraCanPitchPlayer() {
 
     CMoveSpline* spline = mover->m_movement->m_spline;
 
-    if (spline && !(spline->m_flags & 0x400)) {
+    if (spline && !(spline->flags & SPLINEFLAG_NO_SPLINE)) {
         return 0;
     }
 
-    if (mover->IsAlteredFormTransitionPreventingMovement() || (mover->m_unit->m_unitFieldFlags & 0x40000) || mover->GetClientStandState()) {
+    if (mover->IsAlteredFormTransitionPreventingMovement() || (mover->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_STUNNED) || (mover->GetClientStandState() != UNIT_STANDING)) {
         return 0;
     }
 
     CMovement_C* movement = mover->m_movement;
 
-    if ((movement->m_flags2 & 0x20) && !(movement->m_flags & 0x2200000)) {
+    if ((movement->m_moveFlags2 & MOVEFLAG2_ALWAYS_ALLOW_PITCHING) && !(movement->m_flags & MOVEMENTFLAG_SWIMMING_OR_FLYING_MASK)) {
         VehicleRec* rec = mover->GetVehicleRec();
 
-        if (!rec || !(rec->m_flags & 0x40000)) {
+        if (!rec || !(rec->m_flags & VehicleRec::FLAGS::ALLOW_CAMERA_PITCH_INPUT)) {
             return 0;
         }
     }
@@ -549,18 +561,18 @@ void CGInputControl::EnterWorld() {
 
 // VERIFY: 988e7786 manual
 // OFFSET: 0x005FAC90
-int32_t __stdcall CGInputControl::CanMove(CGUnit_C* unit) {
+BOOL __stdcall CGInputControl::CanMove(CGUnit_C* unit) {
     if (!CGInputControl::CanControl(unit)) {
         return 0;
     }
 
-    return unit->m_unit->m_unitFieldHealth > 0 && !(unit->m_movement->m_flags & 0x100A00) && unit->m_unit->m_unitFieldBytes1[0] != UNIT_DEAD && !unit->HasVehicleTransport();
+    return unit->m_unit->m_unitFieldHealth > 0 && !(unit->m_movement->m_flags & (MOVEMENTFLAG_ONTRANSPORT | MOVEMENTFLAG_ROOT | MOVEMENTFLAG_PENDING_ROOT)) && unit->m_unit->m_standState != UNIT_DEAD && !unit->HasVehicleTransport();
 }
 
 // VERIFY: d0f5f494 auto
 // OFFSET: 0x00568560
 void __stdcall ScaleMouseDeltaByFov(float* dx, float* dy) {
-    if (!CGWorldFrame::s_currentWorldFrame) {
+    if (!CGWorldFrame::GetActive()) {
         return;
     }
 
@@ -574,14 +586,14 @@ void __stdcall ScaleMouseDeltaByFov(float* dx, float* dy) {
     float clamped = 1.0f;
 
     if (fovScale < 1.0f) {
-        clamped = 0.050000001f;
+        clamped = 0.05f;
 
-        if (fovScale > 0.050000001f) {
+        if (fovScale > 0.05f) {
             clamped = fovScale;
         }
     }
 
-    float scale = 0.050000001f + clamped * 0.94999999f;
+    float scale = 0.05f + clamped * 0.95f;
     *dx = *dx * scale;
     *dy = scale * *dy;
 }
@@ -635,7 +647,7 @@ void CGInputControl::OnUpdate(float elapsed) {
         }
     }
 
-    if (mover->m_movement->m_flags & 0xC0) {
+    if (mover->m_movement->m_flags & MOVEMENTFLAG_PITCH_MASK) {
         CGInputControl::SendUIVehicleAngleUpdate(mover->GetPitch());
     }
 }
@@ -657,10 +669,10 @@ void CGInputControl::OnMouseMoveRel(const CMouseEvent& evt) {
     }
 
     this->m_lastMouseMoveFrame = frame;
-    int32_t allowPitch = 1;
+    BOOL allowPitch = 1;
     this->m_dragAccumX = std::fabs(x) + this->m_dragAccumX;
     this->m_dragAccumY = std::fabs(y) + this->m_dragAccumY;
-    int32_t canSync = this->CanSyncFreeLookFacing(mover);
+    BOOL canSync = this->CanSyncFreeLookFacing(mover);
 
     if (canSync && mover && mover->m_vehicle && mover->m_vehicle->m_vehicleRec && mover->m_vehicle->IsSuppressingCameraPitchWhileMouseAiming()) {
         allowPitch = 0;
@@ -708,7 +720,7 @@ void CGInputControl::CameraTurnPlayer(uint32_t time, float facing) {
         mover->ConvertVehicleCameraRelativeFacingToTransportRelativeFacing(facing);
     }
 
-    if (mover->m_movement->m_flags2 & 0x8) {
+    if (mover->m_movement->m_moveFlags2 & MOVEFLAG2_FULL_SPEED_TURNING) {
         if (!this->m_facingOverrideActive || this->m_facingOverride != facing) {
             mover->OnTurnToAngleLocal(time, facing);
             this->m_facingOverride = facing;
@@ -741,12 +753,12 @@ void CGInputControl::SetPlayerPitch(CGUnit_C* unit, uint32_t time, float pitch) 
         float min;
         float max;
 
-        if (rec->m_flags & 0x40) {
+        if (rec->m_flags & VehicleRec::FLAGS::USE_PITCH_LIMITS) {
             min = rec->m_pitchMin;
             max = rec->m_pitchMax;
         } else {
-            min = -1.5707964f;
-            max = 1.5707964f;
+            min = -HALF_PI;
+            max = HALF_PI;
         }
 
         if (pitch < min) {
@@ -756,7 +768,7 @@ void CGInputControl::SetPlayerPitch(CGUnit_C* unit, uint32_t time, float pitch) 
         }
     }
 
-    if (unit->m_movement->m_flags2 & 0x10) {
+    if (unit->m_movement->m_moveFlags2 & MOVEFLAG2_FULL_SPEED_PITCHING) {
         if (!this->m_vehicleAimValid || this->m_vehicleAim != pitch) {
             unit->OnPitchToAngleLocal(time, pitch);
             this->m_vehicleAim = pitch;
@@ -766,7 +778,7 @@ void CGInputControl::SetPlayerPitch(CGUnit_C* unit, uint32_t time, float pitch) 
     } else {
         unit->OnSetPitchLocal(time, pitch);
 
-        if (rec && (rec->m_flags & 0x400)) {
+        if (rec && (rec->m_flags & VehicleRec::FLAGS::ADJUSTABLE_AIM_ANGLE)) {
             CGInputControl::SendUIVehicleAngleUpdate(pitch);
         }
     }
@@ -829,7 +841,7 @@ void CheckToCancelCurrentChannelSpell() {
 
     SpellRec spell;
 
-    if (g_spellDB.GetRecord(channelSpell, &spell) && (spell.m_channelInterruptFlags & 0x8)) {
+    if (g_spellDB.GetRecord(channelSpell, &spell) && (spell.m_channelInterruptFlags & SpellRec::ChannelInterruptFlags::CHANNEL_INTERRUPT_ON_MOVEMENT)) {
         Spell_C_CancelChannelSpell(channelSpell);
     }
 }
@@ -843,13 +855,13 @@ int32_t CGInputControl::SetControlBit(uint32_t bit, uint32_t time) {
 
     CGCamera* camera = CGWorldFrame::GetActiveCamera();
     uint32_t flags = this->m_flags;
-    int32_t wasIdle = !(flags & INPUT_MOVE_WITH_AUTORUN_MASK) && !(flags & INPUT_STRAFE_PLAYER_MASK) && (!(flags & INPUT_PLAYER_LOOK_MASK) || !(flags & INPUT_TURN_PLAYER_MASK)) && (!(flags & INPUT_TURN_PLAYER_MASK) || (flags & INPUT_PLAYER_LOOK_MASK)) && !(flags & INPUT_TRACKING_MASK);
+    BOOL wasIdle = !(flags & INPUT_MOVE_WITH_AUTORUN_MASK) && !(flags & INPUT_STRAFE_PLAYER_MASK) && (!(flags & INPUT_PLAYER_LOOK_MASK) || !(flags & INPUT_TURN_PLAYER_MASK)) && (!(flags & INPUT_TURN_PLAYER_MASK) || (flags & INPUT_PLAYER_LOOK_MASK)) && !(flags & INPUT_TRACKING_MASK);
     uint32_t wasLooking = flags & INPUT_FREE_LOOK_MASK;
     uint32_t wasMouseDown = flags & INPUT_MOUSE_LOOK_MASK;
-    int32_t wasBothButtons = (flags & INPUT_TURN_PLAYER) && (flags & INPUT_TURN_CAMERA);
+    BOOL wasBothButtons = (flags & INPUT_TURN_PLAYER) && (flags & INPUT_TURN_CAMERA);
     uint32_t wasRightLook = flags & INPUT_CAMERA_LOOK_MASK;
     uint32_t wasLeftLook = flags & INPUT_PLAYER_LOOK_MASK;
-    int32_t wasMouseTurn = (flags & INPUT_PLAYER_LOOK_MASK) && (flags & INPUT_TURN_PLAYER_MASK);
+    BOOL wasMouseTurn = (flags & INPUT_PLAYER_LOOK_MASK) && (flags & INPUT_TURN_PLAYER_MASK);
 
     this->m_flags = flags | bit;
 
@@ -909,7 +921,7 @@ int32_t CGInputControl::SetControlBit(uint32_t bit, uint32_t time) {
 
 // VERIFY: 308e3e2e manual
 // OFFSET: 0x005FA450
-int32_t CGInputControl::UnsetControlBit(uint32_t bit, uint32_t time, int32_t keepSmoothing) {
+int32_t CGInputControl::UnsetControlBit(uint32_t bit, uint32_t time, BOOL keepSmoothing) {
     if (!(bit & this->m_flags)) {
         return 0;
     }
@@ -918,11 +930,11 @@ int32_t CGInputControl::UnsetControlBit(uint32_t bit, uint32_t time, int32_t kee
     uint32_t flags = this->m_flags;
     uint32_t wasLooking = flags & INPUT_FREE_LOOK_MASK;
     uint32_t wasMouseDown = flags & INPUT_MOUSE_LOOK_MASK;
-    int32_t wasIdle = !(flags & INPUT_MOVE_WITH_AUTORUN_MASK) && !(flags & INPUT_STRAFE_PLAYER_MASK) && (!(flags & INPUT_PLAYER_LOOK_MASK) || !(flags & INPUT_TURN_PLAYER_MASK)) && (!(flags & INPUT_TURN_PLAYER_MASK) || (flags & INPUT_PLAYER_LOOK_MASK)) && !(flags & INPUT_TRACKING_MASK);
-    int32_t wasBothButtons = (flags & INPUT_TURN_PLAYER) && (flags & INPUT_TURN_CAMERA);
+    BOOL wasIdle = !(flags & INPUT_MOVE_WITH_AUTORUN_MASK) && !(flags & INPUT_STRAFE_PLAYER_MASK) && (!(flags & INPUT_PLAYER_LOOK_MASK) || !(flags & INPUT_TURN_PLAYER_MASK)) && (!(flags & INPUT_TURN_PLAYER_MASK) || (flags & INPUT_PLAYER_LOOK_MASK)) && !(flags & INPUT_TRACKING_MASK);
+    BOOL wasBothButtons = (flags & INPUT_TURN_PLAYER) && (flags & INPUT_TURN_CAMERA);
     uint32_t wasRightLook = flags & INPUT_CAMERA_LOOK_MASK;
     uint32_t wasLeftLook = flags & INPUT_PLAYER_LOOK_MASK;
-    int32_t wasMouseTurn = (flags & INPUT_PLAYER_LOOK_MASK) && (flags & INPUT_TURN_PLAYER_MASK);
+    BOOL wasMouseTurn = (flags & INPUT_PLAYER_LOOK_MASK) && (flags & INPUT_TURN_PLAYER_MASK);
 
     this->m_flags = flags & ~bit;
 
@@ -954,9 +966,9 @@ int32_t CGInputControl::UnsetControlBit(uint32_t bit, uint32_t time, int32_t kee
     if (wasMouseDown && !(this->m_flags & INPUT_MOUSE_LOOK_MASK)) {
         if (!this->IsMouseDrag(time)) {
             if (this->m_pendingDefaultAction == INPUT_RELEASE_SELECT) {
-                CGWorldFrame::s_currentWorldFrame->PerformDefaultAction(MOUSE_BUTTON_LEFT);
+                CGWorldFrame::GetActive()->PerformDefaultAction(MOUSE_BUTTON_LEFT);
             } else if (this->m_pendingDefaultAction == INPUT_RELEASE_ACTION) {
-                CGWorldFrame::s_currentWorldFrame->PerformDefaultAction(MOUSE_BUTTON_RIGHT);
+                CGWorldFrame::GetActive()->PerformDefaultAction(MOUSE_BUTTON_RIGHT);
             }
         }
 
@@ -982,7 +994,7 @@ void CGInputControl::AscendDescendPlayer(uint32_t time, CGUnit_C* unit) {
     CMovement_C* movement = unit->m_movement;
     uint32_t moveFlags = movement->m_flags;
 
-    if (!(moveFlags & 0x2200000)) {
+    if (!(moveFlags & MOVEMENTFLAG_SWIMMING_OR_FLYING_MASK)) {
         this->m_flags &= ~INPUT_ASCEND_DESCEND_PLAYER_SENT;
         return;
     }
@@ -994,14 +1006,14 @@ void CGInputControl::AscendDescendPlayer(uint32_t time, CGUnit_C* unit) {
         direction--;
     }
 
-    if (movement->m_flags2 & 0x10) {
+    if (movement->m_moveFlags2 & MOVEFLAG2_FULL_SPEED_PITCHING) {
         if (direction > 0) {
-            if (!(flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) || (moveFlags & 0x80)) {
+            if (!(flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) || (moveFlags & MOVEMENTFLAG_PITCH_DOWN)) {
                 unit->OnPitchStartLocal(time, 1);
                 this->m_flags |= INPUT_ASCEND_DESCEND_PLAYER_SENT;
             }
         } else if (direction < 0) {
-            if (!(flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) || (moveFlags & 0x40)) {
+            if (!(flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) || (moveFlags & MOVEMENTFLAG_PITCH_UP)) {
                 unit->OnPitchStartLocal(time, 0);
                 this->m_flags |= INPUT_ASCEND_DESCEND_PLAYER_SENT;
             }
@@ -1028,12 +1040,12 @@ void CGInputControl::AscendDescendPlayer(uint32_t time, CGUnit_C* unit) {
     }
 
     if (direction > 0) {
-        if (!(this->m_flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) || (unit->m_movement->m_flags & 0x800000)) {
+        if (!(this->m_flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) || (unit->m_movement->m_flags & MOVEMENTFLAG_DESCENDING)) {
             unit->OnAscendDescendStartLocal(time, 1);
             this->m_flags |= INPUT_ASCEND_DESCEND_PLAYER_SENT;
         }
     } else {
-        if (!(this->m_flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) || (unit->m_movement->m_flags & 0x400000)) {
+        if (!(this->m_flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) || (unit->m_movement->m_flags & MOVEMENTFLAG_ASCENDING)) {
             unit->OnAscendDescendStartLocal(time, 0);
             this->m_flags |= INPUT_ASCEND_DESCEND_PLAYER_SENT;
         }
@@ -1045,7 +1057,7 @@ void CGInputControl::AscendDescendPlayer(uint32_t time, CGUnit_C* unit) {
 void CGInputControl::MovePlayer(uint32_t time, CGUnit_C* unit) {
     int32_t direction = 0;
 
-    if ((unit->m_unit->m_unitFieldFlags2 & 0x40) || unit->IsVehicleCurrentlyUnstoppable()) {
+    if ((unit->m_unit->m_unitFieldFlags2 & UNIT_FLAGS2::UNIT_FLAG2_FORCE_MOVEMENT) || unit->IsVehicleCurrentlyUnstoppable()) {
         direction = 1;
     } else {
         uint32_t flags = this->m_flags;
@@ -1076,7 +1088,7 @@ void CGInputControl::MovePlayer(uint32_t time, CGUnit_C* unit) {
         }
     }
 
-    if (unit->GetClientStandState()) {
+    if ((unit->GetClientStandState() != UNIT_STANDING)) {
         unit->ChangeStandState(UNIT_STANDING);
         CGCamera* camera = CGWorldFrame::GetActiveCamera();
 
@@ -1090,12 +1102,12 @@ void CGInputControl::MovePlayer(uint32_t time, CGUnit_C* unit) {
     }
 
     if (direction > 0) {
-        if (!(this->m_flags & INPUT_MOVE_PLAYER_SENT) || (unit->m_movement->m_flags & 0x2)) {
+        if (!(this->m_flags & INPUT_MOVE_PLAYER_SENT) || (unit->m_movement->m_flags & MOVEMENTFLAG_BACKWARD)) {
             unit->OnMoveStartLocal(time, 1);
             this->m_flags |= INPUT_MOVE_PLAYER_SENT;
         }
     } else {
-        if (!(this->m_flags & INPUT_MOVE_PLAYER_SENT) || (unit->m_movement->m_flags & 0x1)) {
+        if (!(this->m_flags & INPUT_MOVE_PLAYER_SENT) || (unit->m_movement->m_flags & MOVEMENTFLAG_FORWARD)) {
             unit->OnMoveStartLocal(time, 0);
             this->m_flags |= INPUT_MOVE_PLAYER_SENT;
         }
@@ -1129,7 +1141,7 @@ void CGInputControl::StrafePlayer(uint32_t time, CGUnit_C* unit) {
         return;
     }
 
-    if (unit->GetClientStandState()) {
+    if ((unit->GetClientStandState() != UNIT_STANDING)) {
         unit->ChangeStandState(UNIT_STANDING);
     }
 
@@ -1161,7 +1173,7 @@ void CGInputControl::TurnPlayer(uint32_t time, CGUnit_C* unit) {
     }
 
     if ((!(flags & INPUT_PLAYER_LOOK_MASK) || unit->IsStrafingDisabled()) && direction) {
-        if (unit->GetClientStandState()) {
+        if ((unit->GetClientStandState() != UNIT_STANDING)) {
             unit->ChangeStandState(UNIT_STANDING);
         }
 
@@ -1220,7 +1232,7 @@ void CGInputControl::PitchPlayer(uint32_t time, CGUnit_C* unit) {
 
 // VERIFY: c0d2e3b9 manual
 // OFFSET: 0x005FBBC0
-void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
+void CGInputControl::UpdatePlayer(uint32_t time, BOOL canControl) {
     CGUnit_C* mover = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGUnit_C::s_activeMover, TYPE_UNIT, __FILE__, __LINE__));
 
     if (!mover) {
@@ -1228,7 +1240,7 @@ void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
     }
 
     if ((mover->m_obj->m_type & TYPE_PLAYER) && static_cast<CGPlayer_C*>(mover)->IsCommentatorUberOrInArena()) {
-        CGCommentator::s_Commentator.UpdateCameraVelocity(this->m_flags, a2);
+        CGCommentator::s_Commentator.UpdateCameraVelocity(this->m_flags, canControl);
         return;
     }
 
@@ -1238,8 +1250,8 @@ void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
         time = lastUpdateTime;
     }
 
-    bool canMove = a2 && CGInputControl::CanMove(mover);
-    bool canTurn = a2 && CGInputControl::CanTurn(mover);
+    bool canMove = canControl && CGInputControl::CanMove(mover);
+    bool canTurn = canControl && CGInputControl::CanTurn(mover);
 
     if (canMove) {
         this->MovePlayer(time, mover);
@@ -1251,7 +1263,7 @@ void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
         }
 
         if (this->m_flags & INPUT_MOVE_PLAYER_SENT) {
-            if (!mover->m_movement->IsOnSpline()) {
+            if (!mover->m_movement->IsSplineMover()) {
                 mover->OnMoveStopLocal(time);
             }
 
@@ -1259,7 +1271,7 @@ void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
         }
 
         if (this->m_flags & INPUT_STRAFE_PLAYER_SENT) {
-            if (!mover->m_movement->IsOnSpline()) {
+            if (!mover->m_movement->IsSplineMover()) {
                 mover->OnStrafeStopLocal(time);
             }
 
@@ -1271,7 +1283,7 @@ void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
         }
 
         if (this->m_flags & INPUT_ASCEND_DESCEND_PLAYER_SENT) {
-            if (!mover->m_movement->IsOnSpline()) {
+            if (!mover->m_movement->IsSplineMover()) {
                 mover->OnAscendDescendStopLocal(time);
             }
 
@@ -1282,12 +1294,12 @@ void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
     if (canTurn) {
         this->TurnPlayer(time, mover);
 
-        if ((mover->m_movement->m_flags & 0x2200000) || (mover->m_movement->m_flags2 & 0x20)) {
+        if ((mover->m_movement->m_flags & MOVEMENTFLAG_SWIMMING_OR_FLYING_MASK) || (mover->m_movement->m_moveFlags2 & MOVEFLAG2_ALWAYS_ALLOW_PITCHING)) {
             this->PitchPlayer(time, mover);
         }
     } else {
         if (this->m_flags & INPUT_TURN_PLAYER_SENT) {
-            if (!mover->m_movement->IsOnSpline()) {
+            if (!mover->m_movement->IsSplineMover()) {
                 mover->OnTurnStopLocal(time);
             }
 
@@ -1295,7 +1307,7 @@ void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
         }
 
         if (this->m_flags & INPUT_PITCH_PLAYER_SENT) {
-            if (!mover->m_movement->IsOnSpline() && (mover->m_movement->m_flags & 0x2200000)) {
+            if (!mover->m_movement->IsSplineMover() && (mover->m_movement->m_flags & MOVEMENTFLAG_SWIMMING_OR_FLYING_MASK)) {
                 mover->OnPitchStopLocal(time);
             }
 
@@ -1306,7 +1318,7 @@ void CGInputControl::UpdatePlayer(uint32_t time, int32_t a2) {
 
 // VERIFY: ad249167 manual
 // OFFSET: 0x005FBE10
-void CGInputControl::ToggleControlBit(uint32_t bit, int32_t enable, uint32_t time, int32_t keepSmoothing) {
+void CGInputControl::ToggleControlBit(uint32_t bit, BOOL enable, uint32_t time, BOOL keepSmoothing) {
     int32_t changed = enable ? this->SetControlBit(bit, time) : this->UnsetControlBit(bit, time, keepSmoothing);
 
     if (!changed) {
@@ -1340,8 +1352,8 @@ uint32_t GetJoystick() {
 void DescendStart() {
     CGInputControl* inputControl = CGInputControl::s_inputControl;
 
-    if (CGGameUI::CanPerformAction(0)) {
-        uint32_t time = CSimpleTop::s_eventTime;
+    if (CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_MOVEMENT)) {
+        uint32_t time = CSimpleTop::GetEventTime();
 
         if (inputControl->SetControlBit(INPUT_DESCEND_PLAYER_KEY, time)) {
             inputControl->UpdatePlayer(time, 1);
@@ -1360,9 +1372,9 @@ void CGInputControl::OnFocusChange(const CFocusEvent& event) {
     }
 
     if (event.m_data.m_focus) {
-        this->m_mouseModeFlags &= ~0x20u;
+        this->m_mouseModeFlags &= ~INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_FORCE_CURSOR_ON;
     } else {
-        this->m_mouseModeFlags |= 0x20u;
+        this->m_mouseModeFlags |= INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_FORCE_CURSOR_ON;
     }
 
     this->UpdateMouseMode(0);

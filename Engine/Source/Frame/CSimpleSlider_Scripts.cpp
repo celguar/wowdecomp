@@ -20,11 +20,7 @@ static int32_t Script_GetThumbTexture(lua_State* L) {
         return 1;
     }
 
-    if (!texture->m_luaRegistered) {
-        texture->RegisterScriptObject(nullptr);
-    }
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, texture->m_luaObjectRef);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, texture->GetLuaObjectRef());
     return 1;
 }
 
@@ -181,7 +177,7 @@ static int32_t Script_SetValueStep(lua_State* L) {
 static int32_t Script_IsEnabled(lua_State* L) {
     CSimpleSlider* slider = static_cast<CSimpleSlider*>(FrameScript_GetObjectThis(L, CSimpleSlider::GetObjectType()));
 
-    if (slider->m_frameFlags & 0x400) {
+    if (slider->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_DISABLED) {
         lua_pushnil(L);
     } else {
         lua_pushnumber(L, 1.0);
@@ -195,9 +191,9 @@ static int32_t Script_IsEnabled(lua_State* L) {
 static int32_t Script_Enable(lua_State* L) {
     CSimpleSlider* slider = static_cast<CSimpleSlider*>(FrameScript_GetObjectThis(L, CSimpleSlider::GetObjectType()));
 
-    slider->SetFrameFlag(0x400, 0);
+    slider->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_DISABLED, 0);
 
-    if (slider->m_onEnable.m_luaRef && !slider->m_isLoading) {
+    if (slider->m_onEnable.m_luaRef && !slider->IsLoading()) {
         slider->RunScript(slider->m_onEnable, 0, nullptr);
     }
 
@@ -209,9 +205,9 @@ static int32_t Script_Enable(lua_State* L) {
 static int32_t Script_Disable(lua_State* L) {
     CSimpleSlider* slider = static_cast<CSimpleSlider*>(FrameScript_GetObjectThis(L, CSimpleSlider::GetObjectType()));
 
-    slider->SetFrameFlag(0x400, 1);
+    slider->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_DISABLED, 1);
 
-    if (slider->m_onDisable.m_luaRef && !slider->m_isLoading) {
+    if (slider->m_onDisable.m_luaRef && !slider->IsLoading()) {
         slider->RunScript(slider->m_onDisable, 0, nullptr);
     }
 

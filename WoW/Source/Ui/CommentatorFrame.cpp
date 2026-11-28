@@ -13,13 +13,14 @@
 #include "WoW/Source/UIUtil/Types.h"
 #include "WoW/Source/Ui/Types.h"
 #include "WoW/Source/WorldClient/World.h"
+#include "WoW/Source/WorldClient/Types.h"
 
 // STATIC: 0x00ACE4A8
 CGCommentator CGCommentator::s_Commentator;
 
 // VERIFY: 892bcb14 manual
 // OFFSET: 0x0056B5C0
-void CGCommentator::UpdateCameraVelocity(uint32_t controlFlags, int32_t canControl) {
+void CGCommentator::UpdateCameraVelocity(uint32_t controlFlags, BOOL canControl) {
     if (!ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__) || !CGWorldFrame::GetActiveCamera()) {
         return;
     }
@@ -96,7 +97,7 @@ void CGCommentator::UpdateCameraVelocity(uint32_t controlFlags, int32_t canContr
         turn = 0;
     }
 
-    this->m_yawVelocity = turn * 0.050000001f;
+    this->m_yawVelocity = turn * 0.05f;
 }
 
 // VERIFY: a105314a manual
@@ -116,8 +117,8 @@ void CGCommentator::Init() {
     this->m_mapID = 0;
     this->m_pitch = 0.0f;
     this->m_distance = 12.0f;
-    this->m_fov = 1.5707964f;
-    this->m_targetFov = 1.5707964f;
+    this->m_fov = HALF_PI;
+    this->m_targetFov = HALF_PI;
     this->m_moveSpeed = 10.0f;
     this->m_targetHeightOffset = 0.0f;
     this->m_key.unk_0004 = 13;
@@ -145,7 +146,7 @@ void CGCommentator::InitializeGame() {
 // VERIFY: 4126a5f5 manual
 // OFFSET: 0x0056B510
 void CGCommentator::SnapCameraToPlayer() {
-    if (!CGWorldFrame::s_currentWorldFrame) {
+    if (!CGWorldFrame::GetActive()) {
         return;
     }
 
@@ -172,10 +173,10 @@ void CGCommentator::SnapCameraToPlayer() {
 // OFFSET: 0x0056B830
 void CGCommentator::PostInit(CGPlayer_C* player) {
     if (player && player->IsCommentatorUberOrInArena()) {
-        World::ObjectSetShadow(player->m_worldObject, 2, 2);
+        World::ObjectSetShadow(player->m_worldObject, MAP_OBJECT_CREATE_FLAG_NO_BLOB_SHADOW, MAP_OBJECT_CREATE_FLAG_NO_BLOB_SHADOW);
 
-        if (CGWorldFrame::s_currentWorldFrame) {
-            CGWorldFrame::GetActiveCamera()->SetView(6, 2, 0);
+        if (CGWorldFrame::GetActive()) {
+            CGWorldFrame::GetActiveCamera()->SetView(CGCamera::VIEW_COMMENTATOR, CGCamera::VIEW_BLEND_INSTANT, CGCamera::VIEW_TRANSITION_NONE);
             CGCommentator::s_Commentator.SnapCameraToPlayer();
         }
     }
@@ -226,7 +227,7 @@ int32_t CGCommentator::OnSkirmishPlayersModeState(void* param, NETMESSAGE msgId,
 // VERIFY: b41bcf95 auto
 // OFFSET: 0x005684B0
 void CGCommentator::SetPosYawPitch(const C3Vector& position, float facing, float pitch) {
-    if (!CGWorldFrame::s_currentWorldFrame) {
+    if (!CGWorldFrame::GetActive()) {
         return;
     }
 
@@ -253,8 +254,8 @@ void CGCommentator::SetFov(float fov) {
 
     this->m_targetFov = fov;
 
-    if (fov <= 0.017453292f) {
-        this->m_targetFov = 0.017453292f;
+    if (fov <= DEG_TO_RAD) {
+        this->m_targetFov = DEG_TO_RAD;
     } else {
         this->m_targetFov = fov;
     }
@@ -353,12 +354,12 @@ void CGCommentator::OnUpdate(float elapsed) {
         C3Vector hit(0.0f, 0.0f, 0.0f);
         float hitDistance = 1.0f;
 
-        if (this->m_cameraCollision && World::Intersect(target, eye, &hit, &hitDistance, 0x100171, nullptr)) {
+        if (this->m_cameraCollision && World::Intersect(target, eye, &hit, &hitDistance, WORLD_QUERY_COLLISION_MASK | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_WMO_CAMERA, nullptr)) {
             C3Vector direction(target.x - hit.x, target.y - hit.y, target.z - hit.z);
             direction.NormalizeSafe();
-            this->m_position.x = direction.x * 0.80000001f + hit.x;
-            this->m_position.y = direction.y * 0.80000001f + hit.y;
-            this->m_position.z = direction.z * 0.80000001f + hit.z;
+            this->m_position.x = direction.x * 0.8f + hit.x;
+            this->m_position.y = direction.y * 0.8f + hit.y;
+            this->m_position.z = direction.z * 0.8f + hit.z;
         } else {
             this->m_position = eye;
         }
@@ -382,7 +383,7 @@ void CGCommentator::OnUpdate(float elapsed) {
             C3Vector hit(0.0f, 0.0f, 0.0f);
             float hitDistance = 1.0f;
 
-            if (!this->m_cameraCollision || !World::Intersect(this->m_position, next, &hit, &hitDistance, 0x100171, nullptr)) {
+            if (!this->m_cameraCollision || !World::Intersect(this->m_position, next, &hit, &hitDistance, WORLD_QUERY_COLLISION_MASK | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_WMO_CAMERA, nullptr)) {
                 this->m_position = next;
             }
         }
@@ -400,7 +401,7 @@ void CGCommentator::OnUpdate(float elapsed) {
             C3Vector direction(target.x - this->m_position.x, target.y - this->m_position.y, z - this->m_position.z);
             direction.NormalizeSafe();
 
-            if (direction.x * direction.x + direction.z * direction.z + direction.y * direction.y < 0.000099999997f) {
+            if (direction.x * direction.x + direction.z * direction.z + direction.y * direction.y < 0.0001f) {
                 direction.x = 1.0f;
                 direction.y = 0.0f;
                 direction.z = 0.0f;
@@ -423,7 +424,7 @@ void CGCommentator::OnUpdate(float elapsed) {
     }
 
     float delta = this->m_targetFov - this->m_fov;
-    float maxDelta = (this->m_fov - 0.017453292f) * 0.19259088f + 0.2f;
+    float maxDelta = (this->m_fov - DEG_TO_RAD) * 0.19259088f + 0.2f;
 
     if (maxDelta <= delta) {
         delta = maxDelta;
@@ -451,7 +452,7 @@ void CGCommentator::OnUpdate(float elapsed) {
     }
 
     this->m_fov = fov;
-    this->m_fov = this->m_fov > 0.017453292f ? this->m_fov : 0.017453292f;
+    this->m_fov = this->m_fov > DEG_TO_RAD ? this->m_fov : DEG_TO_RAD;
 
     if (this->m_fov >= 2.0943952f) {
         this->m_fov = 2.0943952f;
@@ -468,15 +469,15 @@ uint64_t CGCommentator::GetArenaMember(int32_t index) {
     CGCommentator::MapInfo* map;
     CGCommentator::InstanceInfo* instance;
 
-    if (!player || !(player->m_player->m_playerFlags & 0x80000) || !this->GetCommentatorInfo(&map, &instance)) {
+    if (!player || !(player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_COMMENTATOR) || !this->GetCommentatorInfo(&map, &instance)) {
         return 0;
     }
 
     int32_t faction = 0;
 
-    if (index >= 5) {
+    if (index >= CGCommentator::MAX_TEAM_PLAYERS) {
         faction = 1;
-        index -= 5;
+        index -= CGCommentator::MAX_TEAM_PLAYERS;
     }
 
     if (index >= 0 && static_cast<uint32_t>(index) < instance->m_numPlayers[faction]) {
@@ -546,7 +547,9 @@ int32_t CGCommentator::OnReceivePlayerInfo(void* param, NETMESSAGE msgId, uint32
         info.unk_003C = value;
 
         if (info.m_faction < 2) {
-            instance->m_players[info.m_faction][instance->m_numPlayers[info.m_faction]] = info;
+            CGCommentator::PlayerInfo* pPlayerInfo = &instance->m_players[info.m_faction][instance->m_numPlayers[info.m_faction]];
+            STORM_ASSERT(pPlayerInfo);
+            *pPlayerInfo = info;
             instance->m_numPlayers[info.m_faction]++;
         }
     }
@@ -572,17 +575,17 @@ int32_t CGCommentator::OnStateChanged(void* param, NETMESSAGE msgId, uint32_t ti
     }
 
     if (enabled && player->IsCommentatorUberOrInArena()) {
-        World::ObjectSetShadow(player->m_worldObject, 2, 2);
+        World::ObjectSetShadow(player->m_worldObject, MAP_OBJECT_CREATE_FLAG_NO_BLOB_SHADOW, MAP_OBJECT_CREATE_FLAG_NO_BLOB_SHADOW);
 
-        if (CGWorldFrame::s_currentWorldFrame) {
-            CGWorldFrame::GetActiveCamera()->SetView(6, 2, 0);
+        if (CGWorldFrame::GetActive()) {
+            CGWorldFrame::GetActiveCamera()->SetView(CGCamera::VIEW_COMMENTATOR, CGCamera::VIEW_BLEND_INSTANT, CGCamera::VIEW_TRANSITION_NONE);
             CGCommentator::s_Commentator.SnapCameraToPlayer();
         }
     } else {
-        World::ObjectSetShadow(player->m_worldObject, 0, 2);
+        World::ObjectSetShadow(player->m_worldObject, 0, MAP_OBJECT_CREATE_FLAG_NO_BLOB_SHADOW);
 
-        if (CGWorldFrame::s_currentWorldFrame) {
-            CGWorldFrame::GetActiveCamera()->SetView(1, 2, 0);
+        if (CGWorldFrame::GetActive()) {
+            CGWorldFrame::GetActiveCamera()->SetView(CGCamera::VIEW_THIRD_PERSON_A, CGCamera::VIEW_BLEND_INSTANT, CGCamera::VIEW_TRANSITION_NONE);
         }
     }
 
@@ -637,7 +640,7 @@ int32_t CGCommentator::OnReceiveMapInfo(void* param, NETMESSAGE msgId, uint32_t 
     current.m_guid = 0;
     msg->Get(current.m_guid);
 
-    bool found = false;
+    bool foundInstance = false;
     uint32_t foundMapID = 0;
     CommentatorInstanceKey foundKey;
 
@@ -680,14 +683,15 @@ int32_t CGCommentator::OnReceiveMapInfo(void* param, NETMESSAGE msgId, uint32_t 
             instance->m_numPlayers[1] = 0;
 
             if (current && current == instance->m_guid) {
+                STORM_ASSERT(foundInstance == false);
                 foundMapID = instance->m_mapID;
                 foundKey = instance->m_key;
-                found = true;
+                foundInstance = true;
             }
         }
     }
 
-    if (found) {
+    if (foundInstance) {
         CGCommentator::s_Commentator.m_mapID = foundMapID;
         CGCommentator::s_Commentator.m_key = foundKey;
     }

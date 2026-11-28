@@ -131,7 +131,7 @@ void NETEVENTQUEUE::Poll() {
     this->m_critSect.Enter();
 
     bool destroyed = false;
-    this->m_client->m_refCount.Increment();
+    this->m_client->AddRef();
 
     for (NETEVENTQUEUENODE* node = this->m_eventQueue.Head(); node; node = this->m_eventQueue.Next(node)) {
         NetClient* client = this->m_client;
@@ -170,7 +170,7 @@ void NETEVENTQUEUE::Poll() {
 
         client = this->m_client;
 
-        if (client->m_refCount.Decrement() == 0 && client->m_deleteMe) {
+        if (client->DelRef() == 0 && client->m_deleteMe) {
             delete client;
         }
     }
@@ -181,7 +181,7 @@ void NETEVENTQUEUE::Poll() {
 
     NetClient* client = this->m_client;
 
-    if (client->m_refCount.Decrement() == 0 && client->m_deleteMe) {
+    if (client->DelRef() == 0 && client->m_deleteMe) {
         delete client;
     }
 
@@ -200,6 +200,8 @@ static void InitializePropContext() {
 // VERIFY: 8093d1d7 manual
 // OFFSET: 0x00631D30
 int32_t NetClient::Initialize() {
+    STORM_ASSERT(m_netState == NS_UNINITIALIZED);
+
     if (!NetClient::s_clientCount) {
         s_propContext = PropGetSelectedContext();
 
@@ -213,9 +215,11 @@ int32_t NetClient::Initialize() {
     NetClient::s_clientCount++;
 
     this->m_netEventQueue = new (SMemAlloc(sizeof(NETEVENTQUEUE), __FILE__, __LINE__, 0)) NETEVENTQUEUE(this);
+    STORM_ASSERT(m_netEventQueue);
     memset(this->m_handlers, 0, sizeof(this->m_handlers));
     memset(this->m_handlerParams, 0, sizeof(this->m_handlerParams));
     this->m_serverConnection = new (SMemAlloc(sizeof(WowConnection), __FILE__, __LINE__, 0)) WowConnection(this, nullptr);
+    STORM_ASSERT(m_serverConnection);
     this->m_netState = NS_INITIALIZED;
     s_initializeTime = OsGetAsyncTimeMs();
 
@@ -232,11 +236,11 @@ int32_t NetClient::ConnectInternal(const char* host, uint16_t port) {
     this->m_netState = NS_CONNECTING;
     this->m_serverConnection->Connect(host, port, -1);
 
-    if (this->m_redirectConnection) {
-        this->m_redirectConnection->SetResponse(nullptr, false);
-        this->m_redirectConnection->Disconnect();
-        this->m_redirectConnection->Release();
-        this->m_redirectConnection = nullptr;
+    if (this->m_newConnection) {
+        this->m_newConnection->SetResponse(nullptr, false);
+        this->m_newConnection->Disconnect();
+        this->m_newConnection->Release();
+        this->m_newConnection = nullptr;
     }
 
     return 1;
@@ -257,6 +261,9 @@ uint8_t* NetClient::GetSessionKey() {
 // VERIFY: f1080d7c auto
 // OFFSET: 0x00631FA0
 void NetClient::SetMessageHandler(NETMESSAGE msgId, MESSAGE_HANDLER handler, void* param) {
+    STORM_ASSERT(static_cast<uint32_t>(msgId) < NUM_MSG_TYPES); // 12213: "msgId < NUM_MSG_TYPES"
+    STORM_ASSERT(handler);
+    STORM_ASSERT(m_handlers[msgId] == nullptr); // 12213: "m_handlers[msgId] == __null"
     this->m_handlers[msgId] = handler;
     this->m_handlerParams[msgId] = param;
 }
@@ -264,13 +271,14 @@ void NetClient::SetMessageHandler(NETMESSAGE msgId, MESSAGE_HANDLER handler, voi
 // VERIFY: acb4d340 auto
 // OFFSET: 0x00631FC0
 void NetClient::ResetHandler(NETMESSAGE msgId) {
+    STORM_ASSERT(static_cast<uint32_t>(msgId) < NUM_MSG_TYPES); // 12213: "msgId < NUM_MSG_TYPES"
     this->m_handlers[msgId] = nullptr;
     this->m_handlerParams[msgId] = nullptr;
 }
 
 // VERIFY: 59f00590 auto
 // OFFSET: 0x00631FE0
-int32_t NetClient::ProcessMessage(uint32_t timeReceived, CDataStore* msg, int32_t unused_a4) {
+int32_t NetClient::ProcessMessage(uint32_t timeReceived, CDataStore* msg, int32_t unused4) {
     s_stats[4]++;
 
     uint16_t msgId;
@@ -348,14 +356,16 @@ void NetClient::PollEventQueue() {
 
 // VERIFY: 1eecebd5 auto
 // OFFSET: 0x006323C0
-int32_t NetClient::Connect(const char* address) {
+int32_t NetClient::Connect(const char* hostName) {
+    STORM_ASSERT(hostName);
+
     if (this->m_netState != NS_INITIALIZED) {
         SErrDisplayAppFatal("Expected (m_netState == NS_INITIALIZED), got %d", this->m_netState);
     }
 
     uint16_t port = 9090;
     char host[1024];
-    SStrCopy(host, address, sizeof(host));
+    SStrCopy(host, hostName, sizeof(host));
 
     char* separator = SStrChr(host, ':');
 
@@ -409,6 +419,7 @@ int32_t NetClient::HandleDisconnect() {
         NetClient::PushObjMgr(this->m_objMgr);
     }
 
+    STORM_ASSERT(m_netState == NS_CONNECTED || m_netState == NS_DISCONNECTING);
     this->m_netState = NS_INITIALIZED;
     ConsolePrintf("NetClient::HandleDisconnect()");
     CGlueMgr::NetDisconnectHandler(this);
@@ -424,6 +435,7 @@ int32_t NetClient::HandleCantConnect() {
         NetClient::PushObjMgr(this->m_objMgr);
     }
 
+    STORM_ASSERT(m_netState == NS_CONNECTING);
     this->m_netState = NS_INITIALIZED;
     NetClient::PopObjMgr();
 
@@ -468,8 +480,7 @@ void NetClient::HandlePong(WowConnection* connection, CDataStore* msg) {
 // OFFSET: 0x00632690
 void NetClient::EnableEncryption(WowConnection* connection, const uint8_t* seed, uint8_t seedLength) {
     connection->SetEncryptionKey(this->m_loginData.m_sessionKey, sizeof(this->m_loginData.m_sessionKey), 1, seed, seedLength);
-    connection->m_uint375 = 4;
-    connection->m_uint376 = 2;
+    connection->SetEncryptedOpcodeSizes(4, 2);
     connection->SetEncryption(true);
 }
 
@@ -518,7 +529,7 @@ void NetClient::HandleAuthChallenge(WowConnection* connection, CDataStore* msg) 
         connection->Disconnect();
     } else if (connection == this->m_serverConnection) {
         this->m_netEventQueue->AddEvent(EVENT_ID_NET_AUTH_CHALLENGE, connection, this, challenge, sizeof(AuthenticationChallenge));
-    } else if (connection == this->m_redirectConnection) {
+    } else if (connection == this->m_newConnection) {
         CDataStore reply;
         reply.Put(static_cast<uint32_t>(CMSG_AUTH_CONTINUED_SESSION));
         reply.PutString(this->m_loginData.m_account);
@@ -534,12 +545,11 @@ void NetClient::HandleAuthChallenge(WowConnection* connection, CDataStore* msg) 
         reply.PutData(digest, sizeof(digest));
         reply.Finalize();
 
-        this->m_redirectConnection->SendPacket(&reply, 0);
+        this->m_newConnection->SendPacket(&reply, 0);
 
-        WowConnection* redirect = this->m_redirectConnection;
+        WowConnection* redirect = this->m_newConnection;
         redirect->SetEncryptionKey(this->m_loginData.m_sessionKey, sizeof(this->m_loginData.m_sessionKey), 1, reinterpret_cast<const uint8_t*>(seeds), sizeof(seeds));
-        redirect->m_uint375 = 4;
-        redirect->m_uint376 = 2;
+        redirect->SetEncryptedOpcodeSizes(4, 2);
         redirect->SetEncryption(true);
     } else {
         connection->Disconnect();
@@ -556,7 +566,7 @@ NetClient::NetClient() {
     this->m_netState = NS_UNINITIALIZED;
     this->m_netEventQueue = nullptr;
     this->m_serverConnection = nullptr;
-    this->m_redirectConnection = nullptr;
+    this->m_newConnection = nullptr;
     this->m_suspended = false;
     this->m_refCount.m_value = 0;
     this->m_deleteMe = false;
@@ -567,7 +577,7 @@ NetClient::NetClient() {
     this->m_connectedTimestamp = 0;
     this->m_objMgr = nullptr;
 
-    NETCLIENTNODE* node = s_clientList.NewNode(2, 0, 0);
+    NETCLIENTNODE* node = s_clientList.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     node->m_client = this;
 }
 
@@ -585,7 +595,7 @@ void NetClient::Send(CDataStore* msg) {
     }
 
     if (this->m_suspended) {
-        NetClient::HELDMESSAGE* held = this->m_heldMessages.NewNode(2, 0, 0);
+        NetClient::HELDMESSAGE* held = this->m_heldMessages.NewNode(TSLIST_LINK_BEFORE, 0, 0);
         uint32_t bytes = msg->m_size - msg->m_read;
         void* data;
         msg->GetDataInSitu(data, bytes);
@@ -600,7 +610,7 @@ void NetClient::Send(CDataStore* msg) {
     s_stats[1]++;
     this->m_bytesSent += size;
 
-    if (!connection->m_encrypt) {
+    if (!connection->IsEncrypted()) {
         this->EnableEncryption(connection, nullptr, 0);
     }
 }
@@ -608,14 +618,14 @@ void NetClient::Send(CDataStore* msg) {
 // VERIFY: 30fc936b manual
 // OFFSET: 0x00632C10
 void NetClient::WCCantConnect(WowConnection* connection, uint32_t timeStamp, const NETCONNADDR* addr) {
-    if (connection == this->m_redirectConnection) {
+    if (connection == this->m_newConnection) {
         CDataStore msg;
         msg.Put(static_cast<uint32_t>(CMSG_CONNECT_TO_FAILED));
         msg.Put(this->m_redirectKey);
         msg.Finalize();
         this->Send(&msg);
-        this->m_redirectConnection->Release();
-        this->m_redirectConnection = nullptr;
+        this->m_newConnection->Release();
+        this->m_newConnection = nullptr;
     } else if (connection == this->m_serverConnection) {
         this->m_netEventQueue->AddEvent(EVENT_ID_NET_CANTCONNECT, connection, this, nullptr, 0);
     }
@@ -624,7 +634,7 @@ void NetClient::WCCantConnect(WowConnection* connection, uint32_t timeStamp, con
 // VERIFY: af338d14 manual
 // OFFSET: 0x00632CD0
 void NetClient::Ping() {
-    if (!this->m_serverConnection->m_encrypt) {
+    if (!this->m_serverConnection->IsEncrypted()) {
         return;
     }
 
@@ -664,15 +674,15 @@ void NetClient::HandleIdle() {
 // VERIFY: 4b27bdaa manual
 // OFFSET: 0x00631EA0
 void NetClient::Disconnect() {
-    if (this->m_redirectConnection) {
-        this->m_redirectConnection->SetResponse(nullptr, false);
-        this->m_redirectConnection->Disconnect();
-        this->m_redirectConnection->Release();
-        this->m_redirectConnection = nullptr;
+    if (this->m_newConnection) {
+        this->m_newConnection->SetResponse(nullptr, false);
+        this->m_newConnection->Disconnect();
+        this->m_newConnection->Release();
+        this->m_newConnection = nullptr;
     }
 
     if (this->m_netState == NS_CONNECTED) {
-        this->m_netState = NS_UNK_6;
+        this->m_netState = NS_DISCONNECTING;
         this->m_serverConnection->Disconnect();
         return;
     }
@@ -740,7 +750,7 @@ void NETEVENTQUEUE::Clear() {
 void NETEVENTQUEUE::AddEvent(EVENTID eventId, void* connection, NetClient* client, const void* data, uint32_t size) {
     this->m_critSect.Enter();
 
-    NETEVENTQUEUENODE* node = this->m_eventQueue.NewNode(2, 0, 8);
+    NETEVENTQUEUENODE* node = this->m_eventQueue.NewNode(TSLIST_LINK_BEFORE, 0, SMEM_FLAG_ZEROMEMORY);
     node->m_eventId = eventId;
 
     if (size) {
@@ -753,7 +763,7 @@ void NETEVENTQUEUE::AddEvent(EVENTID eventId, void* connection, NetClient* clien
     }
 
     node->m_timeReceived = OsGetAsyncTimeMs();
-    client->m_refCount.Increment();
+    client->AddRef();
 
     this->m_critSect.Leave();
 }
@@ -761,15 +771,13 @@ void NETEVENTQUEUE::AddEvent(EVENTID eventId, void* connection, NetClient* clien
 // VERIFY: 4d2c7b3d manual
 // OFFSET: 0x00633730
 NETEVENTQUEUE::~NETEVENTQUEUE() {
-    this->m_critSect.Enter();
-    this->m_eventQueue.Clear();
-    this->m_critSect.Leave();
+    this->Clear();
 }
 
 // VERIFY: 75864678 auto
 // OFFSET: 0x00633020
 void NetClient::HandleSuspendComms(WowConnection* connection, CDataStore* msg) {
-    if (connection != this->m_serverConnection || this->m_suspended || !this->m_redirectConnection) {
+    if (connection != this->m_serverConnection || this->m_suspended || !this->m_newConnection) {
         connection->Disconnect();
         return;
     }
@@ -793,18 +801,18 @@ void NetClient::HandleSuspendComms(WowConnection* connection, CDataStore* msg) {
 // VERIFY: 5dad1904 manual
 // OFFSET: 0x00633250
 void NetClient::HandleResumeComms(WowConnection* connection, CDataStore* msg) {
-    if (connection == this->m_redirectConnection) {
+    if (connection == this->m_newConnection) {
         WowConnection* old = this->m_serverConnection;
-        this->m_serverConnection = this->m_redirectConnection;
-        this->m_redirectConnection = nullptr;
+        this->m_serverConnection = this->m_newConnection;
+        this->m_newConnection = nullptr;
         old->SetResponse(nullptr, false);
         old->Disconnect();
         old->Release();
     } else {
-        this->m_redirectConnection->SetResponse(nullptr, false);
-        this->m_redirectConnection->Disconnect();
-        this->m_redirectConnection->Release();
-        this->m_redirectConnection = nullptr;
+        this->m_newConnection->SetResponse(nullptr, false);
+        this->m_newConnection->Disconnect();
+        this->m_newConnection->Release();
+        this->m_newConnection = nullptr;
     }
 
     this->m_suspended = 0;
@@ -841,7 +849,7 @@ void NetClient::HandleRedirectClient(WowConnection* connection, CDataStore* msg)
     msg->Get(port);
     msg->Get(this->m_redirectKey);
 
-    if (this->m_redirectConnection || this->m_suspended) {
+    if (this->m_newConnection || this->m_suspended) {
         CDataStore response;
         response.Put(static_cast<uint32_t>(CMSG_CONNECT_TO_FAILED));
         response.Put(this->m_redirectKey);
@@ -850,7 +858,8 @@ void NetClient::HandleRedirectClient(WowConnection* connection, CDataStore* msg)
         return;
     }
 
-    this->m_redirectConnection = new (SMemAlloc(sizeof(WowConnection), __FILE__, __LINE__, 0)) WowConnection(this, nullptr);
+    this->m_newConnection = new (SMemAlloc(sizeof(WowConnection), __FILE__, __LINE__, 0)) WowConnection(this, nullptr);
+    STORM_ASSERT(m_newConnection);
 
     HMAC<SHA1> hmac;
     SHA1::Digest digest;
@@ -865,6 +874,6 @@ void NetClient::HandleRedirectClient(WowConnection* connection, CDataStore* msg)
     if (memcmp(&digest, proof, sizeof(proof)) || !msg->IsRead() || msg->m_read > msg->m_size) {
         connection->Disconnect();
     } else {
-        this->m_redirectConnection->Connect(address, port, -1);
+        this->m_newConnection->Connect(address, port, -1);
     }
 }

@@ -30,7 +30,7 @@ class CSimpleRender {
     static CGxShader* s_vertexShader[2];
     static int32_t s_mergeEnable;
 
-    static int32_t CalcBatchCounts(CRenderBatch* batch, uint32_t* vertCounts, uint32_t* idxCounts);
+    static int32_t CalcBatchCounts(CRenderBatch* batch, uint32_t* batchVertices, uint32_t* batchIndices);
     static void Destroy();
     static void DrawBatch(CRenderBatch* batch);
     static void Init();
@@ -38,11 +38,22 @@ class CSimpleRender {
 
 class CSimpleFontString : public CSimpleRegion, public CSimpleFontable {
     public:
+    // m_maxLines packing: the XML maxLines count in the low 24 bits, plus a bit the
+    // constructor sets that lets LoadXML apply the inherits/font attributes (inferred name).
+    enum MAX_LINES_BITS : uint32_t {
+        MAX_LINES_MASK = 0xFFFFFF,
+        MAX_LINES_LOAD_XML_FONT = 0x1000000,
+    };
+
     static CDataAllocator s_allocator;
     static int32_t s_metatable;
     static int32_t s_objectType;
     static const char* s_objectTypeName;
 
+    static void* Allocate(std::size_t bytes) { // (inferred)
+        STORM_ASSERT(bytes <= s_allocator.BytesPerData());
+        return s_allocator.GetData(0, typeid(CSimpleFontString).raw_name(), SLOG_OBJECT);
+    }
     static void operator delete(void* ptr);
     static void CreateScriptMetaTable();
     static void DestroyScriptMetaTable();
@@ -58,8 +69,8 @@ class CSimpleFontString : public CSimpleRegion, public CSimpleFontable {
     /* 00F4 */ char* m_text;
     /* 00F8 */ float m_spacing;
     /* 00FC */ HTEXTBLOCK m_string;
-    /* 0100 */ float m_textWidth;
-    /* 0104 */ float m_textHeight;
+    /* 0100 */ float m_cachedWidth; // Scaled text width; GetStringWidth divides by layout scale. Zero invalidates the cache.
+    /* 0104 */ float m_cachedHeight; // Scaled text height; GetStringHeight divides by layout scale. Zero invalidates the cache.
     /* 0108 */ CImVector m_shadowColor;
     /* 010C */ C2Vector m_shadowOffset;
     /* 0114 */ C2Vector m_justificationOffset;
@@ -67,7 +78,7 @@ class CSimpleFontString : public CSimpleRegion, public CSimpleFontable {
     /* 011E */ int16_t m_alphaGradientLength;
     /* 0120 */ uint32_t m_styleFlags;
     /* 0124 */ uint32_t m_settableStyleFlags;
-    /* 0128 */ uint32_t m_maxLines;
+    /* 0128 */ uint32_t m_maxLines; // MAX_LINES_BITS
     /* 012C */ C3Vector m_animPosition;
     /* 0138 */ TSExplicitList<CSimpleEmbeddedTexture, offsetof(CSimpleEmbeddedTexture, m_link)> m_textures;
 

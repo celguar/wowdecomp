@@ -198,7 +198,7 @@ BannedAddOnCache* FindBannedAddOn(const char* name, const char* version) {
     for (_BANNEDADDON* entry = s_bannedAddOns.m_fulllist.Head(); entry; entry = s_bannedAddOns.m_fulllist.Next(entry)) {
         BannedAddOnCache* cache = &entry->m_cache;
 
-        if ((cache->m_flags & 1) && !memcmp(cache->m_nameMd5, nameMd5, sizeof(nameMd5)) && (!memcmp(cache->m_versionMd5, s_emptyMd5, sizeof(s_emptyMd5)) || !memcmp(cache->m_versionMd5, versionMd5, sizeof(versionMd5)))) {
+        if ((cache->m_flags & BANNED_ADDON_FLAG_ACTIVE) && !memcmp(cache->m_nameMd5, nameMd5, sizeof(nameMd5)) && (!memcmp(cache->m_versionMd5, s_emptyMd5, sizeof(s_emptyMd5)) || !memcmp(cache->m_versionMd5, versionMd5, sizeof(versionMd5)))) {
             return cache;
         }
     }
@@ -255,8 +255,8 @@ static _BANNEDADDON* GetBannedAddOn(int32_t id, const int32_t* lastModified, int
 // VERIFY: 4426e36a auto
 // OFFSET: 0x005F45B0
 static void LoadDatabase() {
-    for (int32_t i = 0; i < g_bannedAddOnsDB.m_numRecords; i++) {
-        BannedAddOnsRec* record = i >= 0 && i < g_bannedAddOnsDB.m_numRecords ? &g_bannedAddOnsDB.m_records[i] : nullptr;
+    for (int32_t i = 0; i < g_bannedAddOnsDB.GetNumRecords(); i++) {
+        BannedAddOnsRec* record = i >= 0 && i < g_bannedAddOnsDB.GetNumRecords() ? &g_bannedAddOnsDB.m_records[i] : nullptr;
 
         if (!record) {
             continue;
@@ -303,7 +303,7 @@ static int32_t LoadCache() {
     uint32_t bytes;
 
     do {
-        _BANNEDADDONLOADNODE* node = records.NewNode(2, 0, 8);
+        _BANNEDADDONLOADNODE* node = records.NewNode(TSLIST_LINK_BEFORE, 0, SMEM_FLAG_ZEROMEMORY);
 
         if (!ReadCacheRecord(file, &node->m_cache, &bytes)) {
             records.Clear();

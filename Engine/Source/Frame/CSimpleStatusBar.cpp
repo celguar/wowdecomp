@@ -154,19 +154,24 @@ void CSimpleStatusBar::SetOrientation(ORIENTATION orientation) {
 
 // VERIFY: 4f2300fa auto
 // OFFSET: 0x00961800
-void CSimpleStatusBar::SetMinMaxValues(float minValue, float maxValue) {
-    if (minValue > maxValue) {
-        minValue = maxValue;
+void CSimpleStatusBar::SetMinMaxValues(float min, float max) {
+    if (min > max) {
+        min = max;
     }
 
-    if (this->m_rangeSet && this->m_minValue == minValue && this->m_maxValue == maxValue) {
+    STORM_ASSERT(min <= 1e12);
+    STORM_ASSERT(min >= -1e12);
+    STORM_ASSERT(max <= 1e12);
+    STORM_ASSERT(max >= -1e12);
+
+    if (this->m_rangeSet && this->m_minValue == min && this->m_maxValue == max) {
         return;
     }
 
-    this->m_minValue = minValue;
+    this->m_minValue = min;
     this->m_changed = 1;
     this->m_rangeSet = 1;
-    this->m_maxValue = maxValue;
+    this->m_maxValue = max;
     this->RunOnMinMaxChangedScript();
 
     if (this->m_valueSet) {
@@ -208,6 +213,9 @@ float CSimpleStatusBar::GetAnimValue() const {
     float range = this->m_maxValue - this->m_minValue;
 
     if (range > 0.0f) {
+        STORM_ASSERT(m_minValue <= m_value);
+        STORM_ASSERT(m_value <= m_maxValue);
+        STORM_ASSERT((m_value - m_minValue) <= range);
         return (this->m_value - this->m_minValue) / range;
     }
 
@@ -246,12 +254,12 @@ int32_t CSimpleStatusBar::SetBarTexture(const char* fileName, uint32_t drawLayer
     CSimpleTexture* texture = this->m_barTexture;
 
     if (texture) {
-        texture->SetTexture(fileName, (texture->m_textureFlags >> 2) & 1, (texture->m_textureFlags >> 3) & 1, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
+        texture->SetTexture(fileName, (texture->m_textureFlags & CSimpleTexture::TEXTURE_FLAGS::FLAG_HORIZ_TILE) != 0, (texture->m_textureFlags & CSimpleTexture::TEXTURE_FLAGS::FLAG_VERT_TILE) != 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
         this->SetBarTexture(texture, drawLayer);
         return 1;
     }
 
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     texture = data ? new (data) CSimpleTexture(nullptr, 2, 1) : nullptr;
 
     if (!texture->SetTexture(fileName, 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal)) {

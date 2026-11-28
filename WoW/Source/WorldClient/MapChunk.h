@@ -12,7 +12,9 @@
 #include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/WorldClient/MapBaseObj.h"
+#include "WoW/Source/WorldClient/WorldConstants.h"
 #include "Engine/Source/Tempest/C2iVector.h"
+#include "Engine/Source/Tempest/CRange.h"
 #include "WoW/Source/WorldClient/MapObjGroup.h"
 
 class CFacet;
@@ -37,13 +39,13 @@ struct SMChunk;
 struct SMLayer;
 struct SMLiquidChunk;
 
-class CGxVertexPN {
+class CGxVertexPN { // GxVBF_PN: interleaved position and normal, 24 bytes per vertex.
     public:
     /* 0000 */ C3Vector m_position;
     /* 000C */ C3Vector m_normal;
 };
 
-class CGxVertexPNC {
+class CGxVertexPNC { // GxVBF_PNC: position/normal followed by packed BGRA color, 28 bytes per vertex.
     public:
     /* 0000 */ C3Vector m_position;
     /* 000C */ C3Vector m_normal;
@@ -62,7 +64,7 @@ class CMapChunkMapObjDefLink {
 class CMapChunk : public CMapBaseObj {
     public:
     static float s_geoToTex;
-    static C3Vector vertexList[145];
+    static C3Vector vertexList[TERRAIN_CHUNK_VERTEX_COUNT];
     static int32_t farCornerIndex;
     static int32_t nearCornerIndex;
     static const int32_t cornerVertexIndex[4];
@@ -72,7 +74,7 @@ class CMapChunk : public CMapBaseObj {
     static void InitializeVertexGrid();
     static bool CanMergeChunkLayers(CMapChunk* chunkA, CMapChunk* chunkB);
 
-    /* 0024 */ C2iVector m_aIndex;
+    /* 0024 */ C2iVector aIndex;
     /* 002C */ C2iVector m_sOffset;
     /* 0034 */ C2iVector m_cOffset;
     /* 003C */ CAaSphere m_sphere;
@@ -81,22 +83,22 @@ class CMapChunk : public CMapBaseObj {
     /* 007C */ C3Vector m_topLeftCoords;
     /* 0088 */ float m_distToCamera;
     /* 008C */ CAaBox m_bbox2;
-    /* 00A4 */ CDetailDoodadInst* m_detailDoodadInst;
+    /* 00A4 */ CDetailDoodadInst* detailDoodadInst;
     /* 00A8 */ CMapRenderChunk* m_renderChunk;
     /* 00AC */ int32_t m_bLoaded;
     /* 00B0 */ int32_t m_areaId;
     /* 00B4 */ TSLink<CMapChunk> m_link;
     /* 00BC */ TSLink<CMapChunk> m_sortListLink;
-    /* 00C4 */ TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> > m_doodadDefLinkList;
-    /* 00D0 */ TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> > m_mapObjDefLinkList;
-    /* 00DC */ TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> > m_entityLinkList;
-    /* 00E8 */ TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> > m_lightLinkList;
+    /* 00C4 */ TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> > doodadDefLinkList;
+    /* 00D0 */ TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> > mapObjDefLinkList;
+    /* 00DC */ TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> > entityLinkList;
+    /* 00E8 */ TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> > lightLinkList;
     /* 00F4 */ TSList<SE2SoundKitObject, TSGetExplicitLink<SE2SoundKitObject> > m_soundHandleList;
-    /* 0100 */ TSExplicitList<CChunkLiquid, offsetof(CChunkLiquid, m_chunkLink)> m_liquidChunkLinkList;
+    /* 0100 */ TSExplicitList<CChunkLiquid, offsetof(CChunkLiquid, m_chunkLink)> liquidsList;
     /* 010C */ uint8_t* m_chunkInfoBeginPtr;
     /* 0110 */ SMChunk* m_header;
-    /* 0114 */ uint8_t* m_lowQualityTexMap;
-    /* 0118 */ uint8_t* m_predTexture;
+    /* 0114 */ uint16_t* m_predTex;
+    /* 0118 */ uint8_t* m_noEffectDoodad;
     /* 011C */ float* m_height;
     /* 0120 */ uint32_t* m_vertexShading;
     /* 0124 */ int8_t* m_normals;
@@ -113,9 +115,9 @@ class CMapChunk : public CMapBaseObj {
 
     CMapChunk();
     ~CMapChunk() override;
-    void Create(SIffChunk* headerChunk, bool a3);
-    void CreateRefs(CMapArea* mapChunk, uint32_t* mcrfPtr, uint32_t doodadRefs, uint32_t mapObjRefs);
-    void ProcessIffChunks(bool a3);
+    void Create(SIffChunk* data, bool firstUse);
+    void CreateRefs(CMapArea* area, uint32_t* ref, uint32_t doodadRefs, uint32_t mapObjRefs);
+    void ProcessIffChunks(bool firstUse);
     void CreateBounds();
     int32_t Intersect(int32_t subX, int32_t subY, const C3Ray& ray, float* t);
     void RenderPrep();
@@ -126,8 +128,8 @@ class CMapChunk : public CMapBaseObj {
     void UpdateLights();
     void GetVertexPosition(int32_t index, C3Vector* pos);
     void ClipBufferUpdate();
-    void CreateLiquids(bool a3);
-    void CreateSoundEmitters(bool a3);
+    void CreateLiquids(bool firstUse);
+    void CreateSoundEmitters(bool firstUse);
     void CreateDetailDoodads();
     int32_t LoadDetailDoodadModels();
     void GetLiquidBounds(CAaBox& box) const;
@@ -151,16 +153,57 @@ class CWSoundEmitter {
 };
 
 struct SLTiles {
-    /* 0000 */ char m_tiles [8][8];
+    /* 0000 */ uint8_t m_tiles [LIQUID_TILES_PER_CHUNK_AXIS][LIQUID_TILES_PER_CHUNK_AXIS];
 };
 
+struct SWVert {
+    /* 0000 */ uint8_t m_depth;
+    /* 0001 */ uint8_t m_flow0Pct;
+    /* 0002 */ uint8_t m_flow1Pct;
+    /* 0003 */ uint8_t m_filler;
+    /* 0004 */ float m_height;
+};
+
+struct SOVert {
+    /* 0000 */ uint8_t m_depth;
+    /* 0001 */ uint8_t m_foam;
+    /* 0002 */ uint8_t m_wet;
+    /* 0003 */ uint8_t m_filler;
+};
+
+struct SMVert {
+    /* 0000 */ uint16_t m_s;
+    /* 0002 */ uint16_t m_t;
+    /* 0004 */ float m_height;
+};
+
+// 0.5.3 symbols describe these overlapping legacy MCLQ vertex views.
+// The 3.3.5 reader retains their eight-byte stride, including for ocean data.
 struct SLVert {
-    /* 0000 */ uint8_t unused_0000[8];
+    union {
+        /* 0000 */ SWVert m_waterVert;
+        /* 0000 */ SOVert m_oceanVert;
+        /* 0000 */ SMVert m_magmaVert;
+    };
 };
 
 struct SMChunk {
-    /* 0000 */ uint32_t m_flags;
-    /* 0004 */ C2iVector m_index;
+    // MCNK flags tested by the client.
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        HAS_SHADOW_MAP = 0x1,
+        IMPASSABLE = 0x2,
+        // Legacy MCLQ liquids, in LiquidType order 1..4.
+        LIQUID_WATER = 0x4,
+        LIQUID_OCEAN = 0x8,
+        LIQUID_MAGMA = 0x10,
+        LIQUID_SLIME = 0x20,
+        DO_NOT_FIX_ALPHA_MAP = 0x8000,
+    };
+
+    /* 0000 */ uint32_t m_flags; // FLAGS
+    /* 0004 */ uint32_t indexX;
+    /* 0008 */ uint32_t indexY;
     /* 000C */ uint32_t m_nLayers;
     /* 0010 */ uint32_t m_nDoodadRefs;
     /* 0014 */ uint32_t m_ofsHeight;
@@ -168,16 +211,16 @@ struct SMChunk {
     /* 001C */ uint32_t m_ofsLayer;
     /* 0020 */ uint32_t m_ofsRefs;
     /* 0024 */ uint32_t m_ofsAlpha;
-    /* 0028 */ uint32_t m_sizeAlpha;
+    /* 0028 */ uint32_t sizeAlpha;
     /* 002C */ uint32_t m_ofsShadow;
     /* 0030 */ uint32_t m_sizeShadow;
     /* 0034 */ uint32_t m_areaid;
     /* 0038 */ uint32_t m_nMapObjRefs;
     /* 003C */ uint16_t m_holes;
     /* 003E */ uint16_t unused_003E;
-    /* 0040 */ uint8_t m_lowQualityTextureMap [16];
-    /* 0050 */ uint32_t m_predTex;
-    /* 0054 */ uint32_t m_nEffectDoodad;
+    // 0.5.3 names; 3.3.5 reads eight WORD selector rows and eight BYTE suppression rows.
+    /* 0040 */ uint16_t m_predTex [8];
+    /* 0050 */ uint8_t m_noEffectDoodad [8];
     /* 0058 */ uint32_t m_ofsSndEmitters;
     /* 005C */ uint32_t m_nSndEmitters;
     /* 0060 */ uint32_t m_ofsLiquid;
@@ -196,34 +239,13 @@ struct SWFlowv {
     /* 0024 */ float m_frequency;
 };
 
+// Legacy MCLQ payload: the data prefix of 0.5.3 CChunkLiquid, without its runtime links.
 struct SMLiquidChunk {
-    /* 0000 */ float m_minHeight;
-    /* 0004 */ float m_maxHeight;
-    /* 0008 */ SLVert m_verts [81];
+    /* 0000 */ CRange m_height;
+    /* 0008 */ SLVert m_verts [LIQUID_VERTEX_COUNT_PER_CHUNK];
     /* 0290 */ SLTiles m_tiles;
     /* 02D0 */ uint32_t m_nFlowvs;
     /* 02D4 */ SWFlowv m_flowvs [2];
-};
-
-struct SMVert {
-    /* 0000 */ uint16_t m_s;
-    /* 0002 */ uint16_t m_t;
-    /* 0004 */ float m_height;
-};
-
-struct SOVert {
-    /* 0000 */ char m_depth;
-    /* 0001 */ char m_foam;
-    /* 0002 */ char m_wet;
-    /* 0003 */ char m_filler;
-};
-
-struct SWVert {
-    /* 0000 */ char m_depth;
-    /* 0001 */ char m_flow0Pct;
-    /* 0002 */ char m_flow1Pct;
-    /* 0003 */ char m_filler;
-    /* 0004 */ float m_height;
 };
 
 #endif

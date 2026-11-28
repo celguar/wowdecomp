@@ -223,7 +223,7 @@ class CGxDeviceD3d : public CGxDevice {
     /* 3AD0 */ TSGrowableArray<CGxDeviceD3d::GxVertexDecl> m_gxVertexDecl;
     /* 3AE0 */ LPDIRECT3DVERTEXDECLARATION9 m_d3dVertexDecl [14];
     /* 3B18 */ D3DDISPLAYMODE m_desktopDisplayMode;
-    /* 3B28 */ int32_t m_inScene;
+    /* 3B28 */ BOOL m_inScene;
     /* 3B2C */ int32_t m_ambientOnlyMode;
     /* 3B30 */ D3DFORMAT m_devDepthFormat;
     /* 3B34 */ D3DFORMAT m_devAdapterFormat;
@@ -293,7 +293,7 @@ class CGxDeviceD3d : public CGxDevice {
     virtual void ShaderDestroy(CGxShader*& shader);
     virtual void IShaderReload(CGxShader* shader, const char* path, const char* name);
     virtual void IShaderCreate(CGxShader* shader);
-    virtual void CursorSetVisible(int32_t visible);
+    virtual void CursorSetVisible(BOOL visible);
     virtual void CursorUnlock(uint32_t x, uint32_t y);
     virtual void StereoSetConvergence(float convergence);
     virtual float StereoGetConvergence();
@@ -316,8 +316,8 @@ class CGxDeviceD3d : public CGxDevice {
     static const D3DCULL s_cullMode[3];
     static D3DTEXTUREFILTERTYPE s_filterModes[GxTexFilters_Last][3];
     static const D3DTEXTUREADDRESS s_wrapModes[2];
-    static const uint32_t s_gxAttribToD3dAttribSize[7];
-    static D3DDECLTYPE s_gxAttribToD3dAttribType[7];
+    static const uint32_t s_gxAttribToD3dAttribSize[GxVertexAttribTypes_Last];
+    static D3DDECLTYPE s_gxAttribToD3dAttribType[GxVertexAttribTypes_Last];
     static const D3DDECLUSAGE s_gxAttribToD3dAttribUsage[GxVAs_Last];
     static const uint32_t s_gxAttribToD3dAttribUsageIndex[GxVAs_Last];
 

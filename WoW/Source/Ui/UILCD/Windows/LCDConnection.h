@@ -11,8 +11,15 @@ class CLCDOutput;
 
 class CLCDConnection {
     public:
+    // Named from the handler Update dispatches each queued callback event to.
+    enum CB_EVENT_TYPE : int32_t {
+        CB_EVENT_SOFTBUTTON = 0,
+        CB_EVENT_CONFIGURE = 1,
+        CB_EVENT_NOTIFICATION = 2,
+    };
+
     struct CB_EVENT {
-        /* 0000 */ int32_t m_type;
+        /* 0000 */ CB_EVENT_TYPE m_type;
         /* 0004 */ DWORD m_code;
         /* 0008 */ DWORD m_param1;
         /* 000C */ DWORD m_param2;
@@ -44,7 +51,7 @@ class CLCDConnection {
     virtual int32_t InitializeConnection(lgLcdConnectContextEx& connectContext, lgLcdSoftbuttonsChangedContext* softbuttonsChangedContext);
     virtual int32_t Initialize(lgLcdConnectContext& connectContext, lgLcdSoftbuttonsChangedContext* softbuttonsChangedContext);
     virtual void Shutdown();
-    virtual int32_t IsConnected();
+    virtual BOOL IsConnected();
     virtual int32_t GetConnectionId();
     virtual void Update();
     virtual void OnDeviceArrival(uint32_t displayType);

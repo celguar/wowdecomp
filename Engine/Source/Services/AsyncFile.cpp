@@ -9,7 +9,7 @@
 #include "Engine/Source/Storm/H/storm.h"
 
 // STATIC: 0x00AC3438
-static const char* s_asyncQueueNames[3] = { "Disk Queue", "Net Geometry Queue", "Net Texture Queue" };
+static const char* const s_asyncQueueNames[3] = { "Disk Queue", "Net Geometry Queue", "Net Texture Queue" };
 
 // STATIC: 0x00AC3444
 static uint32_t s_handlerTimeout = 100;
@@ -22,14 +22,14 @@ static TSList<CAsyncThread, TSGetLink<CAsyncThread> > s_asyncThreadList;
 
 namespace AsyncFileRead {
     // STATIC: 0x00AC3460
-    TSExplicitList<CAsyncObject, offsetof(CAsyncObject, m_link)> s_asyncFileReadFreeList;
+    static TSExplicitList<CAsyncObject, offsetof(CAsyncObject, link)> s_asyncFileReadFreeList;
 }
 
 // STATIC: 0x00AC346C
-static TSExplicitList<CAsyncObject, offsetof(CAsyncObject, m_link)> s_asyncFileReadPostList;
+static TSExplicitList<CAsyncObject, offsetof(CAsyncObject, link)> s_asyncFileReadPostList;
 
 // STATIC: 0x00B4A1EC
-static int32_t s_queueLocked;
+static int32_t s_userQueueLock;
 
 // STATIC: 0x00B4A1F0
 static void (*s_ingameStartCallback)();
@@ -60,7 +60,7 @@ static uint32_t s_threadSleep;
 
 namespace AsyncFileRead {
     // STATIC: 0x00B4A21C
-    SEvent s_shutdownEvent(1, 0);
+    static SEvent s_shutdownEvent(1, 0);
 }
 
 // STATIC: 0x00B4A220
@@ -70,12 +70,12 @@ static TSGrowableArray<void (*)()> s_asyncPollHandlers;
 static TSGrowableArray<int32_t (*)()> s_asyncStatusHandlers;
 
 // STATIC: 0x00B4A240
-SCritSect g_queueLock;
+static SCritSect g_queueLock;
 
 // VERIFY: 5a8ab5a9 auto
 // OFFSET: 0x004B50A0
-int32_t CAsyncObject::IsPending() {
-    return !this->m_isCurrent && !this->m_isRead && !this->m_isProcessed;
+BOOL CAsyncObject::IsPending() const {
+    return !this->isCurrent && !this->isRead && !this->isProcessed;
 }
 
 // VERIFY: 6305e7e3 auto
@@ -95,7 +95,7 @@ void AsyncFileReadIngameProgressCallback(void (*startCallback)(), void (*progres
 // VERIFY: 08e4e19e auto
 // OFFSET: 0x004B9950
 void AsyncFile::EnterQueueLock() {
-    s_queueLocked = 1;
+    s_userQueueLock = 1;
     g_queueLock.Enter();
 }
 
@@ -103,19 +103,19 @@ void AsyncFile::EnterQueueLock() {
 // OFFSET: 0x004B9970
 void AsyncFile::LeaveQueueLock() {
     g_queueLock.Leave();
-    s_queueLocked = 0;
+    s_userQueueLock = 0;
 }
 
 // VERIFY: ca9687a9 manual
 // OFFSET: 0x004B9AB0
-void AsyncFileReadUnloadPostList() {
+static void AsyncFileReadUnloadPostList() {
     CAsyncObject* object;
 
     while ((object = s_asyncFileReadPostList.Head()) != nullptr) {
-        object->m_link.Unlink();
+        object->link.Unlink();
 
-        if (object->m_userPostUnloadCallback) {
-            reinterpret_cast<void (*)(void*)>(object->m_userPostUnloadCallback)(object->m_userArg);
+        if (object->userPostUnloadCallback) {
+            object->userPostUnloadCallback(object->userArg);
         }
     }
 }
@@ -135,15 +135,16 @@ int32_t AsyncFileReadPollHandler(const void* data, void* param) {
             break;
         }
 
-        object->m_link.Unlink();
+        object->link.Unlink();
 
         if (object == s_asyncWaitObject) {
             s_asyncWaitObject = nullptr;
         }
 
-        object->m_isProcessed = 1;
+        object->isProcessed = 1;
         g_queueLock.Leave();
-        reinterpret_cast<void (*)(void*)>(object->m_userPostloadCallback)(object->m_userArg);
+        STORM_ASSERT(object->userPostloadCallback);
+        object->userPostloadCallback(object->userArg);
         s_progressCount--;
 
         if (OsGetAsyncTimeMs() - start > s_handlerTimeout) {
@@ -185,23 +186,25 @@ void AsyncFileReadAddStatusHandler(int32_t (*handler)()) {
 // VERIFY: 75b60811 manual
 // OFFSET: 0x004B9DE0
 void AsyncFileReadDestroyObject(CAsyncObject* object) {
+    STORM_ASSERT(object);
+
     g_queueLock.Enter();
 
-    if (object->m_isCurrent) {
+    if (object->isCurrent) {
         DebugLog("AsyncFileReadDestroyObject()");
         g_queueLock.Leave();
 
-        while (object->m_isCurrent) {
+        while (object->isCurrent) {
             OsSleep(1);
         }
 
         g_queueLock.Enter();
     }
 
-    object->m_link.Unlink();
+    object->link.Unlink();
 
-    if (object->m_file) {
-        SFileCloseFile(object->m_file);
+    if (object->file) {
+        SFileCloseFile(object->file);
     }
 
     AsyncFileRead::s_asyncFileReadFreeList.LinkToHead(object);
@@ -210,7 +213,7 @@ void AsyncFileReadDestroyObject(CAsyncObject* object) {
 
 // VERIFY: 37b4ae03 auto
 // OFFSET: 0x004B9E90
-void DefaultAsyncObjectCleanupCallback(CAsyncObject* object) {
+static void DefaultAsyncObjectCleanupCallback(CAsyncObject* object) {
     AsyncFileReadDestroyObject(object);
 }
 
@@ -219,17 +222,17 @@ void DefaultAsyncObjectCleanupCallback(CAsyncObject* object) {
 int32_t AsyncFile::Cancel(CAsyncObject* object, void (*callback)(CAsyncObject*)) {
     g_queueLock.Enter();
 
-    if (object->m_isCurrent) {
-        object->m_userArg = object;
-        object->m_userPostUnloadCallback = reinterpret_cast<void*>(callback ? callback : DefaultAsyncObjectCleanupCallback);
-        object->m_userPostloadCallback = object->m_userPostUnloadCallback;
+    if (object->isCurrent) {
+        object->userArg = object;
+        object->userPostUnloadCallback = reinterpret_cast<CAsyncObject::POST_CALLBACK>(callback ? callback : DefaultAsyncObjectCleanupCallback);
+        object->userPostloadCallback = object->userPostUnloadCallback;
         g_queueLock.Leave();
 
         return 0;
     }
 
-    SFileCloseFile(object->m_file);
-    object->m_link.Unlink();
+    SFileCloseFile(object->file);
+    object->link.Unlink();
     AsyncFileRead::s_asyncFileReadFreeList.LinkToHead(object);
     g_queueLock.Leave();
 
@@ -238,9 +241,11 @@ int32_t AsyncFile::Cancel(CAsyncObject* object, void (*callback)(CAsyncObject*))
 
 // VERIFY: 8a117547 manual
 // OFFSET: 0x004B9F40
-int32_t NetQueuePromoteLocalFiles(const void* data, void* param) {
+static int32_t NetQueuePromoteLocalFiles(const void* data, void* param) {
     // STATIC: 0x00B4A268
     static uint32_t s_lastPromoteTime;
+
+    STORM_ASSERT(SFile::IsStreamingMode());
 
     uint32_t time = OsGetAsyncTimeMs();
 
@@ -249,14 +254,14 @@ int32_t NetQueuePromoteLocalFiles(const void* data, void* param) {
         g_queueLock.Enter();
 
         for (int32_t i = 1; i < 3; i++) {
-            CAsyncObject* object = s_asyncQueues[i]->m_readList.Head();
+            CAsyncObject* object = s_asyncQueues[i]->readList.Head();
 
-            while (!s_asyncQueues[i]->m_readList.IsEnd(object)) {
-                CAsyncObject* next = s_asyncQueues[i]->m_readList.RawNext(object);
+            while (!s_asyncQueues[i]->readList.IsEnd(object)) {
+                CAsyncObject* next = s_asyncQueues[i]->readList.RawNext(object);
 
-                if (SFile::FileIsLocal(object->m_file, 6) == 1) {
-                    s_asyncQueues[0]->m_readList.LinkToTail(object);
-                    object->m_queue = s_asyncQueues[0];
+                if (SFile::FileIsLocal(object->file, 6) == SFILE_LOCAL_YES) {
+                    s_asyncQueues[0]->readList.LinkToTail(object);
+                    object->queue = s_asyncQueues[0];
                 }
 
                 object = next;
@@ -275,6 +280,8 @@ void AsyncFileReadWait(CAsyncObject* object) {
     // STATIC: 0x00B4A26C
     static int32_t s_waiting;
 
+    STORM_ASSERT(object);
+
     if (s_waiting) {
         SErrDisplayAppFatal("AsyncFileReadWait(): s_waiting != FALSE");
     }
@@ -282,26 +289,28 @@ void AsyncFileReadWait(CAsyncObject* object) {
     s_waiting++;
     g_queueLock.Enter();
 
-    if (object->m_isProcessed) {
+    if (object->isProcessed) {
         g_queueLock.Leave();
         return;
     }
 
+    STORM_ASSERT(s_asyncWaitObject == nullptr); // 12213: "s_asyncWaitObject == __null"
     s_asyncWaitObject = object;
 
-    if (!object->m_isCurrent && !object->m_isRead) {
-        object->m_link.Unlink();
-        object->m_queue->m_readList.LinkToHead(object);
+    if (!object->isCurrent && !object->isRead) {
+        STORM_ASSERT(object->queue);
+        object->link.Unlink();
+        object->queue->readList.LinkToHead(object);
     }
 
     g_queueLock.Leave();
 
     if (SFile::IsStreamingMode()) {
-        SFile::SetFilePriority(object->m_file, 1, 0);
+        SFile::SetFilePriority(object->file, 1, 0);
     }
 
     char name[256];
-    SFile::GetActualFileName(object->m_file, name, sizeof(name));
+    SFile::GetActualFileName(object->file, name, sizeof(name));
     DebugLog("AsyncFileReadWait():%s\n", name);
 
     if (s_ingameStartCallback) {
@@ -333,26 +342,26 @@ CAsyncObject* AsyncFileReadAllocObject() {
     CAsyncObject* object = AsyncFileRead::s_asyncFileReadFreeList.Head();
 
     if (!object) {
-        object = AsyncFileRead::s_asyncFileReadFreeList.NewNode(1, 0, 0);
+        object = AsyncFileRead::s_asyncFileReadFreeList.NewNode(TSLIST_LINK_AFTER, 0, 0);
     }
 
-    object->m_link.Unlink();
+    object->link.Unlink();
     g_queueLock.Leave();
 
-    object->m_file = nullptr;
-    object->m_buffer = nullptr;
-    object->m_size = 0;
-    object->m_userArg = nullptr;
-    object->m_userPostloadCallback = nullptr;
-    object->m_userPostUnloadCallback = nullptr;
-    object->m_queue = nullptr;
-    object->m_isProcessed = 0;
-    object->m_isRead = 0;
-    object->m_isCurrent = 0;
+    object->file = nullptr;
+    object->buffer = nullptr;
+    object->size = 0;
+    object->userArg = nullptr;
+    object->userPostloadCallback = nullptr;
+    object->userPostUnloadCallback = nullptr;
+    object->queue = nullptr;
+    object->isProcessed = 0;
+    object->isRead = 0;
+    object->isCurrent = 0;
     object->m_char24 = 0;
     object->m_char25 = 0;
-    object->m_queuedFrame = 0;
-    object->m_priority = 126;
+    object->queuedFrame = 0;
+    object->priority = 126;
 
     return object;
 }
@@ -365,44 +374,48 @@ CAsyncQueue::~CAsyncQueue() {
 // VERIFY: 69785110 manual
 // OFFSET: 0x004BA3D0
 void AsyncFileReadLinkObject(CAsyncObject* object, int32_t urgent) {
-    if (!object->m_queue) {
+    if (!object->queue) {
         return;
     }
 
-    object->m_link.Unlink();
+    STORM_ASSERT(!object->isRead);
+    STORM_ASSERT(!object->isCurrent);
+    STORM_ASSERT(!object->isProcessed);
 
-    for (CAsyncObject* other = object->m_queue->m_readList.Head(); !object->m_queue->m_readList.IsEnd(other); other = object->m_queue->m_readList.RawNext(other)) {
-        if (object->m_priority <= other->m_priority && (urgent || object->m_priority != other->m_priority)) {
-            object->m_queue->m_readList.LinkNode(object, 2, other);
+    object->link.Unlink();
+
+    for (CAsyncObject* other = object->queue->readList.Head(); !object->queue->readList.IsEnd(other); other = object->queue->readList.RawNext(other)) {
+        if (object->priority <= other->priority && (urgent || object->priority != other->priority)) {
+            object->queue->readList.LinkNode(object, TSLIST_LINK_BEFORE, other);
             object->m_char25 = 0;
             return;
         }
     }
 
-    object->m_queue->m_readList.LinkToTail(object);
+    object->queue->readList.LinkToTail(object);
     object->m_char25 = 0;
 }
 
 // VERIFY: c818c689 manual
 // OFFSET: 0x004BA530
-void AsyncFileReadLinkStaleObject(CAsyncObject* object, int32_t urgent) {
-    object->m_link.Unlink();
+static void AsyncFileReadLinkStaleObject(CAsyncObject* object, int32_t urgent) {
+    object->link.Unlink();
 
-    for (CAsyncObject* other = object->m_queue->m_staleList.Head(); !object->m_queue->m_staleList.IsEnd(other); other = object->m_queue->m_staleList.RawNext(other)) {
-        if (object->m_priority <= other->m_priority && (urgent || object->m_priority != other->m_priority)) {
-            object->m_queue->m_staleList.LinkNode(object, 2, other);
+    for (CAsyncObject* other = object->queue->m_staleList.Head(); !object->queue->m_staleList.IsEnd(other); other = object->queue->m_staleList.RawNext(other)) {
+        if (object->priority <= other->priority && (urgent || object->priority != other->priority)) {
+            object->queue->m_staleList.LinkNode(object, TSLIST_LINK_BEFORE, other);
             object->m_char25 = 1;
             return;
         }
     }
 
-    object->m_queue->m_staleList.LinkToTail(object);
+    object->queue->m_staleList.LinkToTail(object);
     object->m_char25 = 1;
 }
 
 // VERIFY: 28f905c7 manual
 // OFFSET: 0x004BA680
-uint32_t STORMAPI AsyncFileReadThread(void* param) {
+static uint32_t STORMAPI AsyncFileReadThread(void* param) {
     CAsyncThread* thread = static_cast<CAsyncThread*>(param);
     CAsyncQueue* queue = thread->m_queue;
     PropSelectContext(s_propContext);
@@ -413,10 +426,10 @@ uint32_t STORMAPI AsyncFileReadThread(void* param) {
         while (true) {
             g_queueLock.Enter();
 
-            CAsyncObject* object = queue->m_readList.Head();
+            CAsyncObject* object = queue->readList.Head();
 
             if (object) {
-                if (queue->m_frameLimited && g_theGxDevicePtr->m_frameCount - object->m_queuedFrame > 3) {
+                if (queue->m_frameLimited && g_theGxDevicePtr->m_frameCount - object->queuedFrame > 3) {
                     AsyncFileReadLinkStaleObject(object, 1);
                     g_queueLock.Leave();
                     continue;
@@ -429,24 +442,34 @@ uint32_t STORMAPI AsyncFileReadThread(void* param) {
                 }
             }
 
-            object->m_link.Unlink();
-            object->m_queue = nullptr;
-            object->m_isCurrent = 1;
-            thread->m_currentObject = object;
+            object->link.Unlink();
+            STORM_ASSERT(!thread->currentObject);
+            STORM_ASSERT(!object->isCurrent);
+            STORM_ASSERT(object->queue == queue);
+            object->queue = nullptr;
+            object->isCurrent = 1;
+            thread->currentObject = object;
             g_queueLock.Leave();
 
+            STORM_ASSERT(!object->isRead);
+            STORM_ASSERT(!object->isProcessed);
+            STORM_ASSERT(object->file);
+            STORM_ASSERT(object->buffer);
+            STORM_ASSERT(object->size);
+            STORM_ASSERT(object->userPostloadCallback);
+
             for (int32_t retries = 10; retries; ) {
-                if (SFile::IsStreamingMode() && object->m_file->m_type) {
-                    SFile::MakeFileLocal(object->m_file, (object->m_priority > 127) + 1, true);
+                if (SFile::IsStreamingMode() && object->file->m_type) {
+                    SFile::MakeFileLocal(object->file, (object->priority > 127) + 1, true);
                 }
 
-                if (SFileReadFile(object->m_file, object->m_buffer, object->m_size, nullptr, nullptr, 0)) {
+                if (SFileReadFile(object->file, object->buffer, object->size, nullptr, nullptr, 0)) {
                     break;
                 }
 
                 if (!--retries) {
                     char name[512];
-                    SFile::GetActualFileName(object->m_file, name, sizeof(name));
+                    SFile::GetActualFileName(object->file, name, sizeof(name));
                     char error[512];
                     SErrGetErrorStr(SErrGetLastError(), error, sizeof(error));
                     DebugLog("AsyncFileReadThread() failed reading %s: %s", name, error);
@@ -455,9 +478,9 @@ uint32_t STORMAPI AsyncFileReadThread(void* param) {
 
             g_queueLock.Enter();
             s_asyncFileReadPostList.LinkToTail(object);
-            thread->m_currentObject = nullptr;
-            object->m_isCurrent = 0;
-            object->m_isRead = 1;
+            thread->currentObject = nullptr;
+            object->isCurrent = 0;
+            object->isRead = 1;
             g_queueLock.Leave();
 
             if (s_threadSleep && ++count == s_threadSleep) {
@@ -475,16 +498,16 @@ uint32_t STORMAPI AsyncFileReadThread(void* param) {
 
 // VERIFY: 1d3b9267 manual
 // OFFSET: 0x004BA8E0
-CAsyncQueue* AsyncFileReadCreateQueue() {
-    return s_asyncQueueList.NewNode(2, 0, 0);
+static CAsyncQueue* AsyncFileReadCreateQueue() {
+    return s_asyncQueueList.NewNode(TSLIST_LINK_BEFORE, 0, 0);
 }
 
 // VERIFY: 3de6d82d auto
 // OFFSET: 0x004BA980
-void AsyncFileReadCreateThread(CAsyncQueue* queue, const char* name) {
-    CAsyncThread* thread = s_asyncThreadList.NewNode(2, 0, 0);
+static void AsyncFileReadCreateThread(CAsyncQueue* queue, const char* name) {
+    CAsyncThread* thread = s_asyncThreadList.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     thread->m_queue = queue;
-    thread->m_currentObject = nullptr;
+    thread->currentObject = nullptr;
     SThread::Create(AsyncFileReadThread, thread, thread->m_thread, const_cast<char*>(name), 0);
 }
 
@@ -527,30 +550,41 @@ void AsyncFileReadInitialize(uint32_t threadSleep, uint32_t handlerTimeout) {
         s_asyncQueues[2]->m_frameLimited = 1;
     }
 
-    s_queueLocked = 0;
+    s_userQueueLock = 0;
 }
 
 // VERIFY: 35423985 auto
 // OFFSET: 0x004BAB50
 void AsyncFileReadObject(CAsyncObject* object, int32_t urgent) {
+    STORM_ASSERT(object);
+    STORM_ASSERT(!object->isRead);
+    STORM_ASSERT(!object->queue);
+    STORM_ASSERT(!object->isCurrent);
+    STORM_ASSERT(!object->isProcessed);
+    STORM_ASSERT(object->file);
+    STORM_ASSERT(object->buffer);
+    STORM_ASSERT(object->size);
+    STORM_ASSERT(object->userPostloadCallback);
+
     CAsyncQueue* queue = s_asyncQueues[0];
 
     if (SFile::IsStreamingMode()) {
-        int32_t local = SFile::FileIsLocal(object->m_file, 6);
+        int32_t local = SFile::FileIsLocal(object->file, 6);
 
-        if (!local || local == 2) {
+        if (local == SFILE_LOCAL_NO || local == SFILE_LOCAL_PARTIAL) {
             object->m_char24 = 1;
-            queue = object->m_priority > 127 ? s_asyncQueues[2] : s_asyncQueues[1];
+            queue = object->priority > 127 ? s_asyncQueues[2] : s_asyncQueues[1];
         }
     }
 
+    STORM_ASSERT(queue);
     g_queueLock.Enter();
-    object->m_queue = queue;
+    object->queue = queue;
 
     if (object == s_asyncWaitObject) {
-        object->m_priority = object->m_priority > 127 ? 128 : 0;
-        object->m_queuedFrame = g_theGxDevicePtr->m_frameCount;
-        queue->m_readList.LinkToHead(object);
+        object->priority = object->priority > 127 ? 128 : 0;
+        object->queuedFrame = g_theGxDevicePtr->m_frameCount;
+        queue->readList.LinkToHead(object);
         object->m_char25 = 0;
     } else if (queue->m_frameLimited) {
         AsyncFileReadLinkStaleObject(object, urgent);
@@ -561,14 +595,15 @@ void AsyncFileReadObject(CAsyncObject* object, int32_t urgent) {
     g_queueLock.Leave();
 
     if (SFile::IsStreamingMode()) {
-        SFile::SetFilePriority(object->m_file, 0, 0);
+        SFile::SetFilePriority(object->file, 0, 0);
     }
 }
 
 // VERIFY: 2f496060 auto
 // OFFSET: 0x004BAC20
 void AsyncFileReadIncreasePriority(CAsyncObject* object) {
-    object->m_queuedFrame = g_theGxDevicePtr->m_frameCount;
+    STORM_ASSERT(s_userQueueLock);
+    object->queuedFrame = g_theGxDevicePtr->m_frameCount;
 
     if (object->m_char25) {
         AsyncFileReadLinkObject(object, 1);
@@ -586,16 +621,22 @@ void AsyncFileReadDestroy() {
     AsyncFileReadUnloadPostList();
     AsyncFileRead::s_asyncFileReadFreeList.Clear();
 
+#if defined(WOWDECOMP_ASSERTIONS)
     for (CAsyncQueue* queue = s_asyncQueueList.Head(); !s_asyncQueueList.IsEnd(queue); queue = s_asyncQueueList.RawNext(queue)) {
+        STORM_ASSERT(queue->readList.Head() == nullptr); // 12213: "queue->readList.Head() == __null"
     }
+#endif
 
     s_asyncQueueList.Clear();
     s_asyncQueues[0] = nullptr;
     s_asyncQueues[1] = nullptr;
     s_asyncQueues[2] = nullptr;
 
+#if defined(WOWDECOMP_ASSERTIONS)
     for (CAsyncThread* thread = s_asyncThreadList.Head(); !s_asyncThreadList.IsEnd(thread); thread = s_asyncThreadList.RawNext(thread)) {
+        STORM_ASSERT(thread->currentObject == nullptr); // 12213: "thread->currentObject == __null"
     }
+#endif
 
     s_asyncThreadList.Clear();
     s_asyncPollHandlers.SetCount(0);
@@ -620,13 +661,13 @@ bool AsyncFileReadIsReading() {
     bool reading = false;
 
     for (CAsyncThread* thread = s_asyncThreadList.Head(); !s_asyncThreadList.IsEnd(thread); thread = s_asyncThreadList.RawNext(thread)) {
-        if (thread->m_currentObject) {
+        if (thread->currentObject) {
             reading = true;
         }
     }
 
     for (CAsyncQueue* queue = s_asyncQueueList.Head(); !s_asyncQueueList.IsEnd(queue); queue = s_asyncQueueList.RawNext(queue)) {
-        if (queue->m_readList.Head()) {
+        if (queue->readList.Head()) {
             reading = true;
         }
     }

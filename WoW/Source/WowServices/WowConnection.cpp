@@ -13,7 +13,7 @@
 WowConnection::IDBITS WowConnection::s_idBits;
 
 // STATIC: 0x00B38D00
-static uint32_t s_unused_B38D00;
+static uint32_t s_destroyed;
 
 // STATIC: 0x00B38D04
 static int32_t s_sendNodeCount;
@@ -53,11 +53,11 @@ static const uint8_t s_defaultSeed[32] = { 0xCC, 0x98, 0xAE, 0x04, 0xE8, 0x97, 0
 
 // INLINED
 void WowConnection::IDBITS::SetCount(uint32_t count) {
-    this->m_count = count;
-    this->m_bits.SetCount(count ? ((count - 1) >> 5) + 1 : 0);
+    this->m_numBits = count;
+    this->m_array.SetCount(count ? ((count - 1) >> 5) + 1 : 0);
 
-    if (this->m_count) {
-        memset(this->m_bits.m_data, 0, sizeof(uint32_t) * this->m_bits.m_count);
+    if (this->m_numBits) {
+        memset(this->m_array.m_data, 0, sizeof(uint32_t) * this->m_array.m_count);
     }
 }
 
@@ -94,8 +94,8 @@ void WowConnection::SetEncryptionKey(const uint8_t* key, uint8_t keyLength, uint
 // VERIFY: 9c7e0bb3 manual
 // OFFSET: 0x00466DB0
 void WowConnection::IDBITS::Or(const WowConnection::IDBITS& source) {
-    for (int32_t i = 0; i < static_cast<int32_t>(source.m_bits.m_count); i++) {
-        this->m_bits.m_data[i] |= source.m_bits.m_data[i];
+    for (int32_t i = 0; i < static_cast<int32_t>(source.m_array.m_count); i++) {
+        this->m_array.m_data[i] |= source.m_array.m_data[i];
     }
 }
 
@@ -181,6 +181,7 @@ void WowConnection::SetResponse(WowConnectionResponse* response, bool deferred) 
 // OFFSET: 0x00466750
 void WowConnection::AcquireResponseRef() {
     this->m_responseLock.Enter();
+    STORM_ASSERT(m_responseRef == 0 || GetState() == WOWC_LISTENING);
     this->m_responseRef++;
     this->m_responseRefThread = SGetCurrentThreadId();
     this->m_responseLock.Leave();
@@ -192,6 +193,7 @@ void WowConnection::ReleaseResponseRef() {
     this->m_responseLock.Enter();
 
     WowConnectionResponse* pendingResponse = this->m_pendingResponse;
+    STORM_ASSERT(m_responseRef > 0);
     this->m_responseRef--;
 
     if (pendingResponse) {
@@ -243,17 +245,12 @@ void WowConnection::Init(WowConnectionResponse* response, void (*threadInit)()) 
     this->m_pendingResponse = nullptr;
     this->m_maxSendDepth = 100000;
     this->m_sendDepth = 0;
-    this->m_sendBytes = 0;
+    this->m_sendDepthBytes = 0;
     this->m_oldsock = -1;
     this->m_notifyWriteReady = 0;
     this->unused_0144 = -1;
 
-    WOW_CONN_STATE oldState = this->m_connState;
-    this->m_connState = WOWC_UNINITIALIZED;
-
-    if (WowConnection::s_network) {
-        WowConnection::s_network->PlatformChangeState(this, oldState);
-    }
+    this->SetState(WOWC_UNINITIALIZED);
 
     this->m_response = response;
     this->unused_000C = 0;
@@ -279,17 +276,11 @@ void WowConnection::Init(WowConnectionResponse* response, void (*threadInit)()) 
     this->m_readBufferSize = 0;
     this->m_event = nullptr;
     this->m_encrypt = false;
-    this->m_uint375 = 0;
-    this->m_uint376 = 0;
+    this->SetEncryptedOpcodeSizes(0, 0);
     memset(this->m_sendKeyInit, 0, sizeof(this->m_sendKeyInit));
     memset(this->m_receiveKeyInit, 0, sizeof(this->m_receiveKeyInit));
 
-    oldState = this->m_connState;
-    this->m_connState = WOWC_INITIALIZED;
-
-    if (WowConnection::s_network) {
-        WowConnection::s_network->PlatformChangeState(this, oldState);
-    }
+    this->SetState(WOWC_INITIALIZED);
 
     this->m_type = WOWC_TYPE_MESSAGES;
 }
@@ -457,21 +448,21 @@ void WowConnection::MarkSocketId(int32_t sock) {
 
     WowConnection::s_idLock.Enter();
 
-    if (sock >= static_cast<int32_t>(WowConnection::s_idBits.m_count)) {
-        int32_t count = WowConnection::s_idBits.m_count;
+    if (sock >= static_cast<int32_t>(WowConnection::s_idBits.m_numBits)) {
+        int32_t count = WowConnection::s_idBits.m_numBits;
 
         do {
             count *= 2;
         } while (sock >= count);
 
         WowConnection::IDBITS bits;
-        bits.SetCount(WowConnection::s_idBits.m_count);
+        bits.SetCount(WowConnection::s_idBits.m_numBits);
         bits.Or(WowConnection::s_idBits);
         WowConnection::s_idBits.SetCount(count);
         WowConnection::s_idBits.Or(bits);
     }
 
-    WowConnection::s_idBits.m_bits.m_data[sock >> 5] |= 1 << (sock & 0x1F);
+    WowConnection::s_idBits.Set(sock);
 
     WowConnection::s_idLock.Leave();
 }
@@ -574,7 +565,9 @@ bool WowConnection::Connect(uint32_t address, uint16_t port, int32_t timeout) {
 // VERIFY: 30cc0530 manual
 // OFFSET: 0x00466B90
 void WowConnection::DestroyOsNet() {
-    s_unused_B38D00 = 1;
+    STORM_ASSERT(!s_destroyed);
+
+    s_destroyed = 1;
 
     if (!WowConnection::s_network) {
         return;
@@ -594,7 +587,7 @@ int32_t WowConnection::InitOsNet(bool (*netAddrFilter)(const NETADDR* addr), voi
         WowConnection::s_idBits.SetCount(256);
         WDataStore::StaticInitialize();
         WowConnection::s_verifyAddr = netAddrFilter;
-        s_unused_B38D00 = 0;
+        s_destroyed = 0;
 
         if (static_cast<uint32_t>(numThreads) > 32) {
             numThreads = 32;

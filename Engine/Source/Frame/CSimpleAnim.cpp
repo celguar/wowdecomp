@@ -1,3 +1,4 @@
+#include "Engine/Source/Tempest/CMath.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -23,7 +24,7 @@ int32_t CSimpleAnim::s_metatable = LUA_NOREF;
 int32_t CSimpleAnim::s_objectType;
 
 // STATIC: 0x00AC138C
-const char* CSimpleAnim::s_objectTypeName = "Animation";
+const char* const CSimpleAnim::s_objectTypeName = "Animation";
 
 // INLINED
 int32_t CSimpleAnim::GetObjectType() {
@@ -51,15 +52,15 @@ void CSimpleAnimSCurveSmoother::SetWeights(float in, float out) {
 // OFFSET: 0x00497BA0
 float CSimpleAnimSCurveSmoother::GetSmoothProgress(float progress) {
     if (fabsf(this->m_in) >= 0.001f && fabsf(this->m_out) >= 0.001f) {
-        return 0.5f - cosf(progress * 3.1415927f) * 0.5f;
+        return 0.5f - cosf(progress * PI) * 0.5f;
     }
 
     if (fabsf(this->m_in) >= 0.001f) {
-        return 1.0f - cosf(progress * 1.5707964f);
+        return 1.0f - cosf(progress * HALF_PI);
     }
 
     if (fabsf(this->m_out) >= 0.001f) {
-        return cosf((progress + 1.0f) * 1.5707964f) * -1.0f;
+        return cosf((progress + 1.0f) * HALF_PI) * -1.0f;
     }
 
     return progress;
@@ -149,6 +150,7 @@ bool CSimpleAnim::GetSmoothing(float& in, float& out) {
 // VERIFY: 78802c25 auto
 // OFFSET: 0x00497AC0
 void CSimpleAnim::RunOnUpdateScript(float elapsedSec) {
+    STORM_ASSERT(!(m_flags & SIMPLEANIM_FLAG_IS_LOADING));
     if (this->m_onUpdate.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushnumber(L, elapsedSec);
@@ -216,11 +218,9 @@ void CSimpleAnim::LoadXML_Scripts(XMLNode* node, CStatus* status) {
 // VERIFY: eb02a39f manual
 // OFFSET: 0x00497E40
 void CSimpleAnim::PostLoadXML(XMLNode* node, CStatus* status) {
-    this->m_flags ^= 1;
+    this->m_flags ^= ANIM_FLAGS::SIMPLEANIM_FLAG_IS_LOADING;
 
-    if (this->m_onLoad.m_luaRef) {
-        this->RunScript(this->m_onLoad, 0, nullptr);
-    }
+    this->RunOnLoadScript();
 }
 
 // VERIFY: 25606c0d auto
@@ -228,9 +228,10 @@ void CSimpleAnim::PostLoadXML(XMLNode* node, CStatus* status) {
 void CSimpleAnim::Pause() {
     this->m_group->Pause();
 
-    if (this->m_playState == 1) {
-        this->m_playState = 2;
+    if (this->m_playState == CSimpleAnim::ANIM_PLAY_STATE::STATE_PLAYING) {
+        this->m_playState = CSimpleAnim::ANIM_PLAY_STATE::STATE_PAUSED;
 
+        STORM_ASSERT(!(m_flags & SIMPLEANIM_FLAG_IS_LOADING));
         if (this->m_onPause.m_luaRef) {
             this->RunScript(this->m_onPause, 0, nullptr);
         }
@@ -388,7 +389,7 @@ bool CSimpleAnim::OnUpdate(float elapsedSec, float& consumed) {
         return true;
     }
 
-    if (this->m_playState == 2) {
+    if (this->m_playState == CSimpleAnim::ANIM_PLAY_STATE::STATE_PAUSED) {
         this->Apply(this->m_smoothProgress);
         return false;
     }
@@ -401,6 +402,7 @@ bool CSimpleAnim::OnUpdate(float elapsedSec, float& consumed) {
         return false;
     }
 
+    STORM_ASSERT(!(m_flags & SIMPLEANIM_FLAG_IS_LOADING));
     if (this->m_onFinished.m_luaRef) {
         this->RunScript(this->m_onFinished, 0, nullptr);
     }
@@ -415,7 +417,7 @@ CSimpleAnim::CSimpleAnim(CSimpleAnimGroup* group) {
     this->unused_002C = 0;
     this->m_order = -1;
     this->m_flags = 0;
-    this->m_playState = 0;
+    this->m_playState = CSimpleAnim::ANIM_PLAY_STATE::STATE_STOPPED;
     this->m_loopState = 0;
     this->m_startDelay = 0.0f;
     this->m_endDelay = 0.0f;
@@ -441,13 +443,14 @@ bool CSimpleAnim::Play() {
         return false;
     }
 
-    if (this->m_playState != 1) {
-        this->m_playState = 1;
+    if (this->m_playState != CSimpleAnim::ANIM_PLAY_STATE::STATE_PLAYING) {
+        this->m_playState = CSimpleAnim::ANIM_PLAY_STATE::STATE_PLAYING;
 
         if (!this->m_loopState) {
             this->m_loopState = ANIM_LOOPSTATE_FORWARD;
         }
 
+        STORM_ASSERT(!(m_flags & SIMPLEANIM_FLAG_IS_LOADING));
         if (this->m_onPlay.m_luaRef) {
             this->RunScript(this->m_onPlay, 0, nullptr);
         }
@@ -467,8 +470,9 @@ void CSimpleAnim::Stop(bool requested) {
     this->m_progressWithDelay = 0.0f;
     this->m_progress = 0.0f;
     this->m_loopState = ANIM_LOOPSTATE_NONE;
-    this->m_playState = 0;
+    this->m_playState = CSimpleAnim::ANIM_PLAY_STATE::STATE_STOPPED;
 
+    STORM_ASSERT(!(m_flags & SIMPLEANIM_FLAG_IS_LOADING));
     if (this->m_onStop.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushboolean(L, requested);
@@ -535,7 +539,7 @@ void CSimpleAnim::SetOrder(int32_t order, bool notify, bool wrap) {
 // VERIFY: e53e8fe4 manual
 // OFFSET: 0x0049B810
 void CSimpleAnim::LoadXML(XMLNode* node, CStatus* status) {
-    this->m_flags |= 1;
+    this->m_flags |= ANIM_FLAGS::SIMPLEANIM_FLAG_IS_LOADING;
 
     const char* inherits = node->GetAttributeByName("inherits");
 
@@ -563,18 +567,10 @@ void CSimpleAnim::LoadXML(XMLNode* node, CStatus* status) {
         CScriptObject* parent = this->GetScriptObjectParent();
 
         if (parent) {
-            if (!parent->m_luaRegistered) {
-                parent->RegisterScriptObject(nullptr);
-            }
-
-            lua_rawgeti(L, LUA_REGISTRYINDEX, parent->m_luaObjectRef);
+            lua_rawgeti(L, LUA_REGISTRYINDEX, parent->GetLuaObjectRef());
             lua_pushstring(L, parentKey);
 
-            if (!this->m_luaRegistered) {
-                this->RegisterScriptObject(nullptr);
-            }
-
-            lua_rawgeti(L, LUA_REGISTRYINDEX, this->m_luaObjectRef);
+            lua_rawgeti(L, LUA_REGISTRYINDEX, this->GetLuaObjectRef());
             lua_settable(L, -3);
             lua_settop(L, -2);
         }

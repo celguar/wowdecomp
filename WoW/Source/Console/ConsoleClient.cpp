@@ -1,4 +1,5 @@
 #include <cstdarg>
+#include "Engine/Source/Tempest/Color.h"
 #include <cstdint>
 #include <cstdio>
 #include <malloc.h>
@@ -58,7 +59,17 @@ static const COMMANDHANDLER s_consoleCommandHandlers[] = { ConsoleCommand_FontCo
 TSList<CONSOLELINE, TSGetLink<CONSOLELINE> > s_linelist;
 
 // STATIC: 0x00ADBBBC
-uint32_t s_colorArray[NUM_COLORTYPES] = { 0xFFFFFFFF, 0xFFFFFFFF, 0xFF808080, 0xFFFF0000, 0xFFFFFF00, 0xFFFFFFFF, 0xFFFFFFFF, 0x80FFFFFF, 0xC0000000 };
+CImVector s_colorArray[NUM_COLORTYPES] = {
+    { COLOR_WHITE_BGRA }, // DEFAULT_COLOR
+    { COLOR_WHITE_BGRA }, // INPUT_COLOR
+    { COLOR_GRAY_128_BGRA }, // ECHO_COLOR
+    { COLOR_RED_BGRA }, // ERROR_COLOR
+    { COLOR_YELLOW_BGRA }, // WARNING_COLOR
+    { COLOR_WHITE_BGRA }, // GLOBAL_COLOR
+    { COLOR_WHITE_BGRA }, // ADMIN_COLOR
+    { COLOR_WHITE_ALPHA_128_BGRA }, // HIGHLIGHT_COLOR
+    { COLOR_BLACK_ALPHA_192_BGRA }, // BACKGROUND_COLOR
+};
 
 // STATIC: 0x00CA1690
 static float s_caretpixheight;
@@ -166,12 +177,13 @@ void GenerateNodeString(CONSOLELINE* node) {
         return;
     }
 
-    if (node->m_fontPointer) {
-        GxuFontDestroyString(node->m_fontPointer);
+    if (node->fontPointer) {
+        GxuFontDestroyString(node->fontPointer);
     }
 
     C3Vector position(0.0f, 0.0f, 1.0f);
-    GxuFontCreateString(font, reinterpret_cast<const char*>(node->m_buffer), s_fontHeight, position, 1.0f, s_fontHeight, 0.0f, node->m_fontPointer, GxVJ_Middle, GxHJ_Left, s_baseTextFlags, *reinterpret_cast<const CImVector*>(&s_colorArray[node->m_colorType]), s_charSpacing, 1.0f);
+    GxuFontCreateString(font, reinterpret_cast<const char*>(node->m_buffer), s_fontHeight, position, 1.0f, s_fontHeight, 0.0f, node->fontPointer, GxVJ_Middle, GxHJ_Left, s_baseTextFlags, s_colorArray[node->m_colorType], s_charSpacing, 1.0f);
+    STORM_ASSERT(node->fontPointer);
 }
 
 // VERIFY: bc0f8159 auto
@@ -185,7 +197,7 @@ static void SetInputString(const char* text) {
 
     if (text && *text) {
         C3Vector position(0.0f, 0.0f, 1.0f);
-        GxuFontCreateString(TextBlockGetFontPtr(s_textFont), text, s_fontHeight, position, 1.0f, s_fontHeight, 0.0f, s_inputString, GxVJ_Middle, GxHJ_Left, s_baseTextFlags, *reinterpret_cast<const CImVector*>(&s_colorArray[INPUT_COLOR]), s_charSpacing, 1.0f);
+        GxuFontCreateString(TextBlockGetFontPtr(s_textFont), text, s_fontHeight, position, 1.0f, s_fontHeight, 0.0f, s_inputString, GxVJ_Middle, GxHJ_Left, s_baseTextFlags, s_colorArray[INPUT_COLOR], s_charSpacing, 1.0f);
     }
 }
 
@@ -409,8 +421,8 @@ CONSOLELINE::~CONSOLELINE() {
         SMemFree(this->m_buffer, __FILE__, __LINE__, 0);
     }
 
-    if (this->m_fontPointer) {
-        GxuFontDestroyString(this->m_fontPointer);
+    if (this->fontPointer) {
+        GxuFontDestroyString(this->fontPointer);
     }
 }
 
@@ -437,7 +449,7 @@ static void DrawBackground() {
     GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
-    GxPrimLockVertexPtrs(4, position, sizeof(C3Vector), nullptr, 0, reinterpret_cast<const CImVector*>(&s_colorArray[BACKGROUND_COLOR]), 0, nullptr, 0, nullptr, 0, nullptr, 0);
+    GxPrimLockVertexPtrs(4, position, sizeof(C3Vector), nullptr, 0, &s_colorArray[BACKGROUND_COLOR], 0, nullptr, 0, nullptr, 0, nullptr, 0);
     GxDrawLockedElements(GxPrim_TriangleStrip, 4, indices);
     GxPrimUnlockVertexPtrs();
 
@@ -462,7 +474,7 @@ static void DrawHighLight() {
     GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
-    GxPrimLockVertexPtrs(4, position, sizeof(C3Vector), nullptr, 0, reinterpret_cast<const CImVector*>(&s_colorArray[HIGHLIGHT_COLOR]), 0, nullptr, 0, nullptr, 0, nullptr, 0);
+    GxPrimLockVertexPtrs(4, position, sizeof(C3Vector), nullptr, 0, &s_colorArray[HIGHLIGHT_COLOR], 0, nullptr, 0, nullptr, 0, nullptr, 0);
     GxDrawLockedElements(GxPrim_TriangleStrip, 4, indices);
     GxPrimUnlockVertexPtrs();
 
@@ -492,7 +504,7 @@ static void DrawCaret(const C3Vector& caretpos) {
     GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
-    GxPrimLockVertexPtrs(4, position, sizeof(C3Vector), nullptr, 0, reinterpret_cast<const CImVector*>(&s_colorArray[INPUT_COLOR]), 0, nullptr, 0, nullptr, 0, nullptr, 0);
+    GxPrimLockVertexPtrs(4, position, sizeof(C3Vector), nullptr, 0, &s_colorArray[INPUT_COLOR], 0, nullptr, 0, nullptr, 0, nullptr, 0);
     GxDrawLockedElements(GxPrim_TriangleStrip, 4, indices);
     GxPrimUnlockVertexPtrs();
 
@@ -522,6 +534,7 @@ static void EnforceMaxLines() {
 
     if (node == s_currlineptr) {
         s_currlineptr = s_linelist.Prev(node);
+        STORM_ASSERT(s_currlineptr);
     }
 
     node->~CONSOLELINE();
@@ -538,7 +551,7 @@ static CONSOLELINE* GetInputLine() {
         return head;
     }
 
-    CONSOLELINE* line = s_linelist.NewNode(1, 0, 0);
+    CONSOLELINE* line = s_linelist.NewNode(TSLIST_LINK_AFTER, 0, 0);
 
     line->m_charsalloc = 16;
     line->m_buffer = static_cast<uint8_t*>(SMemAlloc(line->m_charsalloc, __FILE__, __LINE__, 0));
@@ -592,9 +605,9 @@ static void PaintText(void* param, const RECTF* rect, const RECTF* visible, floa
     position.y += s_fontHeight;
 
     for (CONSOLELINE* ptr = s_currlineptr; !s_linelist.IsEnd(ptr) && position.y < 1.0f; ptr = ptr->RawNext()) {
-        if (ptr->m_fontPointer && ptr != lineptr) {
-            GxuFontSetStringPosition(ptr->m_fontPointer, position);
-            GxuFontAddToBatch(s_batch, ptr->m_fontPointer);
+        if (ptr->fontPointer && ptr != lineptr) {
+            GxuFontSetStringPosition(ptr->fontPointer, position);
+            GxuFontAddToBatch(s_batch, ptr->fontPointer);
             position.y += s_fontHeight;
         }
     }
@@ -795,7 +808,7 @@ static int32_t OnKeyDownRepeat(const void* data, void* param) {
             break;
 
         case KEY_PAGEUP:
-            if (key->m_metaKeyState & 3) {
+            if (key->m_metaKeyState & META_KEY_SHIFT) {
                 CONSOLELINE* ptr = s_currlineptr;
 
                 for (int32_t i = 0; i < 10 && ptr; i++) {
@@ -826,7 +839,7 @@ static int32_t OnKeyDownRepeat(const void* data, void* param) {
             break;
 
         case KEY_PAGEDOWN:
-            if (key->m_metaKeyState & 3) {
+            if (key->m_metaKeyState & META_KEY_SHIFT) {
                 CONSOLELINE* ptr = s_currlineptr;
 
                 for (int32_t i = 0; i < 10 && ptr; i++) {
@@ -860,7 +873,7 @@ static int32_t OnKeyDownRepeat(const void* data, void* param) {
             break;
     }
 
-    if (key->m_key != KEY_TAB && key->m_key != KEY_LSHIFT && key->m_key != KEY_RSHIFT && key->m_key != KEY_LALT && key->m_key != KEY_RALT && !(key->m_metaKeyState & 0xC)) {
+    if (key->m_key != KEY_TAB && key->m_key != KEY_LSHIFT && key->m_key != KEY_RSHIFT && key->m_key != KEY_LALT && key->m_key != KEY_RALT && !(key->m_metaKeyState & META_KEY_CONTROL)) {
         s_completionMode = 0;
         ResetHighlight();
     }
@@ -877,11 +890,11 @@ void ConsoleWrite(const char* str, COLOR_T color) {
 
     s_critsect.Enter();
 
-    CONSOLELINE* node = s_linelist.NewNode(0, 0, 0);
+    CONSOLELINE* node = s_linelist.NewNode(TSLIST_NEWNODE_UNLINKED, 0, 0);
     CONSOLELINE* head = s_linelist.Head();
 
     if (head && head->m_inputpos) {
-        s_linelist.LinkNode(node, 1, head);
+        s_linelist.LinkNode(node, TSLIST_LINK_AFTER, head);
     } else {
         s_linelist.LinkToHead(node);
     }
@@ -933,7 +946,7 @@ void ConsolePrintf(const char* format, ...) {
 // VERIFY: d43d21f6 manual
 // OFFSET: 0x007658A0
 void ConsoleCommandExecute(const char* commandLine, int32_t addToHistory) {
-    if (s_execState == EM_RECORDING || s_execState == EM_PROMPTOVERWRITE || s_execState == EM_APPEND) {
+    if (s_execState == EXECMODE::EM_RECORDING || s_execState == EXECMODE::EM_PROMPTOVERWRITE || s_execState == EXECMODE::EM_APPEND) {
         if (!AddLineToExecFile(commandLine)) {
             return;
         }
@@ -1078,7 +1091,7 @@ static int32_t OnKeyDown(const void* data, void* param) {
                 SStrCopy(s_partial, reinterpret_cast<const char*>(line->m_buffer) + line->m_inputstart, STORM_MAX_STR);
             }
 
-            if (ConsoleCommandComplete(s_partial, &s_completedCmd, (key->m_metaKeyState & 3) != 0)) {
+            if (ConsoleCommandComplete(s_partial, &s_completedCmd, (key->m_metaKeyState & META_KEY_SHIFT) != 0)) {
                 MakeCommandCurrent(line, s_completedCmd);
             }
 
@@ -1112,7 +1125,7 @@ static int32_t OnKeyDown(const void* data, void* param) {
             break;
 
         case KEY_HOME:
-            if (key->m_metaKeyState & 0xC) {
+            if (key->m_metaKeyState & META_KEY_CONTROL) {
                 s_currlineptr = s_linelist.Tail();
             } else if (line->m_inputpos > line->m_inputstart) {
                 line->m_inputpos = line->m_inputstart;
@@ -1121,7 +1134,7 @@ static int32_t OnKeyDown(const void* data, void* param) {
             break;
 
         case KEY_END:
-            if (key->m_metaKeyState & 0xC) {
+            if (key->m_metaKeyState & META_KEY_CONTROL) {
                 s_currlineptr = s_linelist.Head();
             } else if (line->m_inputpos < line->m_chars) {
                 line->m_inputpos = line->m_chars;
@@ -1130,7 +1143,7 @@ static int32_t OnKeyDown(const void* data, void* param) {
             break;
 
         case KEY_PAGEUP:
-            if (key->m_metaKeyState & 3) {
+            if (key->m_metaKeyState & META_KEY_SHIFT) {
                 CONSOLELINE* ptr = s_currlineptr;
 
                 for (int32_t i = 0; i < 10 && ptr; i++) {
@@ -1161,7 +1174,7 @@ static int32_t OnKeyDown(const void* data, void* param) {
             break;
 
         case KEY_PAGEDOWN:
-            if (key->m_metaKeyState & 3) {
+            if (key->m_metaKeyState & META_KEY_SHIFT) {
                 CONSOLELINE* ptr = s_currlineptr;
 
                 for (int32_t i = 0; i < 10 && ptr; i++) {
@@ -1192,7 +1205,7 @@ static int32_t OnKeyDown(const void* data, void* param) {
             break;
 
         case 'C':
-            if (key->m_metaKeyState & 0xC) {
+            if (key->m_metaKeyState & META_KEY_CONTROL) {
                 if (s_copyText[0]) {
                     char buffer[128];
                     uint32_t length = s_highlightRightCharIndex - s_highlightLeftCharIndex;
@@ -1212,7 +1225,7 @@ static int32_t OnKeyDown(const void* data, void* param) {
             break;
 
         case 'V':
-            if (key->m_metaKeyState & 0xC) {
+            if (key->m_metaKeyState & META_KEY_CONTROL) {
                 char* text = OsClipboardGetString();
 
                 if (text) {
@@ -1228,7 +1241,7 @@ static int32_t OnKeyDown(const void* data, void* param) {
             break;
     }
 
-    if (key->m_key != KEY_TAB && key->m_key != KEY_LSHIFT && key->m_key != KEY_RSHIFT && key->m_key != KEY_LALT && key->m_key != KEY_RALT && !(key->m_metaKeyState & 0xC)) {
+    if (key->m_key != KEY_TAB && key->m_key != KEY_LSHIFT && key->m_key != KEY_RSHIFT && key->m_key != KEY_LALT && key->m_key != KEY_RALT && !(key->m_metaKeyState & META_KEY_CONTROL)) {
         s_completionMode = 0;
         ResetHighlight();
     }
@@ -1277,8 +1290,8 @@ void ConsoleScreenInitialize(const char* title) {
     SStrCopy(s_fontName, "Fonts\\ARIALN.ttf", sizeof(s_fontName));
     s_textFont = TextBlockGenerateFont(s_fontName, 0, NDCToDDCHeight(s_fontHeight));
 
-    ScrnLayerCreate(&s_rect, 6.0f, 3, nullptr, PaintBackground, &s_layerBackground);
-    ScrnLayerCreate(&s_rect, 7.0f, 3, nullptr, PaintText, &s_layerText);
+    ScrnLayerCreate(&s_rect, 6.0f, SCRN_LAYER_TRANSPARENT | SCRN_LAYER_ORTHO, nullptr, PaintBackground, &s_layerBackground);
+    ScrnLayerCreate(&s_rect, 7.0f, SCRN_LAYER_TRANSPARENT | SCRN_LAYER_ORTHO, nullptr, PaintText, &s_layerText);
 
     RegisterHandlers();
 

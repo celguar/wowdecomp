@@ -17,7 +17,7 @@ static TSHashTable<FOOTSTEPSNDCACHE, HASHKEY_NONE> s_footstepSounds;
 
 // VERIFY: a8ad1552 auto
 // OFFSET: 0x004CEE50
-bool CGUnit_C::IsActivePlayer() {
+bool CGUnit_C::IsActivePlayer() const {
     return this->m_obj->m_guid == ClntObjMgrGetActivePlayer();
 }
 
@@ -36,18 +36,16 @@ static uint32_t GetFootstepSound(int32_t terrainType, int32_t footstepId, int32_
         return 0;
     }
 
-    int32_t index = terrain->m_soundID;
+    uint32_t terrainSoundID = terrain->m_soundID;
     FOOTSTEPSNDCACHE* cache = s_footstepSounds.Ptr(footstepId, s_footstepKey);
 
     if (!cache) {
         return 0;
     }
 
-    if (splash) {
-        return cache->m_splashSounds[index];
-    }
-
-    return cache->m_sounds[index];
+    TSGrowableArray<uint32_t>& theArray = splash ? cache->m_splashSounds : cache->m_sounds;
+    STORM_ASSERT(terrainSoundID < theArray.Count());
+    return theArray[terrainSoundID];
 }
 
 // VERIFY: 508a3422 manual
@@ -79,18 +77,18 @@ void SI2::PlayFootstepSound(int32_t footstepId, const C3Vector* position, int32_
         properties.ResetToDefaults();
         properties.m_maxDistance = loud ? 50.0f : MaximumFoostepDistance;
         properties.m_volumeScale = 0.65f;
-        properties.m_group = 17;
-        properties.m_priority = 115;
+        properties.m_group = SI2_SOUND_GROUP_PLAYER_FOOTSTEP;
+        properties.m_priority = SI2_PRIORITY_FOOTSTEP;
         SI2::PlaySoundKit(soundKitId, nullptr, nullptr, &properties, 0, nullptr, 1, 0);
     } else if ((unit->m_obj->m_type & TYPE_PLAYER) && unit->IsActivePlayer()) {
         properties.ResetToDefaults();
-        properties.m_group = 17;
-        properties.m_priority = 115;
+        properties.m_group = SI2_SOUND_GROUP_PLAYER_FOOTSTEP;
+        properties.m_priority = SI2_PRIORITY_FOOTSTEP;
         SI2::PlaySoundKit(soundKitId, position, nullptr, &properties, 0, nullptr, 1, 0);
     } else {
         properties.ResetToDefaults();
-        properties.m_group = 13;
-        properties.m_maxAudibleBehavior = 0;
+        properties.m_group = SI2_SOUND_GROUP_FOOTSTEP;
+        properties.m_maxAudibleBehavior = SE2_MAX_AUDIBLE_MUTE;
         SI2::PlaySoundKit(soundKitId, position, nullptr, &properties, 0, nullptr, 1, 0);
     }
 }
@@ -107,25 +105,28 @@ FOOTSTEPSNDCACHE::FOOTSTEPSNDCACHE() {
 void SI2::InitFootstepSounds() {
     s_footstepSounds.Clear();
 
-    uint32_t count = g_terrainTypeSoundsDB.m_maxID + 1;
+    uint32_t numTerrains = g_terrainTypeSoundsDB.GetMaxID() + 1;
+    STORM_ASSERT(numTerrains < sizeof(int) * 8);
 
-    for (int32_t i = g_footstepTerrainLookupDB.m_numRecords; i;) {
+    for (int32_t i = g_footstepTerrainLookupDB.GetNumRecords(); i;) {
         i--;
 
-        FootstepTerrainLookupRec* rec = (i < 0 || i >= g_footstepTerrainLookupDB.m_numRecords) ? nullptr : &g_footstepTerrainLookupDB.m_records[i];
+        FootstepTerrainLookupRec* rec = (i < 0 || i >= g_footstepTerrainLookupDB.GetNumRecords()) ? nullptr : &g_footstepTerrainLookupDB.m_records[i];
 
         if (!rec || rec->m_terrainSoundID < 0) {
             continue;
         }
 
+        STORM_ASSERT(static_cast<uint32_t>(rec->m_terrainSoundID) < numTerrains); // 12213: "rec->m_TerrainSoundID < numTerrains"
+
         FOOTSTEPSNDCACHE* cache = s_footstepSounds.Ptr(rec->m_creatureFootstepID, s_footstepKey);
 
         if (!cache) {
             cache = s_footstepSounds.New(rec->m_creatureFootstepID, s_footstepKey, 0, 0);
-            cache->m_sounds.SetCount(count);
-            cache->m_splashSounds.SetCount(count);
+            cache->m_sounds.SetCount(numTerrains);
+            cache->m_splashSounds.SetCount(numTerrains);
 
-            for (uint32_t j = 0; j < count; j++) {
+            for (uint32_t j = 0; j < numTerrains; j++) {
                 cache->m_sounds[j] = 0;
                 cache->m_splashSounds[j] = 0;
             }

@@ -4,6 +4,20 @@
 #include <cstddef>
 #include <cstdint>
 
+// CGInputControl::m_mouseModeFlags; separate from its input-control flags.
+// Bit 0x4 participates in the raw request mask; its distinct meaning is unproved.
+// Request-mask values 2/4/6 are compared with the current 0/1 bit without normalization.
+enum INPUT_MOUSE_MODE_FLAGS : uint32_t {
+    INPUT_MOUSE_MODE_CURSOR_ON = 0x1,
+    INPUT_MOUSE_MODE_DEFAULT_CURSOR_ON = 0x2,
+    INPUT_MOUSE_MODE_UNKNOWN_0004 = 0x4,
+    INPUT_MOUSE_MODE_SPELL_TARGETING = 0x10,
+    INPUT_MOUSE_MODE_FORCE_CURSOR_ON = 0x20,
+    INPUT_MOUSE_MODE_FORCE_CURSOR_OFF = 0x40,
+    INPUT_MOUSE_MODE_INITIAL_FLAGS = 3,
+    INPUT_MOUSE_MODE_CURSOR_REQUEST_MASK = 0x6,
+};
+
 enum CURSORMODE : uint32_t {
     NO_CURSOR = 0,
     POINT_CURSOR = 1,
@@ -172,6 +186,21 @@ enum UIADDON_LOADABLE_REASON : int32_t {
     UIADDON_INTERFACE_VERSION = 7,
     UIADDON_INCOMPATIBLE = 8,
     UIADDON_SECURE = 9,
+};
+
+// SMSG_ADDON_INFO per-addon state byte; names inferred from how SetAddOnInfoRequest applies it.
+enum ADDON_INFO_STATE : uint8_t {
+    ADDON_INFO_STATE_BANNED = 0, // The addon is marked UIADDON_SECURITY_BANNED.
+    ADDON_INFO_STATE_ALLOWED = 1, // Neither banned nor a Blizzard addon.
+    ADDON_INFO_STATE_BLIZZARD = 2, // Sets UIADDON::m_blizzard.
+};
+
+// UIADDON::m_status, as returned by GetAddOnSecurity; AddOnSecurityToken maps
+// it onto the SECURE, INSECURE and BANNED tokens that follow UIADDON_SECURE.
+enum UIADDON_SECURITY : uint32_t {
+    UIADDON_SECURITY_SECURE = 0,
+    UIADDON_SECURITY_INSECURE = 1,
+    UIADDON_SECURITY_BANNED = 2,
 };
 
 enum PENDING_DEFAULT_ACTION {

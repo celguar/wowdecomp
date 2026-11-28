@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CAaSphere.h"
@@ -11,6 +12,7 @@
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Tempest/C4Vector.h"
 #include "Engine/Source/Tempest/CImVector.h"
+#include "WoW/Source/WorldClient/WorldConstants.h"
 
 class CMapArea;
 class CM2Lighting;
@@ -31,8 +33,8 @@ class CMapChunkBuf {
     /* 0004 */ CGxBuf* m_indexBuf;
     /* 0008 */ CMapRenderChunk* m_renderChunk;
     /* 000C */ CMapChunkBufBlock* m_block;
-    /* 0010 */ uint32_t m_unkFlags;
-    /* 0014 */ TSLink<CMapChunkBuf> m_freeLink;
+    /* 0010 */ uint32_t m_batchFlags; // BATCH_PAIR_* bits of the owning render chunk
+    /* 0014 */ TSLink<CMapChunkBuf> m_link;
 
     CMapChunkBuf();
 };
@@ -41,7 +43,7 @@ class CMapChunkBufBlock {
     public:
     /* 0000 */ uint32_t m_vertexCount;
     /* 0004 */ CMapChunkBuf m_bufs [2];
-    /* 003C */ TSLink<CMapChunkBufBlock> m_blockLink;
+    /* 003C */ TSLink<CMapChunkBufBlock> m_link;
     /* 0044 */ TSLink<CMapChunkBufBlock> m_bufLink;
 
     CMapChunkBufBlock();
@@ -52,16 +54,37 @@ class CMapRenderChunkLayer {
     public:
     /* 0000 */ int16_t m_flags;
     /* 0002 */ int16_t m_layerIndex;
-    /* 0004 */ CTexture* m_texture;
-    /* 0008 */ int32_t m_textureId;
-    /* 000C */ CTexture* m_layerTexture;
+    /* 0004 */ CTexture* diffuseTexture;
+    /* 0008 */ int32_t textureId;
+    /* 000C */ CTexture* blendTexture;
     /* 0010 */ CMapRenderChunk* m_owner;
 
     CMapRenderChunkLayer();
+#if defined(WOWDECOMP_ASSERTIONS)
+    ~CMapRenderChunkLayer();
+#endif
 };
 
 class CMapRenderChunk {
     public:
+    enum RENDER_FLAGS : int32_t {
+        FLAG_NONE = 0,
+        FLAG_UNLIT_LAYERS = 0x1,
+        FLAG_SPECULAR = 0x4,
+        FLAG_BLEND_MIP1 = 0x8,
+        LayerFlags_ShouldMip = 0x10,
+        FLAG_LAYER_TEXTURES_DIRTY = 0x20,
+        FLAG_TEXTURE_UPDATE_REQUESTS = 0x30,
+    };
+
+    enum BATCH_FLAGS : int32_t {
+        BATCH_NONE = 0,
+        BATCH_PAIR_VERTICAL = 0x1,
+        BATCH_PAIR_HORIZONTAL = 0x2,
+        BATCH_PAIR_MASK = 0x3,
+        BATCH_LAYER_TEXTURES_LOADED = 0x8,
+    };
+
     struct SLayerAlpha;
     struct SVertexShaderConstants;
     typedef void (*RenderLayersFunc)(CMapRenderChunk* renderChunk);
@@ -73,8 +96,8 @@ class CMapRenderChunk {
     static CGxPool* s_gxVertexPool;
     static CGxPool* s_gxIndexPool;
     static TSGrowableArray<CMapChunkBufBlock> s_chunkBlockArray;
-    static TSExplicitList<CMapChunkBuf, offsetof(CMapChunkBuf, m_freeLink)> s_renderChunkBufFreeList;
-    static TSExplicitList<CMapChunkBufBlock, offsetof(CMapChunkBufBlock, m_blockLink)> s_chunkBufBlockFreeList;
+    static TSExplicitList<CMapChunkBuf, offsetof(CMapChunkBuf, m_link)> s_renderChunkBufFreeList;
+    static TSExplicitList<CMapChunkBufBlock, offsetof(CMapChunkBufBlock, m_link)> s_chunkBufBlockFreeList;
     static TSExplicitList<CMapChunkBufBlock, offsetof(CMapChunkBufBlock, m_bufLink)> s_bufList;
     static CGxBatch s_chunkBatch;
     static uint32_t s_defaultTex[8192];
@@ -92,22 +115,25 @@ class CMapRenderChunk {
     static void UpdatePools();
     static void SetVertexFormat(EGxVertexBufferFormat format);
     static void PurgeChunkBufBlocks();
-    static CMapChunkBuf* AllocBuf(int32_t a1, CMapRenderChunk* renderChunk);
+    static CMapChunkBuf* AllocBuf(int32_t flags, CMapRenderChunk* renderChunk);
     static CTexture* AllocTexture(uint32_t width, uint32_t height, void* userArg, GxTexUserFunc userFunc, EGxTexFormat format, EGxTexFormat dataFormat);
     static void UpdateShaderGxTexture(EGxTexCommand cmd, uint32_t w, uint32_t h, uint32_t d, uint32_t mipLevel, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     static void UpdateLayerGxTexture(EGxTexCommand cmd, uint32_t w, uint32_t h, uint32_t d, uint32_t mipLevel, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     static void UpdateShadowGxTexture(EGxTexCommand cmd, uint32_t w, uint32_t h, uint32_t d, uint32_t mipLevel, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     static void RenderMultiPassAlpha(CMapRenderChunk* renderChunk);
     static void RenderMultiPassAdditive(CMapRenderChunk* renderChunk);
-    static void SetShaders(int32_t a1, int32_t a2);
+    static void SetShaders(int32_t specular, int32_t unlitLayers);
     static void InitializeVertexShaderConstants(const C44Matrix& world, const C44Matrix& view);
-    static CGxShader* GetVertexShader(int32_t pointLights, int32_t layers, int32_t specular, int32_t vertexColor, int32_t a5, int32_t shadow);
+    private:
+    static CGxShader* GetVertexShader(int32_t pointLights, int32_t layers, int32_t specular, int32_t vertexColor, int32_t chunkSpecular, int32_t shadow);
+
+    public:
     static void ComputeTexMatrices(C44Matrix& layerMatrix, C44Matrix& alphaMatrix, const C3Vector& offset, float scale);
     static void RenderMultiPassPixelShaderBigAlpha(CMapRenderChunk* renderChunk);
     static void RenderMultiPassPixelShader(CMapRenderChunk* renderChunk);
     static void RenderMultiPassVertexPixelShaderBigAlpha(CMapRenderChunk* renderChunk);
     static void RenderMultiPassVertexPixelShader(CMapRenderChunk* renderChunk);
-    static void SetVertexShader(CMapRenderChunk* renderChunk, int32_t layerCount, int32_t a3);
+    static void SetVertexShader(CMapRenderChunk* renderChunk, int32_t nTextures, BOOL chunkSpecular);
     static uint8_t* DecodeAlphaRLE(uint8_t* src, uint8_t* dst, int32_t count);
     static void SetupAlphaRows(uint8_t** shadowCursor, uint8_t** shadowRow, SLayerAlpha* layers, uint32_t size, uint8_t** alphaRows);
     static void SetupAlphaRows4444(uint32_t size, uint8_t** shadowRow, uint8_t** alphaRows, SLayerAlpha* layers, uint8_t** shadowCursor);
@@ -128,17 +154,17 @@ class CMapRenderChunk {
     static void __stdcall RecreateAlphaBitsFixed8888Mip1(CImVector* dst, uint32_t size, SLayerAlpha* layer, uint8_t* shadowMap);
 
     /* 0000 */ TSLink<CMapRenderChunk> m_renderChunkLink;
-    /* 0008 */ uint8_t m_unkFlags;
-    /* 0009 */ uint8_t m_layersCount;
-    /* 000A */ int16_t m_renderFlags;
+    /* 0008 */ uint8_t m_batchFlags; // BATCH_FLAGS
+    /* 0009 */ uint8_t m_nLayers;
+    /* 000A */ int16_t m_layerFlags;
     /* 000C */ float m_lastUpdateTime;
-    /* 0010 */ CMapChunk* m_mapChunks [2];
+    /* 0010 */ CMapChunk* m_chunks [MAP_CHUNKS_PER_RENDER_BATCH];
     /* 0018 */ C3Vector m_vec1;
     /* 0024 */ CAaSphere m_sphere;
     /* 0034 */ CMapRenderChunkLayer m_layers [4];
-    /* 0084 */ CTexture* m_terrainBlendTexture;
+    /* 0084 */ CTexture* m_shaderTexture;
     /* 0088 */ CTexture* m_shadowTexture;
-    /* 008C */ CMapChunkBuf* m_chunkBuf;
+    /* 008C */ CMapChunkBuf* m_buf;
     /* 0090 */ CGxBatch m_batch;
 
     ~CMapRenderChunk();
@@ -161,8 +187,8 @@ class CMapRenderChunk {
     void UnpackAlphaShadowBits(void* dstBase, int32_t dstOffset, int32_t dstPitch, uint32_t size, SLayerAlpha* cursors, int32_t alphaSlot, uint8_t* shadowMap, int32_t genFormat, int32_t doNotFixAlphaMap);
     void UnpackAlphaBitsFixed8888Mip0(CImVector* dst, uint32_t size, uint8_t* shadowMap);
     void UnpackAlphaBitsFixed8888Mip1(CImVector* dst, uint32_t size, uint8_t* shadowMap);
-    void UnpackAlphaBits(void* dst, uint32_t size, SLayerAlpha* layerInfo, uint8_t* shadowMap, int32_t layerMode, int32_t bigAlpha);
-    void RenderSetup(int32_t a2);
+    void UnpackAlphaBits(void* pixels, uint32_t size, SLayerAlpha* layerAlpha, uint8_t* shadowMap, int32_t layerMode, int32_t bigAlpha);
+    void RenderSetup(BOOL useVertexShader);
     void RenderSolid();
     void RenderSolidVertexPixelShader();
     void FreeBuf();
@@ -203,6 +229,17 @@ struct CMapRenderChunk::SVertexShaderConstants {
 };
 
 struct SMMapHeader {
+    enum MAP_FLAGS : int32_t {
+        HAS_GLOBAL_WMO = 1,
+        VERTEX_COLORS = 2,
+        BIG_ALPHA = 0x4,
+        UNKNOWN_8 = 0x8,
+    };
+
+    enum MAP_BITS : int32_t {
+        BIG_ALPHA_BIT_INDEX = 2,
+    };
+
     /* 0000 */ uint32_t m_flags;
     /* 0004 */ uint32_t m_something;
     /* 0008 */ uint32_t m_unused [6];
@@ -210,7 +247,7 @@ struct SMMapHeader {
 
 struct CMapRenderChunk::SLayerAlpha {
     /* 0000 */ uint32_t m_flags;
-    /* 0004 */ uint8_t* m_alphaData;
+    /* 0004 */ uint8_t* m_alpha;
 };
 
 #endif

@@ -1,4 +1,5 @@
 #include "WTOBJECT.h"
+#include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Gx/Gx.h"
@@ -22,7 +23,7 @@ static CDataAllocator s_freeTrails(sizeof(WTOBJECT), 128);
 WTOBJECT::~WTOBJECT() {
     if (this->m_model) {
         CM2Model* model = this->m_model;
-        model->m_fFlags |= 0x20;
+        model->m_runtimeFlags |= M2_FLAGS::M2_UNKNOWN_20;
         model->m_drawCallback = nullptr;
         model->m_drawArg = nullptr;
         this->m_model->Release();
@@ -36,6 +37,8 @@ WTOBJECT::~WTOBJECT() {
 // VERIFY: c3c7b136 auto
 // OFFSET: 0x007E4BC0
 void WeaponTrailsShutdown() {
+    STORM_ASSERT(!s_count);
+
     s_freeTrails.Clear(typeid(WTOBJECT).raw_name(), SLOG_OBJECT, 1);
     s_freeSwings.Clear(typeid(SWING).raw_name(), SLOG_OBJECT, 1);
 }
@@ -59,6 +62,8 @@ WTOBJECT* WeaponTrailCreate(CM2Model* model) {
 // VERIFY: 254754a7 auto
 // OFFSET: 0x007E4CC0
 void WeaponTrailClose(WTOBJECT* trail) {
+    STORM_ASSERT(s_count);
+
     s_count--;
     s_freeTrails.Delete(trail);
 }
@@ -174,19 +179,19 @@ bool SWING::BuildVertexBuffer(uint32_t time, const C3Vector& top, const C3Vector
 // VERIFY: 1e058dc3 auto
 // OFFSET: 0x007E4F50
 static void WeaponTrailCallback(CM2Model* model, const CM2Lighting* lighting, void* arg) {
-    if (!model->HasEvent('BTW$') || !model->HasEvent('TTW$')) {
+    if (!model->HasEvent(M2_EVENT_ID::WeaponTrailBottom_WTB) || !model->HasEvent(M2_EVENT_ID::WeaponTrailTop_WTT)) {
         return;
     }
 
     uint32_t time = FrameTime::s_curTimeMs;
-    C3Vector bottom = model->GetEventPosition('BTW$');
-    C3Vector top = model->GetEventPosition('TTW$');
+    C3Vector bottom = model->GetEventPosition(M2_EVENT_ID::WeaponTrailBottom_WTB);
+    C3Vector top = model->GetEventPosition(M2_EVENT_ID::WeaponTrailTop_WTT);
     WTOBJECT* trail = static_cast<WTOBJECT*>(arg);
 
     if (!trail->m_swing->BuildVertexBuffer(time, top, bottom)) {
         s_freeSwings.PutData(trail->m_swing, nullptr, 0);
         trail->m_swing = nullptr;
-        model->m_fFlags |= 0x20;
+        model->m_runtimeFlags |= M2_FLAGS::M2_UNKNOWN_20;
         model->m_drawCallback = nullptr;
         model->m_drawArg = nullptr;
     }
@@ -207,7 +212,7 @@ void WTOBJECT::SetDrawTrail(const uint32_t* color, uint32_t duration) {
 
         CM2Model* model = this->m_model;
         this->m_swing = swing;
-        model->m_fFlags |= 0x20;
+        model->m_runtimeFlags |= M2_FLAGS::M2_UNKNOWN_20;
         model->m_drawCallback = WeaponTrailCallback;
         model->m_drawArg = this;
     }
@@ -220,8 +225,8 @@ void WTOBJECT::SetDrawTrail(const uint32_t* color, uint32_t duration) {
 
 // VERIFY: b37df885 auto
 // OFFSET: 0x007E5080
-void WeaponTrailSetDrawTrail(WTOBJECT* trail, const uint32_t* a2, uint32_t a3) {
-    if (a3 && trail) {
-        trail->SetDrawTrail(a2, a3);
+void WeaponTrailSetDrawTrail(WTOBJECT* trail, const uint32_t* color, uint32_t duration) {
+    if (duration && trail) {
+        trail->SetDrawTrail(color, duration);
     }
 }

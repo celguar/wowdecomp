@@ -147,7 +147,7 @@ bool CWorldMath::VectorIntersectAABox2(CAaBox& box, C3Vector& start, C3Vector& e
 
 // VERIFY: e47b9bbd manual
 // OFFSET: 0x007F9650
-void CWorldMath::ClipVertexListToPlane(const C3Vector* verts, uint32_t count, C3Vector* out, uint32_t& outCount, const C4Plane& plane, float epsilon, int32_t keepCoplanar) {
+void CWorldMath::ClipVertexListToPlane(const C3Vector* verts, uint32_t count, C3Vector* out, uint32_t& outCount, const C4Plane& plane, float epsilon, BOOL keepCoplanar) {
     uint32_t sideCount[3] = { 0, 0, 0 };
     uint32_t i;
 
@@ -272,7 +272,7 @@ int32_t CWorldMath::PointInPolygon(int32_t count, const C2Vector* points, const 
 // VERIFY: fd69952e auto
 // OFFSET: 0x0079F6F0
 void CWorldMath::MakeAaBox(CAaBox& box, const C3Vector& center, const float* size) {
-    float extent = (size[1] >= size[0] ? size[1] : size[0]) * 0.66000003f;
+    float extent = (size[1] >= size[0] ? size[1] : size[0]) * 0.66f;
     box.b = center;
     box.t = center;
     box.b.x -= extent;

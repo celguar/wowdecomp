@@ -36,7 +36,7 @@ TSFixedArray<TalentTabInfo*> CGTalentInfo::m_tabs;
 TSFixedArray<TalentTabInfo*> CGTalentInfo::m_petTabs;
 
 // STATIC: 0x00C21030
-CGTalentGroup_C CGTalentInfo::m_talentGroups[2];
+CGTalentGroup_C CGTalentInfo::m_talentGroups[MAX_TALENT_GROUPS];
 
 // STATIC: 0x00C210D8
 CGTalentGroup_C CGTalentInfo::m_petTalentGroup;
@@ -57,7 +57,7 @@ int32_t CGTalentInfo_Inspect::m_unspentTalentPoints;
 TSFixedArray<TalentTabInfo*> CGTalentInfo_Inspect::m_tabs;
 
 // STATIC: 0x00C21138
-CGTalentGroup_C CGTalentInfo_Inspect::m_talentGroups[2];
+CGTalentGroup_C CGTalentInfo_Inspect::m_talentGroups[MAX_TALENT_GROUPS];
 
 // VERIFY: 05fa25fb auto
 // OFFSET: 0x005C57C0
@@ -174,7 +174,7 @@ CGTalentGroup_C* CGTalentInfo::GetTalentGroup(uint32_t index, int32_t pet) {
 
 // VERIFY: 02243f68 manual
 // OFFSET: 0x005C60C0
-int32_t TalentInfoIsSpellKnown(int32_t spellId, int32_t isInspect, int32_t isPet) {
+int32_t TalentInfoIsSpellKnown(int32_t spellId, BOOL isInspect, BOOL isPet) {
     if (isInspect) {
         return isPet == 0;
     }
@@ -199,13 +199,17 @@ int32_t TalentInfoIsSpellKnown(int32_t spellId, int32_t isInspect, int32_t isPet
 // VERIFY: 7cbaa1c1 auto
 // OFFSET: 0x005C5750
 static int TierCompare(const void* a, const void* b) {
-    return (*static_cast<TalentGroupTier_C* const*>(a))->m_tier - (*static_cast<TalentGroupTier_C* const*>(b))->m_tier;
+    TalentGroupTier_C* tier1 = *static_cast<TalentGroupTier_C* const*>(a);
+    TalentGroupTier_C* tier2 = *static_cast<TalentGroupTier_C* const*>(b);
+    STORM_ASSERT(tier1 && tier2);
+    return tier1->m_tier - tier2->m_tier;
 }
 
 // VERIFY: 2584c2bc auto
 // OFFSET: 0x005C5770
 uint32_t CGTalentGroup_C::GetGlyph(uint32_t index) {
-    return index < 6 ? this->m_glyphs[index] : 6;
+    // Out-of-range slots return the slot count.
+    return index < NUM_GLYPH_SLOTS ? this->m_glyphs[index] : NUM_GLYPH_SLOTS;
 }
 
 // VERIFY: 577e032d auto
@@ -227,7 +231,7 @@ uint32_t TalentInfoGetScriptGroupIndex(lua_State* L, int32_t index) {
 
 // VERIFY: 09a769af manual
 // OFFSET: 0x005C5A20
-int32_t CGTalentInfo::IsTalentAvailableForPet(CGUnit_C* pet, const TalentRec* talent) {
+BOOL CGTalentInfo::IsTalentAvailableForPet(CGUnit_C* pet, const TalentRec* talent) {
     if (!pet || !talent) {
         return 0;
     }
@@ -376,7 +380,7 @@ static void BuildTabInfo(CGPlayer_C* player, TSFixedArray<TalentTabInfo*>* tabs,
         }
     }
 
-    uint32_t numTabs = g_talentTabDB.m_numRecords;
+    uint32_t numTabs = g_talentTabDB.GetNumRecords();
     uint32_t count = 0;
 
     for (uint32_t i = 0; i < numTabs; i++) {
@@ -384,14 +388,14 @@ static void BuildTabInfo(CGPlayer_C* player, TSFixedArray<TalentTabInfo*>* tabs,
 
         if (player) {
             if (tab->m_raceMask) {
-                if (!(tab->m_raceMask & (1 << (player->m_unit->m_unitFieldBytes0[0] - 1)))) {
+                if (!(tab->m_raceMask & (1 << (player->m_unit->m_raceID - 1)))) {
                     continue;
                 }
 
-                if (tab->m_classMask && !(tab->m_classMask & (1 << (player->m_unit->m_unitFieldBytes0[1] - 1)))) {
+                if (tab->m_classMask && !(tab->m_classMask & (1 << (player->m_unit->m_classID - 1)))) {
                     continue;
                 }
-            } else if (!tab->m_classMask || !(tab->m_classMask & (1 << (player->m_unit->m_unitFieldBytes0[1] - 1)))) {
+            } else if (!tab->m_classMask || !(tab->m_classMask & (1 << (player->m_unit->m_classID - 1)))) {
                 continue;
             }
         } else if (!tab->m_categoryEnumID || petTalentType < 0 || !(tab->m_categoryEnumID & (1 << petTalentType))) {
@@ -418,14 +422,14 @@ static void BuildTabInfo(CGPlayer_C* player, TSFixedArray<TalentTabInfo*>* tabs,
 
         if (player) {
             if (tab->m_raceMask) {
-                if (!(tab->m_raceMask & (1 << (player->m_unit->m_unitFieldBytes0[0] - 1)))) {
+                if (!(tab->m_raceMask & (1 << (player->m_unit->m_raceID - 1)))) {
                     continue;
                 }
 
-                if (tab->m_classMask && !(tab->m_classMask & (1 << (player->m_unit->m_unitFieldBytes0[1] - 1)))) {
+                if (tab->m_classMask && !(tab->m_classMask & (1 << (player->m_unit->m_classID - 1)))) {
                     continue;
                 }
-            } else if (!tab->m_classMask || !(tab->m_classMask & (1 << (player->m_unit->m_unitFieldBytes0[1] - 1)))) {
+            } else if (!tab->m_classMask || !(tab->m_classMask & (1 << (player->m_unit->m_classID - 1)))) {
                 continue;
             }
         } else if (!tab->m_categoryEnumID || petTalentType < 0 || !(tab->m_categoryEnumID & (1 << petTalentType))) {
@@ -445,7 +449,7 @@ static void BuildTabInfo(CGPlayer_C* player, TSFixedArray<TalentTabInfo*>* tabs,
 
     int32_t lastTabId = -1;
     TalentTabInfo* info = nullptr;
-    int32_t numTalents = g_talentDB.m_numRecords;
+    int32_t numTalents = g_talentDB.GetNumRecords();
 
     for (int32_t i = 0; i < numTalents; i++) {
         TalentRec* talent = g_talentDB.GetRecordByIndex(i);
@@ -459,6 +463,7 @@ static void BuildTabInfo(CGPlayer_C* player, TSFixedArray<TalentTabInfo*>* tabs,
             continue;
         }
 
+        STORM_ASSERT(g_talentTabDB.GetRecord(talent->m_tabID)); // 12213: "g_talentTabDB.GetRecord(rec->m_tabID)"
         info = nullptr;
         lastTabId = tabId;
 
@@ -601,7 +606,7 @@ int32_t CGTalentGroup_C::ValidatePreviewTalentPoints(uint32_t tabIndex, const Ta
 
     int32_t talentId = talent->m_id;
     int32_t tierId = talent->m_tierID;
-    int32_t pointsPerTier = 2 * (pet == 0) + 3;
+    int32_t pointsPerTier = pet ? PET_TALENTS_PER_TIER : PLAYER_TALENTS_PER_TIER;
 
     if (tab->m_pointsSpent + tab->m_previewPointsSpent < static_cast<uint32_t>(tierId * pointsPerTier)) {
         return 0;
@@ -611,7 +616,7 @@ int32_t CGTalentGroup_C::ValidatePreviewTalentPoints(uint32_t tabIndex, const Ta
     int32_t rank = item ? item->m_rank : -1;
     int32_t previewRank = item ? item->m_previewRank : -1;
 
-    for (uint32_t i = 0; i < 3; i++) {
+    for (uint32_t i = 0; i < MAX_TALENT_PREREQS; i++) {
         int32_t prereqId = talent->m_prereqTalent[i];
 
         if (prereqId && g_talentDB.GetRecord(prereqId)) {
@@ -625,7 +630,7 @@ int32_t CGTalentGroup_C::ValidatePreviewTalentPoints(uint32_t tabIndex, const Ta
 
     int32_t maxRank = rank;
 
-    for (int32_t i = 8; i >= 0; i--) {
+    for (int32_t i = MAX_TALENT_RANKS - 1; i >= 0; i--) {
         if (talent->m_spellRank[i]) {
             maxRank = i;
             break;
@@ -657,7 +662,7 @@ int32_t CGTalentGroup_C::ValidatePreviewTalentPoints(uint32_t tabIndex, const Ta
             continue;
         }
 
-        for (uint32_t i = 0; i < 3; i++) {
+        for (uint32_t i = 0; i < MAX_TALENT_PREREQS; i++) {
             int32_t prereqId = otherTalent->m_prereqTalent[i];
 
             if (prereqId && g_talentDB.GetRecord(prereqId) == talent && item && change + item->m_previewRank < otherTalent->m_prereqRank[i]) {
@@ -694,7 +699,7 @@ int32_t CGTalentGroup_C::ValidatePreviewTalentPoints(uint32_t tabIndex, const Ta
 
 // VERIFY: ed5f15fd auto
 // OFFSET: 0x005C76E0
-int32_t CGTalentGroup_C::CanAddPreviewTalentPoints(const TalentRec* talent, int32_t points, int32_t* delta, int32_t pet) {
+BOOL CGTalentGroup_C::CanAddPreviewTalentPoints(const TalentRec* talent, int32_t points, int32_t* delta, int32_t pet) {
     *delta = 0;
 
     if (!points) {
@@ -705,13 +710,22 @@ int32_t CGTalentGroup_C::CanAddPreviewTalentPoints(const TalentRec* talent, int3
         return 0;
     }
 
-    for (uint32_t i = 0; i < this->m_tabs.m_count; i++) {
+    TalentGroupTab_C* groupTab = nullptr;
+    uint32_t i = 0;
+
+    for (; i < this->m_tabs.m_count; i++) {
         if (this->m_tabs.m_data[i].m_tabId == talent->m_tabID) {
-            return this->ValidatePreviewTalentPoints(i, talent, points, delta, pet);
+            groupTab = &this->m_tabs.m_data[i];
+            break;
         }
     }
 
-    return 0;
+    if (!groupTab) {
+        STORM_ASSERT_RECOVERABLE(groupTab);
+        return 0;
+    }
+
+    return this->ValidatePreviewTalentPoints(i, talent, points, delta, pet);
 }
 
 // VERIFY: b579a45c manual
@@ -817,7 +831,7 @@ void CGTalentGroup_C::AddTalentItem(int32_t talentId, int32_t rank) {
 
     TalentRec* talent = g_talentDB.GetRecord(talentId);
 
-    if (!talent || static_cast<uint32_t>(rank) >= 9 || !talent->m_spellRank[rank]) {
+    if (!talent || static_cast<uint32_t>(rank) >= MAX_TALENT_RANKS || !talent->m_spellRank[rank]) {
         return;
     }
 
@@ -953,7 +967,7 @@ static void ReadTalentGroups(CDataStore* msg, uint32_t* activeGroup, int32_t* un
             uint16_t glyph;
             msg->Get(glyph);
 
-            if (group && j < 6) {
+            if (group && j < NUM_GLYPH_SLOTS) {
                 group->m_glyphs[j] = glyph;
             }
         }
@@ -989,7 +1003,7 @@ void CGTalentGroup_C::Reset() {
     this->m_tabs.Clear();
     this->m_unspentPoints = 0;
 
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < NUM_GLYPH_SLOTS; i++) {
         this->m_glyphs[i] = 0;
     }
 }
@@ -1030,7 +1044,7 @@ void CGTalentInfo::ResetTalentGroups(int32_t pet) {
         return;
     }
 
-    for (uint32_t i = 0; i < 2; i++) {
+    for (uint32_t i = 0; i < MAX_TALENT_GROUPS; i++) {
         CGTalentInfo::m_talentGroups[i].Reset();
     }
 
@@ -1042,7 +1056,7 @@ void CGTalentInfo::ResetTalentGroups(int32_t pet) {
 // VERIFY: b1d0ceef manual
 // OFFSET: 0x005C9AD0
 void CGTalentInfo_Inspect::Reset() {
-    for (uint32_t i = 0; i < 2; i++) {
+    for (uint32_t i = 0; i < MAX_TALENT_GROUPS; i++) {
         CGTalentInfo_Inspect::m_talentGroups[i].Reset();
     }
 

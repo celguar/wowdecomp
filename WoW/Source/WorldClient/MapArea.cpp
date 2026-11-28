@@ -13,6 +13,9 @@
 #include "WoW/Source/WorldClient/MapRenderChunk.h"
 #include "WoW/Source/WorldClient/Types.h"
 #include "WoW/Source/WorldClient/World.h"
+#ifdef WOWDECOMP_TOOL_FEATURES
+#include "WoW/Source/WorldClient/WorldEditHooks.h"
+#endif
 #include <cmath>
 #include "Engine/Source/Tempest/CMath.h"
 #include "WoW/Source/WorldClient/CChunkLiquid.h"
@@ -28,8 +31,8 @@ void CMapArea::Initialize() {
 // VERIFY: 28aeb8e8 auto
 // OFFSET: 0x007C2FF0
 void CMapArea::FreeAsyncObject(CAsyncObject* object) {
-    void* buffer = object->m_buffer;
-    uint32_t size = object->m_size;
+    void* buffer = object->buffer;
+    uint32_t size = object->size;
     AsyncFileReadDestroyObject(object);
     CMapArea::FreeAsyncLoadBuffer(buffer, size);
 }
@@ -44,20 +47,20 @@ void CMapArea::PurgeChunk(CMapChunk* chunk) {
 // VERIFY: 3489b6fa manual
 // OFFSET: 0x007C35F0
 void CMapArea::Purge() {
-    if (this->m_asyncObject) {
-        if (!AsyncFile::Cancel(this->m_asyncObject, CMapArea::FreeAsyncObject)) {
-            this->m_fileBuffer = nullptr;
+    if (this->asyncObject) {
+        if (!AsyncFile::Cancel(this->asyncObject, CMapArea::FreeAsyncObject)) {
+            this->rawAreaData = nullptr;
         }
 
-        this->m_asyncObject = nullptr;
-        this->m_file = nullptr;
+        this->asyncObject = nullptr;
+        this->adtFile = nullptr;
     }
 
-    for (CMapBaseObjLink* link = this->m_chunkLinkList.Head(); link;) {
-        CMapChunk* chunk = static_cast<CMapChunk*>(link->m_owner);
-        CMapBaseObjLink* next = this->m_chunkLinkList.Next(link);
-        this->m_mapChunks[16 * chunk->m_aIndex.y + chunk->m_aIndex.x] = nullptr;
-        this->m_chunkInfo[16 * chunk->m_aIndex.y + chunk->m_aIndex.x].m_flags = 0;
+    for (CMapBaseObjLink* link = this->chunkLinkList.Head(); link;) {
+        CMapChunk* chunk = static_cast<CMapChunk*>(link->owner);
+        CMapBaseObjLink* next = this->chunkLinkList.Next(link);
+        this->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * chunk->aIndex.y + chunk->aIndex.x] = nullptr;
+        this->m_chunkInfo[MAP_CHUNKS_PER_AREA_AXIS * chunk->aIndex.y + chunk->aIndex.x].m_flags = 0;
         CMap::FreeBaseObjLink(link);
         chunk->Purge();
         CMap::FreeChunk(chunk);
@@ -88,15 +91,15 @@ bool CWorldScene::InsideFrustumRect(CiRect* rect) {
 // VERIFY: 8d38ed01 manual
 // OFFSET: 0x007D6810
 void CMapArea::BatchChunks(const C2iVector& pos) {
-    int32_t index = 16 * pos.y + pos.x;
+    int32_t index = MAP_CHUNKS_PER_AREA_AXIS * pos.y + pos.x;
 
-    CMapChunk* chunks[4];
+    CMapChunk* chunks[MAP_CHUNKS_PER_BATCH];
     chunks[0] = this->m_mapChunks[index];
-    chunks[1] = this->m_mapChunks[index + 16];
-    chunks[2] = this->m_mapChunks[16 * pos.y + 1 + pos.x];
-    chunks[3] = this->m_mapChunks[16 * pos.y + 17 + pos.x];
+    chunks[1] = this->m_mapChunks[index + MAP_CHUNKS_PER_AREA_AXIS];
+    chunks[2] = this->m_mapChunks[index + 1];
+    chunks[3] = this->m_mapChunks[index + MAP_CHUNKS_PER_AREA_AXIS + 1];
 
-    for (int32_t i = 0; i < 4; i++) {
+    for (int32_t i = 0; i < MAP_CHUNKS_PER_BATCH; i++) {
         if (!chunks[i]) {
             return;
         }
@@ -120,14 +123,14 @@ void CMapArea::BatchChunks(const C2iVector& pos) {
         int32_t secondStart = 1;
         int32_t firstMerge = mergeTop;
         int32_t secondMerge = mergeBottom;
-        uint8_t orientation = 2;
+        uint8_t orientation = CMapRenderChunk::BATCH_FLAGS::BATCH_PAIR_HORIZONTAL;
 
         if (vertical > horizontal) {
             firstMerge = mergeLeft;
             firstPartner = 1;
             secondStart = 2;
             secondMerge = mergeRight;
-            orientation = 1;
+            orientation = CMapRenderChunk::BATCH_FLAGS::BATCH_PAIR_VERTICAL;
         }
 
         if (firstMerge) {
@@ -158,8 +161,10 @@ void CMapArea::BatchChunks(const C2iVector& pos) {
 
 // VERIFY: bb694f33 manual
 // OFFSET: 0x007D6980
-void CMapArea::LoadTerrainTexture(CMapAreaTexture* areaTexture, int32_t textureId) {
-    bool shaders = g_theGxDevicePtr->Caps().m_texTarget[1] && g_theGxDevicePtr->Caps().m_shaderTargets[0] && g_theGxDevicePtr->Caps().m_shaderTargets[4];
+void CMapArea::LoadTerrainTexture(CMapAreaTexture& mapAreaTexture, int32_t textureId) {
+    STORM_ASSERT(mapAreaTexture.m_texture == NULL);  // 12213: "mapAreaTexture.m_texture == __null"
+
+    bool shaders = g_theGxDevicePtr->Caps().m_texTarget[1] && g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Vertex] && g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel];
 
     uint8_t flags = 0;
 
@@ -167,23 +172,25 @@ void CMapArea::LoadTerrainTexture(CMapAreaTexture* areaTexture, int32_t textureI
         flags = this->m_textureFlags[textureId];
     }
 
-    if ((flags & 0x1) || !CMap::enableSpecularTerrain) {
-        if (!(flags & 0x1) || shaders) {
-            areaTexture->m_texture = CMap::LoadTexture(areaTexture->m_textureName);
+    if ((flags & TEXTURE_FLAG_NO_SPECULAR) || !CMap::enableSpecularTerrain) {
+        if (!(flags & TEXTURE_FLAG_NO_SPECULAR) || shaders) {
+            mapAreaTexture.m_texture = CMap::LoadTexture(mapAreaTexture.m_texName);
         } else {
             CImVector color;
             color.b = 0x00;
             color.g = 0x00;
             color.r = 0x00;
             color.a = 0xFF;
-            areaTexture->m_texture = TextureCreateSolid(color);
+            mapAreaTexture.m_texture = TextureCreateSolid(color);
         }
     } else {
         char fileName[256];
-        SStrCopy(fileName, areaTexture->m_textureName, STORM_MAX_STR);
-        char* ext = SStrChrR(fileName, '.');
-        SStrCopy(ext, "_s.blp", STORM_MAX_STR);
-        areaTexture->m_texture = CMap::LoadTexture(fileName);
+        STORM_ASSERT((SStrLen(mapAreaTexture.m_texName) + 2) < sizeof(fileName)); // 12213: "(SStrLen(mapAreaTexture.m_texName) + 2) < 260"
+        SStrCopy(fileName, mapAreaTexture.m_texName, STORM_MAX_STR);
+        char* dot = SStrChrR(fileName, '.');
+        STORM_ASSERT(dot);
+        SStrCopy(dot, "_s.blp", STORM_MAX_STR);
+        mapAreaTexture.m_texture = CMap::LoadTexture(fileName);
     }
 }
 
@@ -197,10 +204,10 @@ void CMapArea::PurgeChunks(CiRect* chunkRect) {
 
     for (int32_t y = minY; y <= maxY; y++) {
         for (int32_t x = minX; x <= maxX; x++) {
-            CMapChunk* chunk = this->m_mapChunks[16 * y + x];
+            CMapChunk* chunk = this->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * y + x];
 
             if (chunk) {
-                this->m_mapChunks[16 * y + x] = nullptr;
+                this->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * y + x] = nullptr;
                 CMap::FreeBaseObjLink(chunk->m_parentLinkList.Head());
                 CMapArea::PurgeChunk(chunk);
             }
@@ -210,30 +217,32 @@ void CMapArea::PurgeChunks(CiRect* chunkRect) {
 
 // VERIFY: 4696cf2f manual
 // OFFSET: 0x007D6B30
-CMapChunk* CMapArea::PrepareChunk(int32_t chunkX, int32_t chunkY) {
-    int32_t index = chunkX + 16 * chunkY;
+CMapChunk* CMapArea::PrepareChunk(int32_t x, int32_t y) {
+    STORM_ASSERT(GetChunk(x, y) == NULL);
+
+    int32_t index = x + MAP_CHUNKS_PER_AREA_AXIS * y;
 
     bool firstUse = true;
 
-    if (this->m_chunkInfo[index].m_flags & 0x1) {
+    if (this->m_chunkInfo[index].m_flags & SMChunkInfo::F_PREPARED) {
         firstUse = false;
     }
 
-    this->m_chunkInfo[index].m_flags |= 0x1;
+    this->m_chunkInfo[index].m_flags |= SMChunkInfo::F_PREPARED;
 
     CMapChunk* chunk = CMap::AllocMapChunk();
     CMapBaseObjLink* link = CMap::AllocBaseObjLink(chunk);
-    link->m_ref = this;
-    this->m_chunkLinkList.LinkToTail(link);
+    link->ref = this;
+    this->chunkLinkList.LinkToTail(link);
 
-    chunk->m_aIndex.x = chunkX;
-    chunk->m_flags = static_cast<MapObjFlag>(0);
-    chunk->m_aIndex.y = chunkY;
-    chunk->m_cOffset.x = chunkX + this->m_tileChunkIndex.x;
-    chunk->m_cOffset.y = chunkY + this->m_tileChunkIndex.y;
-    chunk->m_sOffset.x = 8 * (chunkX + this->m_tileChunkIndex.x);
-    chunk->m_sOffset.y = 8 * (chunkY + this->m_tileChunkIndex.y);
-    chunk->Create(reinterpret_cast<SIffChunk*>(static_cast<uint8_t*>(this->m_fileBuffer) + this->m_chunkInfo[index].m_offset), firstUse);
+    chunk->aIndex.x = x;
+    chunk->m_flags = MAPOBJ_FLAG_NONE;
+    chunk->aIndex.y = y;
+    chunk->m_cOffset.x = x + this->m_tileChunkIndex.x;
+    chunk->m_cOffset.y = y + this->m_tileChunkIndex.y;
+    chunk->m_sOffset.x = 8 * (x + this->m_tileChunkIndex.x);
+    chunk->m_sOffset.y = 8 * (y + this->m_tileChunkIndex.y);
+    chunk->Create(reinterpret_cast<SIffChunk*>(static_cast<uint8_t*>(this->rawAreaData) + this->m_chunkInfo[index].m_offset), firstUse);
 
     return chunk;
 }
@@ -241,14 +250,18 @@ CMapChunk* CMapArea::PrepareChunk(int32_t chunkX, int32_t chunkY) {
 // VERIFY: b5606f47 manual
 // OFFSET: 0x007D6BF0
 void CMapArea::Update(int32_t addToScene, CiRect* chunkRect) {
+#ifdef WOWDECOMP_TOOL_FEATURES
+    const WorldEditView* editorView = WorldEditGetView();
+#endif
+
     for (int32_t chunkY = chunkRect->minY; chunkY <= chunkRect->maxY; chunkY++) {
-        int32_t localY = chunkY & 0xF;
+        int32_t localY = chunkY & MAP_CHUNK_INDEX_MASK;
 
         for (int32_t chunkX = chunkRect->minX; chunkX <= chunkRect->maxX; chunkX++) {
-            int32_t localX = chunkX & 0xF;
+            int32_t localX = chunkX & MAP_CHUNK_INDEX_MASK;
 
             if (chunkX >= CWorld::gbChunkRect.minX && chunkX <= CWorld::gbChunkRect.maxX && chunkY >= CWorld::gbChunkRect.minY && chunkY <= CWorld::gbChunkRect.maxY) {
-                CMapChunk** slot = &this->m_mapChunks[localX + 16 * localY];
+                CMapChunk** slot = &this->m_mapChunks[localX + MAP_CHUNKS_PER_AREA_AXIS * localY];
                 CMapChunk* chunk = *slot;
 
                 if (!chunk) {
@@ -257,14 +270,19 @@ void CMapArea::Update(int32_t addToScene, CiRect* chunkRect) {
                 }
 
                 if (addToScene && CWorldScene::InsideFrustumRect(chunkRect)) {
+#ifdef WOWDECOMP_TOOL_FEATURES
+                    if (editorView && !editorView->IncludesTerrain(chunk->m_bbox2)) {
+                        continue;
+                    }
+#endif
                     CWorldScene::AddMapChunk(chunk);
                     chunk->CullAndBucketChunk();
                 }
             } else {
-                CMapChunk* chunk = this->m_mapChunks[16 * localY + localX];
+                CMapChunk* chunk = this->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * localY + localX];
 
                 if (chunk) {
-                    this->m_mapChunks[16 * chunk->m_aIndex.y + chunk->m_aIndex.x] = nullptr;
+                    this->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * chunk->aIndex.y + chunk->aIndex.x] = nullptr;
                     CMap::FreeBaseObjLink(chunk->m_parentLinkList.Head());
                     CMapArea::PurgeChunk(chunk);
                 }
@@ -275,7 +293,9 @@ void CMapArea::Update(int32_t addToScene, CiRect* chunkRect) {
 
 // VERIFY: 1e0fb652 manual
 // OFFSET: 0x007D6D20
-void CMapArea::LoadTextures(char* fileNames, uint32_t fileNamesSize) {
+void CMapArea::LoadTextures(char* texNames, uint32_t fileNamesSize) {
+    STORM_ASSERT(texNames);
+
     uint32_t offset = 0;
     int32_t streaming = SFile::IsStreamingMode();
 
@@ -287,14 +307,14 @@ void CMapArea::LoadTextures(char* fileNames, uint32_t fileNamesSize) {
 
     do {
         CMapAreaTexture* areaTexture = this->m_textures.New();
-        areaTexture->m_textureName = &fileNames[offset];
+        areaTexture->m_texName = &texNames[offset];
         areaTexture->m_texture = nullptr;
 
         if (!streaming) {
-            this->LoadTerrainTexture(&this->m_textures.m_data[this->m_textures.Count() - 1], this->m_textures.Count() - 1);
+            this->LoadTerrainTexture(this->m_textures.m_data[this->m_textures.Count() - 1], this->m_textures.Count() - 1);
         }
 
-        while (fileNames[offset]) {
+        while (texNames[offset]) {
             offset++;
         }
 
@@ -305,32 +325,67 @@ void CMapArea::LoadTextures(char* fileNames, uint32_t fileNamesSize) {
 // VERIFY: 2e3ea90a manual
 // OFFSET: 0x007D6EF0
 void CMapArea::ProcessIffChunks() {
-    SIffChunk* version = static_cast<SIffChunk*>(this->m_fileBuffer);
-    uint8_t* header = reinterpret_cast<uint8_t*>(&version->m_data) + version->m_size + offsetof(SIffChunk, m_data);
+    STORM_ASSERT(CMap::bActive);
+    STORM_ASSERT(this->rawAreaData);  // 12213: "data"
 
+    SIffChunk* mIffChunk = static_cast<SIffChunk*>(this->rawAreaData);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MVER); // 12213: "mIffChunk->token == 'MVER'"
+#if defined(WOWDECOMP_ASSERTIONS)
+    const uint32_t adtVersion = *reinterpret_cast<const uint32_t*>(&mIffChunk->m_data);
+    STORM_ASSERT(adtVersion == 0x0012);
+#endif
+
+    auto* headerChunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(&mIffChunk->m_data) + mIffChunk->m_size);
+    mIffChunk = headerChunk;
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MHDR); // 12213: "mIffChunk->token == 'MHDR'"
+    uint8_t* header = reinterpret_cast<uint8_t*>(&headerChunk->m_data);
     this->m_header = reinterpret_cast<SMAreaHeader*>(header);
-    this->m_chunkInfo = reinterpret_cast<SMChunkInfo*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mcin)->m_data);
-    char* textureNames = reinterpret_cast<char*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mtex)->m_data);
-    this->m_doodadDef = reinterpret_cast<SMDoodadDef*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mddf)->m_data);
-    this->m_mapObjDef = reinterpret_cast<SMMapObjDef*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_modf)->m_data);
-    this->m_m2FileNames = reinterpret_cast<char*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mmdx)->m_data);
-    this->m_wmoFileNames = reinterpret_cast<char*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mwmo)->m_data);
-    this->m_modelFilenamesOffsets = reinterpret_cast<uint32_t*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mmid)->m_data);
-    this->m_wmoFilenamesOffsets = reinterpret_cast<uint32_t*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mwid)->m_data);
+    mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mcin);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MCIN); // 12213: "mIffChunk->token == 'MCIN'"
+    this->m_chunkInfo = reinterpret_cast<SMChunkInfo*>(&mIffChunk->m_data);
+    mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mtex);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MTEX); // 12213: "mIffChunk->token == 'MTEX'"
+    char* textureNames = reinterpret_cast<char*>(&mIffChunk->m_data);
+    mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mddf);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MDDF); // 12213: "mIffChunk->token == 'MDDF'"
+    this->m_doodadDef = reinterpret_cast<SMDoodadDef*>(&mIffChunk->m_data);
+    mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_modf);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MODF); // 12213: "mIffChunk->token == 'MODF'"
+    this->m_mapObjDef = reinterpret_cast<SMMapObjDef*>(&mIffChunk->m_data);
+    mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mmdx);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MMDX); // 12213: "mIffChunk->token == 'MMDX'"
+    this->m_m2FileNames = reinterpret_cast<char*>(&mIffChunk->m_data);
+    mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mwmo);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MWMO); // 12213: "mIffChunk->token == 'MWMO'"
+    this->m_wmoFileNames = reinterpret_cast<char*>(&mIffChunk->m_data);
+    mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mmid);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MMID); // 12213: "mIffChunk->token == 'MMID'"
+    this->m_modelFilenamesOffsets = reinterpret_cast<uint32_t*>(&mIffChunk->m_data);
+    mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mwid);
+    STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MWID); // 12213: "mIffChunk->token == 'MWID'"
+    this->m_wmoFilenamesOffsets = reinterpret_cast<uint32_t*>(&mIffChunk->m_data);
 
-    if (this->m_header->m_flags & 0x1) {
-        this->m_flyingBbox = reinterpret_cast<int16_t*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mfbo)->m_data);
+    if (this->m_header->m_flags & SMAreaHeader::FLAGS::HAS_FLYING_BBOX) {
+        mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mfbo);
+        STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MFBO); // 12213: "mIffChunk->token == 'MFBO'"
+        this->m_flyingBbox = reinterpret_cast<int16_t*>(&mIffChunk->m_data);
     }
 
-    if (this->m_header->m_mh2o && reinterpret_cast<SIffChunk*>(header + this->m_header->m_mh2o)->m_size) {
-        void* mem = SMemAlloc(sizeof(Liquid::CAreaData), __FILE__, __LINE__, 0);
-        Liquid::CAreaData* liquid = mem ? new (mem) Liquid::CAreaData(nullptr) : nullptr;
-        this->m_liquid = liquid;
-        liquid->SetData(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mh2o)->m_data);
+    if (this->m_header->m_mh2o) {
+        mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mh2o);
+        STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MH2O); // 12213: "mIffChunk->token == 'MH2O'"
+        if (mIffChunk->m_size) {
+            void* mem = SMemAlloc(sizeof(Liquid::CAreaData), __FILE__, __LINE__, 0);
+            Liquid::CAreaData* liquid = mem ? new (mem) Liquid::CAreaData(nullptr) : nullptr;
+            this->m_liquid = liquid;
+            liquid->SetData(&mIffChunk->m_data);
+        }
     }
 
     if (this->m_header->m_mtxf) {
-        this->m_textureFlags = reinterpret_cast<int32_t*>(&reinterpret_cast<SIffChunk*>(header + this->m_header->m_mtxf)->m_data);
+        mIffChunk = reinterpret_cast<SIffChunk*>(header + this->m_header->m_mtxf);
+        STORM_ASSERT(mIffChunk->token == SIffChunk::TOKEN_MTXF); // 12213: "mIffChunk->token == 'MTXF'"
+        this->m_textureFlags = reinterpret_cast<int32_t*>(&mIffChunk->m_data);
     }
 
     this->LoadTextures(textureNames, reinterpret_cast<SIffChunk*>(header + this->m_header->m_mtex)->m_size);
@@ -345,9 +400,9 @@ void CMapArea::AsyncCallback(void* param) {
     CMapArea* area = static_cast<CMapArea*>(param);
 
     area->ProcessIffChunks();
-    AsyncFileReadDestroyObject(area->m_asyncObject);
-    area->m_asyncObject = nullptr;
-    area->m_file = nullptr;
+    AsyncFileReadDestroyObject(area->asyncObject);
+    area->asyncObject = nullptr;
+    area->adtFile = nullptr;
 }
 
 // VERIFY: e0ce6011 manual
@@ -357,12 +412,12 @@ CMapArea::CMapArea() {
     this->m_index.y = 0;
     this->m_tileChunkIndex.x = 0;
     this->m_tileChunkIndex.y = 0;
-    this->m_chunkLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
-    this->m_file = nullptr;
-    this->m_asyncObject = nullptr;
+    this->chunkLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
+    this->adtFile = nullptr;
+    this->asyncObject = nullptr;
     memset(this->m_mapChunks, 0, sizeof(this->m_mapChunks));
-    this->m_fileBuffer = nullptr;
-    this->m_fileSize = 0;
+    this->rawAreaData = nullptr;
+    this->rawAreaDataSize = 0;
     this->unused_008C = 0;
     this->m_doodadDef = nullptr;
     this->m_mapObjDef = nullptr;
@@ -381,16 +436,20 @@ CMapArea::CMapArea() {
 // VERIFY: 09d8cf56 auto
 // OFFSET: 0x007D7150
 void CMapArea::Load(const char* fileName) {
-    CMap::SafeOpen(fileName, &this->m_file);
-    this->m_fileSize = SFileGetFileSize(this->m_file, nullptr);
-    this->m_fileBuffer = CMapArea::AllocAsyncLoadBuffer(this->m_fileSize);
-    this->m_asyncObject = AsyncFileReadAllocObject();
-    this->m_asyncObject->m_file = this->m_file;
-    this->m_asyncObject->m_buffer = this->m_fileBuffer;
-    this->m_asyncObject->m_size = this->m_fileSize;
-    this->m_asyncObject->m_userArg = this;
-    this->m_asyncObject->m_userPostloadCallback = reinterpret_cast<void*>(&CMapArea::AsyncCallback);
-    AsyncFileReadObject(this->m_asyncObject, 0);
+    CMap::SafeOpen(fileName, &this->adtFile);
+    this->rawAreaDataSize = SFileGetFileSize(this->adtFile, nullptr);
+    STORM_ASSERT(rawAreaDataSize > 0);
+    STORM_ASSERT(rawAreaData == NULL);
+    this->rawAreaData = CMapArea::AllocAsyncLoadBuffer(this->rawAreaDataSize);
+    STORM_ASSERT(rawAreaData != NULL);
+    this->asyncObject = AsyncFileReadAllocObject();
+    STORM_ASSERT(asyncObject);
+    this->asyncObject->file = this->adtFile;
+    this->asyncObject->buffer = this->rawAreaData;
+    this->asyncObject->size = this->rawAreaDataSize;
+    this->asyncObject->userArg = this;
+    this->asyncObject->userPostloadCallback = &CMapArea::AsyncCallback;
+    AsyncFileReadObject(this->asyncObject, 0);
 }
 
 namespace {
@@ -459,32 +518,34 @@ void CMapArea::QueryLiquidSounds(C3Vector* pos, float radius, TSGrowableArray<Wo
     float relY = -(pos->y - this->m_topLeft2.y);
     int32_t chunkX = CMath::fint_(-(pos->x - this->m_topLeft2.x) * OO_COORD_TO_CHUNK - 0.5f);
     int32_t chunkY = CMath::fint_(relY * OO_COORD_TO_CHUNK - 0.5f);
-    int32_t chunkRadius = CMath::fint_(static_cast<float>(ceil(radius * 0.030000001f)) - 0.5f);
+    // 12213: "radius / (150.0f/36.0f) < 256.0f"
+    STORM_ASSERT(radius / SMOLTILE_SIZE < 256.0f);
+    int32_t chunkRadius = CMath::fint_(static_cast<float>(ceil(radius * OO_COORD_TO_CHUNK_RADIUS)) - 0.5f);
     int32_t rowStart = chunkX - chunkRadius <= 0 ? 0 : chunkX - chunkRadius;
     int32_t colStart = chunkY - chunkRadius <= 0 ? 0 : chunkY - chunkRadius;
-    int32_t rowEnd = chunkX + chunkRadius >= 15 ? 15 : chunkX + chunkRadius;
-    int32_t colEnd = chunkY + chunkRadius >= 15 ? 15 : chunkY + chunkRadius;
+    int32_t rowEnd = chunkX + chunkRadius >= MAP_CHUNKS_PER_AREA_AXIS - 1 ? MAP_CHUNKS_PER_AREA_AXIS - 1 : chunkX + chunkRadius;
+    int32_t colEnd = chunkY + chunkRadius >= MAP_CHUNKS_PER_AREA_AXIS - 1 ? MAP_CHUNKS_PER_AREA_AXIS - 1 : chunkY + chunkRadius;
     float radiusSq = radius * radius;
 
     TSGrowableArray<LiquidChunkAndDistance> chunks;
 
     for (int32_t row = rowStart; row <= rowEnd; row++) {
         for (int32_t col = colStart; col <= colEnd; col++) {
-            CMapChunk* chunk = this->m_mapChunks[row * 16 + col];
+            CMapChunk* chunk = this->m_mapChunks[row * MAP_CHUNKS_PER_AREA_AXIS + col];
 
             if (!chunk) {
                 continue;
             }
 
-            for (CChunkLiquid* liquid = chunk->m_liquidChunkLinkList.Head(); liquid; liquid = chunk->m_liquidChunkLinkList.Next(liquid)) {
-                float height = (liquid->m_height.y + liquid->m_height.x) * 0.5f;
+            for (CChunkLiquid* liquid = chunk->liquidsList.Head(); liquid; liquid = chunk->liquidsList.Next(liquid)) {
+                float height = (liquid->m_height.m_h + liquid->m_height.m_l) * 0.5f;
                 LiquidChunkAndDistance* entry = chunks.New();
                 entry->m_chunk = chunk;
                 entry->m_liquid = liquid;
-                float dx = chunk->m_topLeftCoords.x - 16.666666f - pos->x;
-                float dy = chunk->m_topLeftCoords.y - 16.666666f - pos->y;
+                float dx = chunk->m_topLeftCoords.x - HALF_LIQUID_TILE_GRID_SIZE - pos->x;
+                float dy = chunk->m_topLeftCoords.y - HALF_LIQUID_TILE_GRID_SIZE - pos->y;
                 float dz = height - pos->z;
-                entry->m_distance = dx * dx + dz * dz + dy * dy - 277.77777f;
+                entry->m_distance = dx * dx + dz * dz + dy * dy - HALF_LIQUID_TILE_GRID_SIZE_SQ;
             }
         }
     }
@@ -502,11 +563,11 @@ void CMapArea::QueryLiquidSounds(C3Vector* pos, float radius, TSGrowableArray<Wo
             CMapChunk* chunk = entry->m_chunk;
             float dx = chunk->m_topLeftCoords.x - pos->x;
             float dy = chunk->m_topLeftCoords.y - pos->y;
-            float dz = (liquid->m_height.y + liquid->m_height.x) * 0.5f - pos->z;
+            float dz = (liquid->m_height.m_h + liquid->m_height.m_l) * 0.5f - pos->z;
 
-            for (uint32_t row = 0; row < 8; row++) {
-                for (uint32_t col = 0; col < 8; col++) {
-                    if ((liquid->m_tiles[row * 8 + col] & 0xF) != 0xF) {
+            for (uint32_t row = 0; row < LIQUID_TILES_PER_CHUNK_AXIS; row++) {
+                for (uint32_t col = 0; col < LIQUID_TILES_PER_CHUNK_AXIS; col++) {
+                    if ((reinterpret_cast<const uint8_t*>(liquid->m_tiles)[row * LIQUID_TILES_PER_CHUNK_AXIS + col] & 0xF) != 0xF) {
                         if (dx * dx + dy * dy + dz * dz > radiusSq) {
                             continue;
                         }
@@ -521,14 +582,14 @@ void CMapArea::QueryLiquidSounds(C3Vector* pos, float radius, TSGrowableArray<Wo
                     dy -= SMOLTILE_SIZE;
                 }
 
-                dy += 33.333332f;
+                dy += LIQUID_TILE_GRID_SIZE;
                 dx -= SMOLTILE_SIZE;
             }
         } else {
             CMapChunk* chunk = entry->m_chunk;
             float relTileY = -(pos->y - chunk->m_topLeftCoords.y);
             float relTileX = -(pos->x - chunk->m_topLeftCoords.x);
-            int32_t tileRadius = CMath::fint_(static_cast<float>(ceil(radius * 0.24000001f)) - 0.5f);
+            int32_t tileRadius = CMath::fint_(static_cast<float>(ceil(radius * OOSMOLTILE_SIZE)) - 0.5f);
             int32_t tileY = CMath::fint_(relTileY * OO_COORD_TO_SUBCHUNK - 0.5f);
             int32_t tileX = CMath::fint_(relTileX * OO_COORD_TO_SUBCHUNK - 0.5f);
             int32_t tileRowStart = tileX - tileRadius;
@@ -558,7 +619,7 @@ void CMapArea::QueryLiquidSounds(C3Vector* pos, float radius, TSGrowableArray<Wo
 
             float dx = chunk->m_topLeftCoords.x - static_cast<float>(tileRowStart) * SMOLTILE_SIZE - HALF_SMOLTILE_SIZE - pos->x;
             float dy = chunk->m_topLeftCoords.y - static_cast<float>(tileColStart) * SMOLTILE_SIZE - HALF_SMOLTILE_SIZE - pos->y;
-            float dz = (liquid->m_height.y + liquid->m_height.x) * 0.5f - pos->z;
+            float dz = (liquid->m_height.m_h + liquid->m_height.m_l) * 0.5f - pos->z;
 
             int32_t colBegin = tileColStart - liquid->m_tileBegin.y;
             int32_t colEnd = tileColEnd - liquid->m_tileBegin.y;
@@ -598,13 +659,16 @@ void CMapArea::QueryLiquidSounds(C3Vector* pos, float radius, TSGrowableArray<Wo
 // VERIFY: e54d69d6 manual
 // OFFSET: [0x007D6E10, 0x007D7120]
 CMapArea::~CMapArea() {
+    STORM_ASSERT(adtFile == NULL);
+    STORM_ASSERT(asyncObject == NULL);
+
     if (this->m_liquid) {
         SMemFree(this->m_liquid, __FILE__, __LINE__, 0);
         this->m_liquid = nullptr;
     }
 
-    if (this->m_fileBuffer) {
-        CMapArea::FreeAsyncLoadBuffer(this->m_fileBuffer, this->m_fileSize);
+    if (this->rawAreaData) {
+        CMapArea::FreeAsyncLoadBuffer(this->rawAreaData, this->rawAreaDataSize);
     }
 
     this->unused_008C = 0;

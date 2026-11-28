@@ -133,7 +133,8 @@ static int32_t Script_SetPlayerTextureWidth(lua_State* L) {
 static int32_t Script_GetTrackingInfo(lua_State* L) {
     int32_t index = static_cast<int32_t>(static_cast<int64_t>(lua_tonumber(L, 1))) - 1;
 
-    if (index >= static_cast<int32_t>(s_trackingSpells.Count())) {
+    // The original uses an unsigned JNB, rejecting negative indices as well.
+    if (static_cast<uint32_t>(index) >= s_trackingSpells.Count()) {
         const TrackingTypeInfo* info = CGMinimapFrame::GetTrackingTypeByIndex(index - s_trackingSpells.Count());
 
         if (!info) {
@@ -331,7 +332,8 @@ static int32_t Script_SetTracking(lua_State* L) {
 
     int32_t index = static_cast<int32_t>(static_cast<int64_t>(lua_tonumber(L, 1))) - 1;
 
-    if (index < static_cast<int32_t>(s_trackingSpells.Count())) {
+    // The original uses an unsigned JNB to skip this array access.
+    if (static_cast<uint32_t>(index) < s_trackingSpells.Count()) {
         Spell_C::CastSpell(s_trackingSpells.m_data[index], nullptr, WOWGUID(), false);
         return 0;
     }
@@ -368,11 +370,11 @@ static int32_t Script_SetMaskTexture(lua_State* L) {
 
     CStatus status;
 
-    if (s_maskTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_maskTexture));
+    if (s_minimapMaskTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_minimapMaskTexture));
     }
 
-    s_maskTexture = TextureCreate(lua_tolstring(L, 2, nullptr), CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
+    s_minimapMaskTexture = TextureCreate(lua_tolstring(L, 2, nullptr), CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
 
     if (status.m_highestSeverity >= STATUS_ERROR) {
         const char* name = minimap->GetName();
@@ -394,11 +396,11 @@ static int32_t Script_SetPOIArrowTexture(lua_State* L) {
 
     CStatus status;
 
-    if (s_poiArrowTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_poiArrowTexture));
+    if (s_arrowPOITexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_arrowPOITexture));
     }
 
-    s_poiArrowTexture = TextureCreate(lua_tolstring(L, 2, nullptr), CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
+    s_arrowPOITexture = TextureCreate(lua_tolstring(L, 2, nullptr), CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
 
     if (status.m_highestSeverity >= STATUS_ERROR) {
         const char* name = minimap->GetName();
@@ -420,11 +422,11 @@ static int32_t Script_SetStaticPOIArrowTexture(lua_State* L) {
 
     CStatus status;
 
-    if (s_staticPOIArrowTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_staticPOIArrowTexture));
+    if (s_arrowStaticTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_arrowStaticTexture));
     }
 
-    s_staticPOIArrowTexture = TextureCreate(lua_tolstring(L, 2, nullptr), CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
+    s_arrowStaticTexture = TextureCreate(lua_tolstring(L, 2, nullptr), CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
 
     if (status.m_highestSeverity >= STATUS_ERROR) {
         const char* name = minimap->GetName();
@@ -446,11 +448,11 @@ static int32_t Script_SetCorpsePOIArrowTexture(lua_State* L) {
 
     CStatus status;
 
-    if (s_corpseArrowTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_corpseArrowTexture));
+    if (s_arrowCorpseTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_arrowCorpseTexture));
     }
 
-    s_corpseArrowTexture = TextureCreate(lua_tolstring(L, 2, nullptr), CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
+    s_arrowCorpseTexture = TextureCreate(lua_tolstring(L, 2, nullptr), CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
 
     if (status.m_highestSeverity >= STATUS_ERROR) {
         const char* name = minimap->GetName();
@@ -505,11 +507,11 @@ static int32_t Script_SetBlipTexture(lua_State* L) {
 
     CStatus status;
 
-    if (s_blipTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_blipTexture));
+    if (s_objectBlipTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_objectBlipTexture));
     }
 
-    s_blipTexture = TextureCreate(fileName, CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
+    s_objectBlipTexture = TextureCreate(fileName, CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 3);
 
     if (status.m_highestSeverity >= STATUS_ERROR) {
         const char* name = minimap->GetName();

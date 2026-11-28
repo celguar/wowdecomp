@@ -85,7 +85,8 @@ static int32_t CvarListCommandHandler(const char* command, const char* arguments
 // VERIFY: 5bcbe89c manual
 // OFFSET: 0x00767680
 static int32_t CvarCommandHandler(const char* command, const char* arguments) {
-    CVar* var = CVar::Lookup(command);
+    CVar* cvar = CVar::Lookup(command);
+    STORM_ASSERT(cvar);
     const char* value = arguments;
 
     while (*value == ' ') {
@@ -93,33 +94,33 @@ static int32_t CvarCommandHandler(const char* command, const char* arguments) {
     }
 
     if (!*value) {
-        const char* current = var->m_stringValue.m_str;
+        const char* current = cvar->m_stringValue.m_str;
 
         if (current) {
             ConsolePrintf("CVar \"%s\" is \"%s\"", command, current);
 
-            if (var->m_defaultValue.m_str && SStrCmp(current, var->m_defaultValue.m_str, STORM_MAX_STR)) {
-                ConsolePrintf("  default value \"%s\"", var->m_defaultValue.m_str);
+            if (cvar->m_defaultValue.m_str && SStrCmp(current, cvar->m_defaultValue.m_str, STORM_MAX_STR)) {
+                ConsolePrintf("  default value \"%s\"", cvar->m_defaultValue.m_str);
             }
 
-            if (var->m_resetValue.m_str && SStrCmp(current, var->m_resetValue.m_str, STORM_MAX_STR)) {
-                ConsolePrintf("  reset value \"%s\"", var->m_resetValue.m_str);
+            if (cvar->m_resetValue.m_str && SStrCmp(current, cvar->m_resetValue.m_str, STORM_MAX_STR)) {
+                ConsolePrintf("  reset value \"%s\"", cvar->m_resetValue.m_str);
             }
 
-            if (var->m_latchedValue.m_str && SStrCmp(current, var->m_latchedValue.m_str, STORM_MAX_STR)) {
-                ConsolePrintf("  pending value \"%s\"", var->m_latchedValue.m_str);
+            if (cvar->m_latchedValue.m_str && SStrCmp(current, cvar->m_latchedValue.m_str, STORM_MAX_STR)) {
+                ConsolePrintf("  pending value \"%s\"", cvar->m_latchedValue.m_str);
             }
         }
 
         return 1;
     }
 
-    if (var->m_flags & 0x100) {
-        ConsolePrintf("%s is read only.", var->m_key.m_str);
+    if (cvar->m_flags & CVAR_FLAGS::CVAR_CONSOLE_READ_ONLY) {
+        ConsolePrintf("%s is read only.", cvar->m_key.m_str);
         return 1;
     }
 
-    var->Set(value, true, true, false, true);
+    cvar->Set(value, true, true, false, true);
 
     return 1;
 }
@@ -191,7 +192,7 @@ static int32_t SetCommandHandler(const char* command, const char* arguments) {
     if (var) {
         var->Set(value, true, false, false, true);
     } else {
-        CVar::Register(name, "", 0, value, nullptr, CATEGORY_DEFAULT, true, nullptr, false);
+        CVar::Register(name, "", CVAR_FLAGS::CVAR_NONE, value, nullptr, CATEGORY_DEFAULT, true, nullptr, false);
     }
 
     return 1;
@@ -224,13 +225,14 @@ int32_t CVar::Load(HOSFILE file) {
         onStack = true;
     }
 
-    uint32_t bytesRead;
+    uint32_t sizeRead;
 
-    if (OsReadFile(file, buffer, size, &bytesRead)) {
+    if (OsReadFile(file, buffer, size, &sizeRead)) {
+        STORM_ASSERT(sizeRead == size);
         buffer[size] = '\0';
         const char* cur = buffer;
 
-        if (cur && bytesRead >= 3 && static_cast<uint8_t>(cur[0]) == 0xEF && static_cast<uint8_t>(cur[1]) == 0xBB && static_cast<uint8_t>(cur[2]) == 0xBF) {
+        if (cur && sizeRead >= 3 && static_cast<uint8_t>(cur[0]) == 0xEF && static_cast<uint8_t>(cur[1]) == 0xBB && static_cast<uint8_t>(cur[2]) == 0xBF) {
             cur += 3;
         }
 
@@ -323,21 +325,24 @@ int32_t CVar::LogCvar(const char* name, const char* value, void* arg) {
 // OFFSET: 0x00766700
 void CVar::SetReadOnly(bool readOnly) {
     if (readOnly) {
-        this->m_flags |= 0x4;
+        this->m_flags |= CVAR_FLAGS::CVAR_READ_ONLY;
     } else {
-        this->m_flags &= ~0x4;
+        this->m_flags &= ~CVAR_FLAGS::CVAR_READ_ONLY;
     }
 }
 
 // VERIFY: e41a25fd manual
 // OFFSET: 0x00766720
-void CVarIntListWrapper::AddNextValue(uint32_t value) {
-    this->m_state = 2;
+void CVarIntListWrapper::AddNextValue(uint32_t val) {
+    STORM_ASSERT(m_lastOp != CVAR_INT_LIST_OP_GET);
+    this->m_lastOp = CVAR_INT_LIST_OP_ADD;
+    STORM_ASSERT(val <= CVAR_INT_LIST_MAX_VALUE);
+    STORM_ASSERT(m_listIndex < CVAR_INT_LIST_MAX_STRING_SIZE - 3);
 
-    if (value <= 93 * 93 * 93 - 1 && this->m_pos < 0xFD) {
-        this->m_buffer[this->m_pos++] = static_cast<char>(value / (93 * 93) + 35);
-        this->m_buffer[this->m_pos++] = static_cast<char>(value % (93 * 93) / 93 + 35);
-        this->m_buffer[this->m_pos++] = static_cast<char>(value % (93 * 93) % 93 + 35);
+    if (val <= CVAR_INT_LIST_MAX_VALUE && this->m_listIndex < CVAR_INT_LIST_MAX_STRING_SIZE - 3) {
+        this->m_buffer[this->m_listIndex++] = static_cast<char>(val / (93 * 93) + 35);
+        this->m_buffer[this->m_listIndex++] = static_cast<char>(val % (93 * 93) / 93 + 35);
+        this->m_buffer[this->m_listIndex++] = static_cast<char>(val % (93 * 93) % 93 + 35);
     }
 }
 
@@ -346,7 +351,7 @@ void CVarIntListWrapper::AddNextValue(uint32_t value) {
 void CVar::InternalSet(const char* value, bool setValue, bool setReset, bool setDefault, bool setNeedsSave) {
     bool changed = false;
 
-    if ((this->m_flags & 0x4) || !value) {
+    if ((this->m_flags & CVAR_FLAGS::CVAR_READ_ONLY) || !value) {
         return;
     }
 
@@ -387,6 +392,8 @@ bool CVarArrayWrapper::RawGetValue(uint32_t index) const {
 // VERIFY: 8db3b933 auto
 // OFFSET: 0x007668C0
 bool CVar::Set(const char* value, bool setValue, bool setReset, bool setDefault, bool setNeedsSave) {
+    STORM_ASSERT(value);
+
     if (setValue) {
         if (this->m_callback) {
             OsValidateFunctionPointer(reinterpret_cast<const void*>(this->m_callback));
@@ -398,7 +405,7 @@ bool CVar::Set(const char* value, bool setValue, bool setReset, bool setDefault,
 
         this->m_modified++;
 
-        if (this->m_flags & CVAR_LATCH) {
+        if (this->m_flags & CVAR_FLAGS::CVAR_LATCH) {
             this->m_latchedValue.Copy(value);
             CVar::m_needsSave = true;
 
@@ -471,7 +478,7 @@ void CVar::Default() {
 // VERIFY: 0165142c manual
 // OFFSET: 0x00766AB0
 bool CVar::Update() {
-    if (!(this->m_flags & CVAR_LATCH) || !this->m_latchedValue.m_str) {
+    if (!(this->m_flags & CVAR_FLAGS::CVAR_LATCH) || !this->m_latchedValue.m_str) {
         return false;
     }
 
@@ -537,47 +544,49 @@ void CVarArrayWrapper::UpdateFromVersion(int32_t version) {
 // OFFSET: 0x00766CA0
 bool CVarArrayWrapper::RawSetValue(uint32_t index, bool value) {
     const char* str = this->m_cvar->m_stringValue.m_str;
-    size_t length = strlen(str);
+    size_t oldStringSize = strlen(str);
 
-    if (length >= 0xFF) {
+    char buf[256];
+    STORM_ASSERT(sizeof(buf) > oldStringSize); // 12213: "ARRSIZE(buf) > oldStringSize"
+
+    if (oldStringSize >= 0xFF) {
         return false;
     }
 
-    char buffer[256];
-    strncpy(buffer, str, sizeof(buffer));
+    strncpy(buf, str, sizeof(buf));
 
     uint32_t pos = index / 6 + 1;
-    buffer[length] = 0;
-    buffer[0] = 2;
+    buf[oldStringSize] = 0;
+    buf[0] = 2;
 
-    if (index / 6 + 2 >= sizeof(buffer)) {
+    if (index / 6 + 2 >= sizeof(buf)) {
         return false;
     }
 
     if (value) {
-        if (length < pos) {
-            memset(&buffer[length], '@', pos - length + 1);
-            buffer[pos + 1] = 0;
+        if (oldStringSize < pos) {
+            memset(&buf[oldStringSize], '@', pos - oldStringSize + 1);
+            buf[pos + 1] = 0;
         }
 
-        buffer[pos] |= 1 << (index % 6);
+        buf[pos] |= 1 << (index % 6);
     } else {
-        if (pos > length) {
+        if (pos > oldStringSize) {
             return true;
         }
 
-        buffer[pos] &= ~(1 << (index % 6));
+        buf[pos] &= ~(1 << (index % 6));
 
-        for (size_t i = length - 1; i; i--) {
-            if (buffer[i] != '@') {
+        for (size_t i = oldStringSize - 1; i; i--) {
+            if (buf[i] != '@') {
                 break;
             }
 
-            buffer[i] = 0;
+            buf[i] = 0;
         }
     }
 
-    this->m_cvar->Set(buffer, true, false, false, true);
+    this->m_cvar->Set(buf, true, false, false, true);
 
     return true;
 }
@@ -597,14 +606,15 @@ void CVarIntListWrapper::UpdateFromVersion(int32_t version) {
     const uint8_t* str = reinterpret_cast<const uint8_t*>(this->m_cvar->m_stringValue.m_str);
     int32_t weights[3] = { 220 * 220, 220, 1 };
     int8_t digit = 0;
-    uint32_t value = 0;
+    uint32_t val = 0;
 
     while (*str) {
-        value += weights[digit++] * (*str - 35);
+        val += weights[digit++] * (*str - 35);
 
         if (digit > 2) {
-            this->AddNextValue(value);
-            value = 0;
+            STORM_ASSERT(val <= CVAR_INT_LIST_MAX_VALUE);
+            this->AddNextValue(val);
+            val = 0;
             digit = 0;
         }
 
@@ -617,7 +627,9 @@ void CVarIntListWrapper::UpdateFromVersion(int32_t version) {
 // VERIFY: 39283ef7 manual
 // OFFSET: 0x00766F70
 uint32_t CVarIntListWrapper::GetNextValue() {
-    if (this->m_pos == 2) {
+    STORM_ASSERT(m_lastOp != CVAR_INT_LIST_OP_ADD);
+
+    if (this->m_listIndex == 2) {
         uint8_t version = 0;
 
         if (this->m_cvar && this->m_cvar->m_stringValue.m_str[0] == 'v') {
@@ -626,19 +638,19 @@ uint32_t CVarIntListWrapper::GetNextValue() {
 
         if (version != 1) {
             this->UpdateFromVersion(version);
-            this->m_pos = 2;
+            this->m_listIndex = 2;
         }
 
-        this->m_state = 1;
+        this->m_lastOp = CVAR_INT_LIST_OP_GET;
     }
 
-    const char* str = this->m_cvar->m_stringValue.m_str + this->m_pos;
+    const char* str = this->m_cvar->m_stringValue.m_str + this->m_listIndex;
 
     if (!str[0] || !str[1] || !str[2]) {
         return 0;
     }
 
-    this->m_pos += 3;
+    this->m_listIndex += 3;
 
     return 93 * (93 * (str[0] - 35) + str[1] - 35) + str[2] - 35;
 }
@@ -647,7 +659,7 @@ uint32_t CVarIntListWrapper::GetNextValue() {
 // OFFSET: 0x00767030
 int32_t CVar::IterateForArchive(uint32_t category, uint32_t excludeFlags, int32_t (*callback)(const char* name, const char* value, void* arg), void* arg) {
     for (CVar* var = s_registeredCVars.m_fulllist.Head(); var; var = s_registeredCVars.m_fulllist.Next(var)) {
-        if (!(var->m_flags & CVAR_ARCHIVE) || (var->m_flags & 0x80) || (var->m_flags & 0x30) != category || (var->m_flags & excludeFlags)) {
+        if (!(var->m_flags & CVAR_FLAGS::CVAR_ARCHIVE) || (var->m_flags & CVAR_FLAGS::CVAR_UNKNOWN_80) || (var->m_flags & CVAR_ARCHIVE_SCOPE::CVAR_SCOPE_MASK) != category || (var->m_flags & excludeFlags)) {
             continue;
         }
 
@@ -696,7 +708,7 @@ int32_t CVar::SaveAll() {
     HOSFILE file = OsCreateFile(path, OS_GENERIC_WRITE, 0, OS_CREATE_ALWAYS, OS_FILE_ATTRIBUTE_NORMAL, OS_FILE_TYPE_ANY);
 
     if (file != OS_INVALID_FILE) {
-        result = CVar::IterateForArchive(0, 0, CVar::SaveCvar, file);
+        result = CVar::IterateForArchive(CVAR_ARCHIVE_SCOPE::CVAR_SCOPE_CONFIG, CVAR_FLAGS::CVAR_NONE, CVar::SaveCvar, file);
         OsCloseFile(file);
     }
 
@@ -719,7 +731,7 @@ void CVar::DeleteCharacterCVars() {
     CVar* var = s_registeredCVars.m_fulllist.Head();
 
     while (var) {
-        if ((var->m_flags & CVAR_ARCHIVE) && (var->m_flags & 0x30) == 0x20) {
+        if ((var->m_flags & CVAR_FLAGS::CVAR_ARCHIVE) && (var->m_flags & CVAR_ARCHIVE_SCOPE::CVAR_SCOPE_MASK) == CVAR_ARCHIVE_SCOPE::CVAR_SCOPE_CHARACTER) {
             var = s_registeredCVars.DeleteNode(var);
         } else {
             var = s_registeredCVars.Next(var);
@@ -733,7 +745,7 @@ void CVar::DeleteAccountCVars() {
     CVar* var = s_registeredCVars.m_fulllist.Head();
 
     while (var) {
-        if ((var->m_flags & CVAR_ARCHIVE) && (var->m_flags & 0x30) == 0x10) {
+        if ((var->m_flags & CVAR_FLAGS::CVAR_ARCHIVE) && (var->m_flags & CVAR_ARCHIVE_SCOPE::CVAR_SCOPE_MASK) == CVAR_ARCHIVE_SCOPE::CVAR_SCOPE_ACCOUNT) {
             var = s_registeredCVars.DeleteNode(var);
         } else {
             var = s_registeredCVars.Next(var);
@@ -772,7 +784,7 @@ CVar* CVar::LookupRegistered(const char* name) {
         return nullptr;
     }
 
-    if (!(var->m_flags & 0x80000000) && !(var->m_flags & 0x80)) {
+    if (!(var->m_flags & CVAR_FLAGS::CVAR_CODE_REGISTERED) && !(var->m_flags & CVAR_FLAGS::CVAR_UNKNOWN_80)) {
         return nullptr;
     }
 
@@ -790,7 +802,7 @@ CVar* CVar::Register(const char* name, const char* help, uint32_t flags, const c
 
     if (var) {
         bool setReset = var->m_resetValue.m_str == nullptr;
-        var->m_flags = flags | (var->m_flags & ~0x30);
+        var->m_flags = flags | (var->m_flags & ~CVAR_ARCHIVE_SCOPE::CVAR_SCOPE_MASK);
         bool setDefault = var->m_defaultValue.m_str == nullptr;
         var->m_callback = callback;
         var->m_arg = arg;
@@ -804,11 +816,11 @@ CVar* CVar::Register(const char* name, const char* help, uint32_t flags, const c
         var->Set(value, setValue, setReset, setDefault, false);
 
         if (!setCommand) {
-            var->m_flags |= 0x80000000;
+            var->m_flags |= CVAR_FLAGS::CVAR_CODE_REGISTERED;
         }
 
-        if (unk && !(var->m_flags & 0x80000000)) {
-            var->m_flags |= 0x80;
+        if (unk && !(var->m_flags & CVAR_FLAGS::CVAR_CODE_REGISTERED)) {
+            var->m_flags |= CVAR_FLAGS::CVAR_UNKNOWN_80;
         }
 
         return var;
@@ -824,7 +836,7 @@ CVar* CVar::Register(const char* name, const char* help, uint32_t flags, const c
     var->m_resetValue.Copy(nullptr);
     var->m_latchedValue.Copy(nullptr);
     var->m_callback = callback;
-    var->m_flags = 0;
+    var->m_flags = CVAR_FLAGS::CVAR_NONE;
     var->m_arg = arg;
     var->m_help.Copy(help);
 
@@ -834,14 +846,14 @@ CVar* CVar::Register(const char* name, const char* help, uint32_t flags, const c
         var->Set(value, true, false, true, false);
     }
 
-    var->m_flags = flags | CVAR_ARCHIVE;
+    var->m_flags = flags | CVAR_FLAGS::CVAR_ARCHIVE;
 
     if (!setCommand) {
-        var->m_flags = flags | (0x80000000 | CVAR_ARCHIVE);
+        var->m_flags = flags | (CVAR_FLAGS::CVAR_CODE_REGISTERED | CVAR_FLAGS::CVAR_ARCHIVE);
     }
 
-    if (unk && !(var->m_flags & 0x80000000)) {
-        var->m_flags |= 0x80;
+    if (unk && !(var->m_flags & CVAR_FLAGS::CVAR_CODE_REGISTERED)) {
+        var->m_flags |= CVAR_FLAGS::CVAR_UNKNOWN_80;
     }
 
     ConsoleCommandRegister(var->m_key.m_str, CvarCommandHandler, static_cast<CATEGORY>(category), help);
@@ -873,6 +885,6 @@ void CVar::Initialize(const char* fileName) {
 void CVarIntListWrapper::WriteVersionTag() {
     this->m_buffer[1] = 1;
     this->m_buffer[0] = 'v';
-    this->m_buffer[this->m_pos] = 0;
+    this->m_buffer[this->m_listIndex] = 0;
     this->m_cvar->Set(this->m_buffer, true, false, false, true);
 }

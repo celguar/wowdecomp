@@ -149,9 +149,9 @@ void CGTabardModelFrame::OnModelLoaded(CM2Model* model) {
 
     M2SequenceInfo info;
     info.m_radius = 0.0f;
-    model->GetSequenceInfo(0, 0, info);
+    model->GetSequenceInfo(ANIM_STAND, 0, info);
 
-    C3Vector coord(0.0f, (info.m_bounds.t.y - info.m_bounds.b.y) * 0.33000001f, (info.m_bounds.t.z - info.m_bounds.b.z) * 0.5f);
+    C3Vector coord(0.0f, (info.m_bounds.t.y - info.m_bounds.b.y) * 0.33f, (info.m_bounds.t.z - info.m_bounds.b.z) * 0.5f);
     CameraSetCoord(camera, 8, coord, 0);
 }
 
@@ -167,7 +167,7 @@ void CGTabardModelFrame::InitializeTabardColors(CGPlayer_C* player) {
         seed.SetSeed(OsGetAsyncTimeMs());
 
         for (uint32_t i = 0; i < 5; i++) {
-            this->m_variations[i] = static_cast<int32_t>((static_cast<uint64_t>(s_tabardVariationCounts[i]) * CRandom::uint32_(seed)) >> 32);
+            this->m_variations[i] = static_cast<int32_t>(CRandom::dice_(s_tabardVariationCounts[i], seed));
         }
     } else {
         this->m_variations[0] = stats->m_emblemStyle;

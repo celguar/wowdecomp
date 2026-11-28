@@ -83,7 +83,7 @@ int32_t ConsoleDeviceExists() {
 
 // VERIFY: 6e7fe291 auto
 // OFFSET: 0x00769230
-int32_t IsConsoleEnabled() {
+BOOL IsConsoleEnabled() {
     return s_consoleAccessEnabled;
 }
 
@@ -109,41 +109,41 @@ void ConsoleGxOverride(const char* list) {
 
         if (override == GxOverride_PixelShader) {
             switch (overrideValue) {
-                case 0:
-                case 1:
-                case 2:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_1_1:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_1_2:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_1_3:
                     overrideValue = 1;
                     break;
 
-                case 3:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_1_4:
                     overrideValue = 2;
                     break;
 
-                case 4:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_PS_2_0:
                     overrideValue = 3;
                     break;
 
-                case 5:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_NVRC:
                     overrideValue = 7;
                     break;
 
-                case 6:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_NVTS:
                     overrideValue = 8;
                     break;
 
-                case 7:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_NVTS2:
                     overrideValue = 9;
                     break;
 
-                case 8:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_NVTS3:
                     overrideValue = 10;
                     break;
 
-                case 10:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_ARBFP1:
                     overrideValue = 12;
                     break;
 
-                case 11:
+                case CONSOLE_PIXEL_SHADER_PROFILE::CONSOLE_PROFILE_GLSL:
                     overrideValue = 13;
                     break;
 
@@ -192,7 +192,7 @@ void ConsoleDeviceDestroy() {
 
 // VERIFY: 9ae0e177 manual
 // OFFSET: 0x00769E10
-void ValidateFormatMonitor(CGxFormat& format) {
+void ValidateFormatMonitor(CGxFormat& fmt) {
     static C2iVector s_resolutions[] = {
         { 1600, 1200 },
         { 1280, 1024 },
@@ -203,17 +203,18 @@ void ValidateFormatMonitor(CGxFormat& format) {
         { 640, 480 },
     };
 
-    int32_t width = format.m_size.x;
-    int32_t height = format.m_size.y;
+    int32_t width = fmt.m_size.x;
+    int32_t height = fmt.m_size.y;
     int32_t index = -1;
-    uint32_t bpp = s_formatToBpp[format.m_colorFormat];
+    STORM_ASSERT(static_cast<uint32_t>(fmt.m_colorFormat) < ARRSIZE(s_formatToBpp)); // 12213: "fmt.colorFormat < ARRSIZE(s_FormatTobpp)"
+    uint32_t bpp = s_formatToBpp[fmt.m_colorFormat];
     uint32_t minRefresh = 9999;
 
     CGxMonitorMode desktop;
     desktop.m_size.x = 0;
     desktop.m_size.y = 0;
 
-    if (!format.m_window || !GxAdapterDesktopMode(desktop) || desktop.m_size.x < format.m_size.x || desktop.m_size.y < format.m_size.y) {
+    if (!fmt.m_window || !GxAdapterDesktopMode(desktop) || desktop.m_size.x < fmt.m_size.x || desktop.m_size.y < fmt.m_size.y) {
         while (true) {
             uint32_t i;
 
@@ -224,8 +225,8 @@ void ValidateFormatMonitor(CGxFormat& format) {
             }
 
             if (i < s_gxMonitorModes.Count()) {
-                format.m_size.x = width;
-                format.m_size.y = height;
+                fmt.m_size.x = width;
+                fmt.m_size.y = height;
                 break;
             }
 
@@ -244,12 +245,12 @@ refresh:
     for (uint32_t i = 0; i < s_gxMonitorModes.Count(); i++) {
         CGxMonitorMode& mode = s_gxMonitorModes[i];
 
-        if (format.m_size.x == mode.m_size.x && format.m_size.y == mode.m_size.y && bpp == mode.m_bpp) {
+        if (fmt.m_size.x == mode.m_size.x && fmt.m_size.y == mode.m_size.y && bpp == mode.m_bpp) {
             if (mode.m_refreshRate < minRefresh) {
                 minRefresh = mode.m_refreshRate;
             }
 
-            if (format.m_refreshRate == mode.m_refreshRate) {
+            if (fmt.m_refreshRate == mode.m_refreshRate) {
                 return;
             }
         }
@@ -260,8 +261,8 @@ refresh:
         GxLog("ValidateFormatMonitor(): unable to find monitor refresh");
     }
 
-    GxLog("ValidateFormatMonitor(): invalid refresh rate %d, set to %d", format.m_refreshRate, minRefresh);
-    format.m_refreshRate = minRefresh;
+    GxLog("ValidateFormatMonitor(): invalid refresh rate %d, set to %d", fmt.m_refreshRate, minRefresh);
+    fmt.m_refreshRate = minRefresh;
 }
 
 // VERIFY: 35de767a auto
@@ -308,10 +309,10 @@ void RemoveConsoleDeviceDefaultCallback(void (*callback)(OPTION_PAGE page)) {
 
 // VERIFY: 9ac5dfc9 manual
 // OFFSET: 0x0076AB80
-void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) {
+void ConsoleDeviceInitialize(const char* title, bool unused2, bool unused3) {
     GxLogOpen();
 
-    s_cvHwDetect = CVar::Register("hwDetect", "do hardware detection", 1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvHwDetect = CVar::Register("hwDetect", "do hardware detection", CVAR_FLAGS::CVAR_ARCHIVE, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     ConsoleDetectDetectHardware(s_hardware, s_hwChanged);
     s_hardwareDetected = true;
 
@@ -323,6 +324,11 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
     }
 
     s_consoleAccessEnabled = CmdLineGetBool(static_cast<CMDOPT>(CMD_CONSOLE));
+
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug feature: the console is always available, without the -console argument.
+    s_consoleAccessEnabled = 1;
+#endif
 
     ConsoleDetectSetDefaultsFormat(s_defaults, s_hardware);
     RegisterGxCVars();
@@ -421,7 +427,7 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
 
     for (s_device = CreateGxDevice(api, OsWindowProc, format); !s_device; s_device = CreateGxDevice(api, OsWindowProc, format)) {
         if (format.m_multisampleCount > 1) {
-            if (format.m_multisampleCount - 2 <= 1) {
+            if (format.m_multisampleCount >= 2 && format.m_multisampleCount <= 3) {
                 format.m_multisampleCount = 1;
             } else {
                 format.m_multisampleCount -= 2;
@@ -437,15 +443,15 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
             if (desktopTried) {
                 GxLog("ConsoleDeviceInitialize(): no output device available!");
 
-                Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
+                Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(MSG_TITLE_WOW);
                 const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
                 const char* message;
 
                 if (api == GxApi_D3d9 || api == GxApi_D3d9Ex) {
-                    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(2);
+                    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(MSG_GX_INIT_FAILED_D3D);
                     message = rec ? rec->m_message : "World of Warcraft was unable to start up 3D acceleration. Please make sure DirectX 9.0c is installed and your video drivers are up-to-date.";
                 } else {
-                    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(3);
+                    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(MSG_GX_INIT_FAILED);
                     message = rec ? rec->m_message : "World of Warcraft was unable to start up 3D acceleration.";
                 }
 
@@ -475,12 +481,12 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
         switch (g_theGxDevicePtr->DeviceApi()) {
             case GxApi_OpenGl:
             case GxApi_GLL:
-                ConsoleGxOverride(s_hardware.m_videoHw->m_oglOverrides);
+                ConsoleGxOverride(s_hardware.videoHw->m_oglOverrides);
                 break;
 
             case GxApi_D3d9:
             case GxApi_D3d9Ex:
-                ConsoleGxOverride(s_hardware.m_videoHw->m_d3DOverrides);
+                ConsoleGxOverride(s_hardware.videoHw->m_d3DOverrides);
                 break;
 
             default:
@@ -505,7 +511,7 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
         }
 
         if (s_hwDetect || s_hwChanged) {
-            s_defaults.unk_0019 = g_theGxDevicePtr->Caps().m_shaderTargets[4] != 0;
+            s_defaults.unk_0019 = g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] != GxShPS_none;
         }
 
         char version[32];
@@ -519,9 +525,9 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
         return;
     }
 
-    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
+    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(MSG_TITLE_WOW);
     const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
-    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(4);
+    Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(MSG_HW_UNSUPPORTED);
     const char* message = rec ? rec->m_message : "Your 3D accelerator card is not supported by World of Warcraft. Please install a 3D accelerator card with dual-TMU support.";
 
     OsGuiMessageBox(nullptr, OSGUI_MESSAGE_STYLE_OK, message, caption);

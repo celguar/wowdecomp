@@ -55,7 +55,7 @@ int32_t CSimpleHTML::GetObjectType() {
 // VERIFY: adeee239 auto
 // OFFSET: 0x0096C750
 void CSimpleHTML::FontUpdated(CSimpleFontedFrameFont* font, int32_t flags) {
-    if (flags & 0x11) {
+    if (flags & (FLAG_FONT_UPDATE | FLAG_SPACING_UPDATE)) {
         this->m_hyperlinksDirty = 1;
     }
 }
@@ -148,7 +148,7 @@ void CSimpleHTML::ParseIMG(XMLNode* node, CStatus* status) {
         height = NDCToDDCWidth(SStrToFloat(heightAttr) / (CoordinateGetAspectCompensation() * 1024.0f));
     }
 
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     CSimpleTexture* texture = data ? new (data) CSimpleTexture(this, 2, 1) : nullptr;
 
     texture->SetWidth(width);
@@ -180,15 +180,15 @@ void CSimpleHTML::ParseIMG(XMLNode* node, CStatus* status) {
         this->m_layoutOffset -= texture->GetHeight();
     }
 
-    CONTENTNODE* content = this->m_content.NewNode(2, 0, 0);
-    content->m_type = 2;
+    CONTENTNODE* content = this->m_content.NewNode(TSLIST_LINK_BEFORE, 0, 0);
+    content->m_type = CONTENTNODE::CONTENT_TYPE::IMAGE;
     content->m_region = texture;
 }
 
 // VERIFY: bbbb23ac manual
 // OFFSET: 0x0096CC90
 void CSimpleHTML::AddText(const char* text, HTML_TEXT_TYPE type, uint32_t justify) {
-    void* data = CSimpleFontString::s_allocator.GetData(0, typeid(CSimpleFontString).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleFontString::Allocate(sizeof(CSimpleFontString));
     CSimpleFontString* string = data ? new (data) CSimpleFontString(this, 2, 1) : nullptr;
 
     if (this->m_layoutAnchor) {
@@ -208,15 +208,15 @@ void CSimpleHTML::AddText(const char* text, HTML_TEXT_TYPE type, uint32_t justif
     string->SetFontObject(font);
     string->SetJustifyH(justify);
     string->SetNonSpaceWrap(1);
-    string->m_fontableFlags &= ~0x2u;
+    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_STYLE_UPDATE;
     string->SetText(text, 1);
 
     this->m_layoutAnchor = string;
     this->m_layoutOffset = -CSimpleTop::RoundToPixelHeight(string->m_spacing);
 
-    CONTENTNODE* content = this->m_content.NewNode(2, 0, 0);
+    CONTENTNODE* content = this->m_content.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     content->m_region = string;
-    content->m_type = SStrStr(text, "|H") != nullptr;
+    content->m_type = SStrStr(text, "|H") != nullptr ? CONTENTNODE::CONTENT_TYPE::HYPERLINK_TEXT : CONTENTNODE::CONTENT_TYPE::TEXT;
 }
 
 // VERIFY: 31268dcd auto
@@ -372,7 +372,7 @@ void CSimpleHTML::ParseP(XMLNode* node, HTML_TEXT_TYPE type, CStatus* status) {
 // VERIFY: a10a3e21 manual
 // OFFSET: 0x0096D500
 void CSimpleHTML::RefreshHyperlinks() {
-    if (!(this->m_layoutFlags & 0x100)) {
+    if (!(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID)) {
         return;
     }
 
@@ -392,7 +392,7 @@ void CSimpleHTML::RefreshHyperlinks() {
     CONTENTNODE* content = this->m_content.Head();
 
     while (!TSList<CONTENTNODE, TSGetLink<CONTENTNODE> >::IsEnd(content)) {
-        if (content->m_type == 1) {
+        if (content->m_type == CONTENTNODE::CONTENT_TYPE::HYPERLINK_TEXT) {
             CSimpleFontString* string = static_cast<CSimpleFontString*>(content->m_region);
             const GXUFONTHYPERLINKINFO* info;
             uint32_t count = GxuFontStringHyperLinkInfo(string->m_string ? TextBlockGetStringPtr(string->m_string) : nullptr, info);

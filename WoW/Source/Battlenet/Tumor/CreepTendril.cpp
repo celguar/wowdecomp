@@ -36,6 +36,9 @@ void Battlenet::CreepTendril::Host::Log(const char* message) {
 // VERIFY: 74960614 auto
 // OFFSET: 0x009C2460
 bool Battlenet::CreepTendril::Initialize() {
+    STORM_ASSERT(s_instances == 0);
+    STORM_ASSERT(!s_creepModule);
+
     if (Battlenet::CreepTendril::s_creepModule) {
         return true;
     }
@@ -76,6 +79,7 @@ bool Battlenet::CreepTendril::Initialize() {
 Battlenet::CreepTendril::Instance::Instance(const Authentication::Settings& settings, TumorManager& manager) : Tendril(Battlenet::Event::CREEP, manager) {
     this->m_creep = nullptr;
     memcpy(&this->m_settings, &settings, sizeof(this->m_settings));
+    STORM_ASSERT(s_creepModule);
     Battlenet::CreepTendril::s_instances++;
 
     BSN::Hard::SizeEncoder sizeEncoder;
@@ -87,18 +91,19 @@ Battlenet::CreepTendril::Instance::Instance(const Authentication::Settings& sett
     ProtocolHard::TypeInfoOf<Authentication::Settings>::Encode(this->m_settings, encoder);
 
     this->m_creep = Battlenet::CreepTendril::s_creepCreate(this, encoder.m_data, (encoder.m_position + 7) >> 3);
+    STORM_ASSERT(this->m_creep);
 
-    this->m_eventHandlers[1] = &Instance::ProcessEventData<1>;
-    this->m_eventHandlers[2] = &Instance::ProcessEventData<2>;
-    this->m_eventHandlers[3] = &Instance::ProcessEventData<3>;
-    this->m_eventHandlers[10] = &Instance::ProcessEventData<10>;
-    this->m_eventHandlers[11] = &Instance::ProcessEventData<11>;
-    this->m_eventHandlers[5] = &Instance::ProcessEventData<5>;
-    this->m_eventHandlers[6] = &Instance::ProcessEventData<6>;
-    this->m_eventHandlers[9] = &Instance::ProcessEventData<9>;
-    this->m_eventHandlers[8] = &Instance::ProcessEventData<8>;
-    this->m_eventHandlers[14] = &Instance::ProcessEventData<14>;
-    this->m_eventHandlers[15] = &Instance::ProcessEventData<15>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UPDATE] = &Instance::ProcessEventData<Event::EVENT_TYPE_UPDATE>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UNKNOWN_2] = &Instance::ProcessEventData<Event::EVENT_TYPE_UNKNOWN_2>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UNKNOWN_3] = &Instance::ProcessEventData<Event::EVENT_TYPE_UNKNOWN_3>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UNKNOWN_10] = &Instance::ProcessEventData<Event::EVENT_TYPE_UNKNOWN_10>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UNKNOWN_11] = &Instance::ProcessEventData<Event::EVENT_TYPE_UNKNOWN_11>;
+    this->m_eventHandlers[Event::EVENT_TYPE_LARVA] = &Instance::ProcessEventData<Event::EVENT_TYPE_LARVA>;
+    this->m_eventHandlers[Event::EVENT_TYPE_CREEP] = &Instance::ProcessEventData<Event::EVENT_TYPE_CREEP>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UNKNOWN_9] = &Instance::ProcessEventData<Event::EVENT_TYPE_UNKNOWN_9>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UNKNOWN_8] = &Instance::ProcessEventData<Event::EVENT_TYPE_UNKNOWN_8>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UNKNOWN_14] = &Instance::ProcessEventData<Event::EVENT_TYPE_UNKNOWN_14>;
+    this->m_eventHandlers[Event::EVENT_TYPE_UNKNOWN_15] = &Instance::ProcessEventData<Event::EVENT_TYPE_UNKNOWN_15>;
 }
 
 // VERIFY: 58336dcd auto
@@ -120,6 +125,8 @@ Battlenet::CreepTendril::Instance* Battlenet::CreepTendril::Instance::Create(con
 // VERIFY: 3c5d1abe auto
 // OFFSET: [0x009C1A40, 0x009C1C50, 0x009C1CF0]
 Battlenet::CreepTendril::Instance::~Instance() {
+    STORM_ASSERT(s_creepModule);
+
     Battlenet::CreepTendril::s_creepDestroy(this->m_creep);
     this->m_creep = nullptr;
 

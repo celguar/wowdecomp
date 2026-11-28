@@ -17,17 +17,37 @@ struct KERNINGHASHKEY {
 };
 
 struct KERNNODE : public TSHashObject<KERNNODE, KERNINGHASHKEY> {
+    // Which cached spacing value is valid.
+    enum KERN_FLAGS : uint32_t {
+        KERN_FIXED_WIDTH_SPACING = 0x1,
+        KERN_PROPORTIONAL_SPACING = 0x2,
+    };
+
     /* 0018 */ uint32_t m_flags;
     /* 001C */ float m_proportionalSpacing;
     /* 0020 */ float m_fixedWidthSpacing;
 };
 
 struct CGxFont : public TSLinkedNode<CGxFont> {
+    enum FONT_FLAGS : uint32_t {
+        FONT_NONE = 0,
+        FONT_OUTLINE = 1,
+        FONT_MONOCHROME = 2,
+        FONT_LINEAR_FILTER = 4,
+        FONT_THICK_OUTLINE = 8,
+    };
+
+    private:
+    friend struct TEXTURECACHE;
+    friend struct BATCHEDRENDERFONTDESC;
+    friend struct CGxString;
+    friend float GxuFontGetOneToOneHeight(CGxFont* font);
+
     /* 0008 */ TSExplicitList<CGxString, offsetof(CGxString, m_fontStringLink)> m_strings;
     /* 0014 */ TSHashTable<CHARCODEDESC, HASHKEY_NONE> m_activeCharacters;
     /* 003C */ TSHashTable<KERNNODE, KERNINGHASHKEY> m_kernInfo;
     /* 0064 */ TSExplicitList<CHARCODEDESC, offsetof(CHARCODEDESC, m_fontGlyphLink)> m_activeCharacterCache;
-    /* 0070 */ HFACE m_fontFaceHandle;
+    /* 0070 */ HFACE m_faceHandle;
     /* 0074 */ char m_fontName[260];
     /* 0178 */ uint32_t m_cellHeight;
     /* 017C */ uint32_t m_baseline;
@@ -35,25 +55,28 @@ struct CGxFont : public TSLinkedNode<CGxFont> {
     /* 0184 */ float m_fontHeight;
     /* 0188 */ float m_pixelsPerUnit;
     /* 018C */ TEXTURECACHE m_textureCache[8];
-    /* 024C */ uint32_t m_pixelSize;
+    /* 024C */ uint32_t m_pixSize;
 
+    static float FindNearestFixedSize(FT_Face face, float height);
+    bool GetGlyphData(GLYPHBITMAPDATA* data, uint32_t code) const;
+    void RegisterEvictNotice(uint32_t pageNumber);
+    int32_t UpdateDimensions();
+
+    public:
+    uint32_t GetFontFlags() const { return this->m_fontFlags; } // (inferred)
     CGxFont();
     ~CGxFont();
     int32_t CheckStringGlyphs(const char* string);
     void ClearGlyphs();
     float ComputeStep(uint32_t code, uint32_t nextCode);
     float ComputeStepFixedWidth(uint32_t code, uint32_t nextCode);
-    float FindNearestFixedSize(FT_Face face, float height);
     float GetGlyphAdvance(uint32_t code);
-    float GetGlyphBearing(const CHARCODEDESC* desc, bool scaled, float height);
-    bool GetGlyphData(GLYPHBITMAPDATA* data, uint32_t code);
-    const char* GetName();
-    uint32_t GetPixelSize();
+    float GetGlyphBearing(const CHARCODEDESC* desc, bool scaled, float height) const;
+    const char* GetName() const;
+    uint32_t GetPixelSize() const;
     void HandleScreenSizeChange();
     int32_t Initialize(const char* name, uint32_t fontFlags, float fontHeight);
     CHARCODEDESC* NewCodeDesc(uint32_t code);
-    void RegisterEvictNotice(uint32_t texturePage);
-    int32_t UpdateDimensions();
 };
 
 #endif

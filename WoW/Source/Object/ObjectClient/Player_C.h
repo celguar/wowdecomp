@@ -25,13 +25,20 @@ class SpellRec;
 class SpellVisualKitRec;
 
 struct InspectItem {
+    // Reconstructed name; the packet marks it with a negative item ID.
+    enum FLAGS : uint16_t {
+        NONE = 0x0,
+        // The inspected player can use the item (counts for equipped gems).
+        USABLE = 0x1,
+    };
+
     /* 0000 */ WOWGUID m_creator;
     /* 0008 */ int32_t m_itemId;
     /* 000C */ int32_t m_enchants [12];
     /* 003C */ int16_t m_randomPropertiesId;
-    /* 003E */ uint16_t m_flags;
+    /* 003E */ uint16_t m_flags; // FLAGS
     /* 0040 */ uint32_t m_propertySeed;
-    /* 0044 */ uint32_t unused_0044;
+    /* 0044 */ uint32_t unknown_0044;
 };
 
 struct InspectData {
@@ -69,13 +76,22 @@ struct PlayerPendingItemExpiration : public TSLinkedNode<PlayerPendingItemExpira
 struct MerchantItem;
 class ItemStats_C;
 class EmotesTextRec;
+// Per-slot loot permission from SMSG_LOOT_RESPONSE; names describe the client's handling.
+enum LOOT_SLOT_TYPE : int32_t {
+    LOOT_SLOT_TYPE_ALLOW_LOOT = 0,
+    LOOT_SLOT_TYPE_ROLL_PENDING = 1, // ERR_LOOT_ROLL_PENDING.
+    LOOT_SLOT_TYPE_MASTER = 2, // Opens the master loot list.
+    LOOT_SLOT_TYPE_LOCKED = 3, // ERR_LOOT_CANT_LOOT_THAT; GetLootSlotInfo reports it as locked.
+    LOOT_SLOT_TYPE_UNKNOWN_4 = 4, // Auto-looted without the bind-on-pickup confirmation.
+};
+
 struct PlayerLootItem {
     /* 0000 */ int32_t m_itemId;
     /* 0004 */ int32_t m_displayId;
     /* 0008 */ int32_t m_count;
     /* 000C */ int32_t m_randomSuffix;
     /* 0010 */ int32_t m_randomPropertyId;
-    /* 0014 */ int32_t m_slotType;
+    /* 0014 */ int32_t m_slotType; // LOOT_SLOT_TYPE
 };
 
 struct PlayerDance {
@@ -87,12 +103,46 @@ struct PlayerDance {
 class DanceMovesRec;
 class CEffect;
 
+// SMSG_ITEM_REFUND_RESULT codes with a dedicated client error (inferred names); other nonzero
+// codes print UNABLE_TO_REFUND_ITEM.
+enum ITEM_REFUND_RESULT : uint32_t {
+    ITEM_REFUND_RESULT_OK = 0,
+    ITEM_REFUND_RESULT_INV_FULL = 10,
+    ITEM_REFUND_RESULT_CURRENCY_FULL = 11,
+};
+
 class CGPlayer_C : public CGUnit_C, public CGPlayer {
     public:
+    // Build 12340 UI outcomes; 13 and 18 share ALREADY_ON without proved distinct meanings.
+    enum QUEST_INVALID_REASON : int32_t {
+        LOW_LEVEL = 1,
+        WRONG_RACE = 6,
+        ALREADY_DONE = 7,
+        ONLY_ONE_TIMED = 12,
+        UNKNOWN_13 = 13,
+        EXPANSION = 16,
+        UNKNOWN_18 = 18,
+        MISSING_ITEMS = 21,
+        NOT_ENOUGH_MONEY = 23,
+        TOO_MANY_DAILY_QUESTS = 26,
+        CAIS = 27,
+        ALREADY_DONE_DAILY = 29,
+    };
+
+    // Runtime farsight/automatic combat state, not replicated PLAYER_FLAGS.
+    enum COMBAT_MODE_FLAGS : uint32_t {
+        COMBAT_MODE_NONE                        = 0x00000000u,
+        COMBAT_MODE_FAR_SIGHT                   = 0x00000001u,
+        COMBAT_MODE_AUTO_COMBAT                 = 0x00000002u,
+        COMBAT_MODE_AUTO_RANGED                 = 0x00000004u,
+        COMBAT_MODE_EXIT_WHEN_NOT_REPEATING     = 0x00000008u,
+        COMBAT_MODE_AUTO_MASK                   = 0x0000000Eu,
+    };
+
     void DanceMoveAnimComplete();
-    static int32_t IsXRayVisionActive();
-    void AddKnownSpell(int32_t spellId, int32_t a2, int32_t a3, int32_t a4);
-    void AutoEquipItem(WOWGUID container, uint32_t slot, int32_t ignoreBind);
+    static BOOL IsXRayVisionActive();
+    void AddKnownSpell(int32_t spellId, int32_t slot, BOOL notify, int32_t addToSpellBook);
+    void AutoEquipItem(WOWGUID container, uint32_t slot, BOOL ignoreBind);
     void TurnOffGuildTabardPurchase();
     static int32_t GetNewContinentID();
     void CountEquippedGems();
@@ -113,14 +163,14 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     static void __stdcall AcceptArenaTeam();
     static void __stdcall AcceptGroup(uint32_t roles);
     static void __stdcall AcceptGuild();
-    static void __stdcall AcceptQuest(const WOWGUID& questGiver, int32_t questId, int32_t a3);
+    static void __stdcall AcceptQuest(const WOWGUID& questGiver, int32_t questId, int32_t startCheat);
     static void __stdcall AcceptResurrectRequest(int32_t accept);
     static void __stdcall AutoStoreLootItem(uint8_t slot);
     static void __stdcall BuyPetition(const WOWGUID& vendor, CGPetition* petition);
     static int32_t s_turnInArenaCharter;
     void TurnInGuildCharter();
     int32_t TurnInArenaCharter(int32_t turnIn);
-    static void __stdcall ClearAFK(int32_t force);
+    static void __stdcall ClearAFK(BOOL force);
     static void __stdcall ClearPartyAssignment(uint8_t assignment, WOWGUID guid);
     static void __stdcall CompleteQuest(const WOWGUID& questGiver, int32_t questId);
     static void __stdcall DeclineArenaTeam();
@@ -134,10 +184,10 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     static uint32_t GetPendingMovie();
     static uint32_t GetProficiency(uint8_t itemClass);
     static bool CanDualWield();
-    int32_t CanLoot(const CGObject_C* object);
+    BOOL CanLoot(const CGObject_C* object);
     static void __stdcall GetQuestReward(const WOWGUID& questGiver, int32_t questId, int32_t reward);
     static void __stdcall GiveQuestItems(const WOWGUID& questGiver, int32_t questId);
-    static int32_t IsGiftWrapping();
+    static BOOL IsGiftWrapping();
     static void BuyItemInSlot(WOWGUID merchant, const MerchantItem* item, uint32_t count, WOWGUID bag, uint8_t slot);
     static void CancelGiftWrap();
     static int32_t AutoCombatModeEventHandler(const void* data, void* param);
@@ -166,11 +216,72 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     static int32_t __stdcall OnLootMoneyNotify(CDataStore* msg);
     static void OnLootClearMoney();
     static void __stdcall ReadItemResult(NETMESSAGE msgId, CDataStore* msg);
+    // SMSG_RAID_GROUP_ONLY displays a reason only when its boot time is zero.
+    enum RAID_GROUP_ONLY_REASON : int32_t {
+        RG_REASON_UI_LOW_LEVEL = 1,
+        RG_REASON_UI_RAID_GROUP_ONLY = 2,
+        RG_REASON_UI_GROUP_FULL = 3,
+        RG_REASON_UI_REQUIREMENTS_UNMATCH = 4,
+    };
+
+    // SMSG_TRAINER_BUY_FAILED reason, named after the console message for each (inferred).
+    enum TRAINER_BUY_FAILED_REASON : uint32_t {
+        TRAINER_BUY_FAILED_UNAVAILABLE = 0,
+        TRAINER_BUY_FAILED_NOT_ENOUGH_MONEY = 1,
+        TRAINER_BUY_FAILED_NOT_ENOUGH_SKILL_POINTS = 2,
+    };
+
+    // Quest-failure display selector; original enum ownership is unproved.
+    // Sharing BAG_RESULT remains possible despite context-specific messages.
+    // Values4/16/50 share a bag-full display without proved distinct causes.
+    enum QUEST_FAILED_REASON : int32_t {
+        QF_REASON_UNKNOWN_4 = 4,
+        QF_REASON_UNKNOWN_16 = 16,
+        QF_REASON_UI_MAX_COUNT = 17,
+        QF_REASON_UNKNOWN_50 = 50,
+        QF_REASON_UI_TOO_MANY_DAILY_QUESTS = 74,
+    };
+
+    // Shared quest-push result byte; labels describe verified client UI outcomes.
+    enum QUEST_PUSH_RESULT : int32_t {
+        QP_RESULT_UI_SUCCESS = 0,
+        QP_RESULT_UI_INVALID = 1,
+        QP_RESULT_UI_ACCEPTED = 2,
+        QP_RESULT_UI_DECLINED = 3,
+        QP_RESULT_UI_BUSY = 4,
+        QP_RESULT_UI_LOG_FULL = 5,
+        QP_RESULT_UI_ON_QUEST = 6,
+        QP_RESULT_UI_ALREADY_DONE = 7,
+        QP_RESULT_UI_NOT_DAILY = 8,
+        QP_RESULT_UI_TIMER_EXPIRED = 9,
+        QP_RESULT_UI_NOT_IN_PARTY = 10,
+        QP_RESULT_UI_DIFFERENT_SERVER_DAILY = 11,
+    };
+
     static void __stdcall PushQuestToParty(int32_t questId);
     static void __stdcall QueryQuest(const WOWGUID& questGiver, int32_t questId);
     static void __stdcall QueryQuestGiverStatus(const WOWGUID& questGiver);
     static void QueryQuestGiverStatusMultiple();
     static bool __stdcall IsRAFPlayer(WOWGUID guid);
+    // Shared client/server result word; UI_* names describe display outcomes,
+    // without claiming original server enumerator spellings.
+    enum REFER_A_FRIEND_RESULT : int32_t {
+        RAF_RESULT_SUCCESS = 0,
+        RAF_RESULT_UI_NOT_REFERRED_BY = 1,
+        RAF_RESULT_UI_TARGET_TOO_HIGH = 2,
+        RAF_RESULT_UI_INSUFFICIENT_GRANTABLE_LEVELS = 3,
+        RAF_RESULT_UI_TOO_FAR = 4,
+        RAF_RESULT_UI_DIFFERENT_FACTION = 5,
+        RAF_RESULT_UI_NOT_NOW = 6,
+        RAF_RESULT_UI_GRANT_LEVEL_MAX = 7,
+        RAF_RESULT_UI_NO_TARGET = 8,
+        RAF_RESULT_UI_TARGET_NOT_IN_GROUP = 9,
+        RAF_RESULT_UI_SUMMON_LEVEL_MAX = 10,
+        RAF_RESULT_UI_SUMMON_COOLDOWN = 11,
+        RAF_RESULT_UI_INSUFFICIENT_EXPANSION_LEVEL = 12,
+        RAF_RESULT_UI_SUMMON_OFFLINE = 13,
+    };
+
     static int32_t __stdcall CanSummonFriend(WOWGUID guid);
     int32_t CanGrantLevel(WOWGUID guid);
     void TurnOnGuildTabardPurchase();
@@ -213,7 +324,7 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
 
     /* 1010 */ TSList<void> m_playerMirrorLists [176];
     /* 1850 */ TSList<void>* m_playerLocalMirrorLists;
-    /* 1854 */ int32_t unused_1854;
+    /* 1854 */ int32_t unknown_1854;
     /* 1858 */ uint32_t m_combatModeFlags;
     /* 185C */ TSHashTable<TRADESKILLLINE, HASHKEY_NONE> m_tradeSkillLines;
     /* 1884 */ TSHashTable<PROFICIENCYSPELL, HASHKEY_NONE> m_proficiencySpells;
@@ -221,15 +332,15 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     /* 18B8 */ uint32_t m_pendingItemCacheCount;
     /* 18BC */ TSGrowableArray<int32_t> m_equipBypassSkills;
     /* 18CC */ TSGrowableArray<int32_t> m_companionSpells;
-    /* 18DC */ uint32_t unused_18DC;
+    /* 18DC */ uint32_t unknown_18DC;
     /* 18E0 */ WOWGUID m_lootTarget;
     /* 18E8 */ uint8_t m_autoLoot;
-    /* 18E9 */ uint8_t unused_18E9 [3];
-    /* 18EC */ uint32_t unused_18EC;
+    /* 18E9 */ uint8_t unknown_18E9 [3];
+    /* 18EC */ uint32_t unknown_18EC;
     /* 18F0 */ CGBag_C m_bag;
     /* 1908 */ CGUnitVirtualItem m_virtualItems [NUM_VIRTUAL_MONSTER_SLOTS];
     /* 1920 */ UNITSTANDSTATE m_clientStandState;
-    /* 1924 */ int32_t m_gemCounts [4];
+    /* 1924 */ int32_t m_gemCounts [4]; // Equipped gems per SOCKET_COLOR bit index.
     /* 1934 */ uint32_t m_combatModeTime;
     /* 1938 */ WOWGUID m_combatTarget;
     /* 1940 */ uint32_t m_pvpCooldownTimestamp;
@@ -242,7 +353,7 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     ~CGPlayer_C() override;
     void Disable() override;
     void OnSpellEffectClear(CEffect* effect) override;
-    void PlayUnitSound(UNITSOUNDTYPE soundType, int32_t force) override;
+    void PlayUnitSound(UNITSOUNDTYPE soundType, BOOL force) override;
     void PlayFoleySound() override;
     const CGUnitVirtualItem* GetVirtualItem(VIRTUAL_MONSTER_SLOT slot, bool ignoreDisarm) const override;
     uint32_t GetVirtualItemDisplayID(VIRTUAL_MONSTER_SLOT slot) const override;
@@ -279,8 +390,8 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     int32_t CheckBinderDistance();
     int32_t CheckSpiritHealerDistance();
     int32_t CheckTalentMasterDistance();
-    void AutoEquipCursorItem(int32_t ignoreBind);
-    void AutoEquipItemToSlot(CGItem_C* item, uint32_t slot, int32_t ignoreBind);
+    void AutoEquipCursorItem(BOOL ignoreBind);
+    void AutoEquipItemToSlot(CGItem_C* item, uint32_t slot, BOOL ignoreBind);
     void ClearPendingEquip(uint32_t index, int32_t equip);
     void GroupInvite(const char* name, uint32_t flags);
     CGItem_C* GetSoulstone();
@@ -289,7 +400,7 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     void ShowCloak();
     void HideCloak();
     void ToggleSheathe();
-    void AutoStoreItemInBag(WOWGUID item, WOWGUID srcContainer, uint32_t srcSlot, WOWGUID dstBag, int32_t unused_a5);
+    void AutoStoreItemInBag(WOWGUID item, WOWGUID srcContainer, uint32_t srcSlot, WOWGUID dstBag, int32_t unused5);
     static uint8_t FindItemSlot(WOWGUID container, const CGItem_C* item);
     void SaveTabard(int32_t emblemStyle, int32_t emblemColor, int32_t borderStyle, int32_t borderColor, int32_t background, WOWGUID npc);
     static bool CanSaveTabardNow();
@@ -297,7 +408,7 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     void GiftWrap(CGItem_C* item);
     void SplitItem(WOWGUID item, WOWGUID srcContainer, uint32_t srcSlot, WOWGUID dstContainer, uint32_t dstSlot, uint32_t count);
     void SwapGuildBankItem(int32_t itemId, uint32_t virtualSlot, uint8_t bag, uint8_t slot, uint32_t count);
-    void SwapItems(WOWGUID item, WOWGUID srcContainer, uint32_t srcSlot, WOWGUID dstContainer, uint32_t dstSlot, int32_t ignoreBind);
+    void SwapItems(WOWGUID item, WOWGUID srcContainer, uint32_t srcSlot, WOWGUID dstContainer, uint32_t dstSlot, BOOL ignoreBind);
     int32_t ValidateSlot(uint32_t slot, WOWGUID item);
     bool GetPackAndSlot(const CGItem_C* item, uint8_t* bag, uint8_t* slot);
     void OpenLootItem(CGItem_C* item);
@@ -339,11 +450,11 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     int32_t GetModDamageDoneNeg(int32_t school) const;
     float GetModDamageDonePct(int32_t school) const;
     const CGItem_C* EquippedItemMeetSpellRequirements(const SpellRec* spell, uint32_t slotMask);
-    int32_t HasZoneExplored(int32_t zone);
-    int32_t UpdateUnitCollisionBox(int32_t a2, int32_t a3);
-    int32_t UpdateMountedCollisionBox(float mountHeight, int32_t force);
-    int32_t IsCommentatorUberOrInArena() const;
-    int32_t IsInMelee() const;
+    BOOL HasZoneExplored(int32_t zone);
+    int32_t UpdateUnitCollisionBox(int32_t skipFitCheck, BOOL force);
+    int32_t UpdateMountedCollisionBox(float mountHeight, BOOL force);
+    BOOL IsCommentatorUberOrInArena() const;
+    BOOL IsInMelee() const;
     void OnLootGameObject(const WOWGUID& guid);
     bool HasEquipBypassSkill(int32_t skillId) const;
     void LootMoney();
@@ -375,7 +486,7 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     void UpdateAttackPosition(const CGUnit_C* target);
     void UpdateQuestStatus(CGObject_C* object);
     void UpdateTaxiStatus(CGUnit_C* unit);
-    void HandleRepopRequest(bool a2);
+    void HandleRepopRequest(bool automatic);
     void SetClientStandState(UNITSTANDSTATE standState);
     void SetCombatMode();
     CGUnit_C* GetPossessedUnit();
@@ -397,18 +508,18 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     void RequestAllItemPurchaseData();
     float CalcRewardHonor(float honor);
     float GetQuestXPMultiplier();
-    int32_t CanUseItem(const ItemStats_C* stats, int32_t& error);
-    static void BuyItem(WOWGUID vendor, const MerchantItem* item, uint32_t count, uint8_t a5);
+    BOOL CanUseItem(const ItemStats_C* stats, int32_t& error);
+    static void BuyItem(WOWGUID vendor, const MerchantItem* item, uint32_t count, uint8_t unknown5);
     int32_t OnItemRefundResult(CDataStore* msg);
-    void DelKnownSpell(int32_t spellId, int32_t silent);
+    void DelKnownSpell(int32_t spellId, BOOL silent);
     bool VehicleAllowsInteraction() const;
     void SetAutoLoot(int32_t autoLoot);
     bool CanInteract(const CGUnit_C* unit) const;
     void LootUnit(CGUnit_C* unit, bool autoInteract);
-    void HandleSkinning(CGObject_C* object, bool autoInteract, bool a4);
+    void HandleSkinning(CGObject_C* object, bool autoInteract, bool updateAutoLoot);
     void HandleOnRightClick(CGUnit_C* unit, bool autoInteract);
     bool CTMAttackUnit(CGUnit_C* unit);
-    void CombatModeEnter(const WOWGUID& target, int32_t queueRanged, int32_t silent);
+    void CombatModeEnter(const WOWGUID& target, int32_t queueRanged, BOOL silent);
     void MeleeModeEnter(const WOWGUID& target);
     void ExitAutoCombatMode();
     void OnLevelChange();
@@ -421,10 +532,15 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     int32_t RefreshVisibleItems();
     void OnDeath();
     void EquipItem(CGItem_C* item);
-    bool OnGuildChanged(int32_t a2);
+    bool OnGuildChanged(int32_t guildIdChanged);
     void FillPartyMemberState(CGPartyMemberState* state);
     static uint32_t BuildPartyMemberStatsChanges(const CGPartyMemberState* oldState, const CGPartyMemberState* newState);
     static void DispatchPartyMemberStatsChanges(const WOWGUID& guid, uint32_t changes, const CGPartyMemberState* oldState, const CGPartyMemberState* newState);
+    // INLINED
+    uint32_t GetDuelTeam() const {
+        return this->m_player->m_playerDuelTeam;
+    }
+
     const char* GetPlayerGuildNameText();
     void TogglePlayerFlag(uint32_t oldFlags);
     void UpdateGhostStatus();
@@ -434,31 +550,40 @@ class CGPlayer_C : public CGUnit_C, public CGPlayer {
     float GetCombatRatingPct(int32_t rating);
     bool LoadGuildTextures(int32_t displayId);
     static void TabardDrawCallback(int32_t guildID, const WOWGUID& guid, void* param, bool success);
-    void UpdateHandItemVisual(GEOCOMPONENTLINKS link, int32_t hand);
-    void UpdateObjComponentVisuals(const VisibleItem_C* item, GEOCOMPONENTLINKS link);
+    void UpdateHandItemVisual(MODEL_ATTACHMENT_ID link, int32_t hand);
+    void UpdateObjComponentVisuals(const VisibleItem_C* item, MODEL_ATTACHMENT_ID link);
     void UpdateObjComponentVisualsSlot(const VisibleItem_C* item, int32_t slot);
     void PostInitActivePlayer();
     void UpdatePartyMemberState();
     void SetActiveMirrorHandlers();
     void UnsetActiveMirrorHandlers();
     void MeleeModeLeave();
+
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug feature (Unit_C_Debug.cpp), stripped from the 3.3.5 release build.
+    static void TogglePlayerBounds();
+#endif
 };
 
 class PlaySpellVisuaKitData {
     public:
+    enum LIGHTNING_ATTACHMENT : int32_t {
+        NONE = -1,
+    };
+
     /* 0000 */ const SpellRec* m_spellRec;
     /* 0004 */ const SpellVisualKitRec* m_impactVisualKit;
-    /* 0008 */ uint32_t m_kitType;
+    /* 0008 */ SPELL_VISUAL_KIT_TYPE m_kitType;
     /* 000C */ C3Vector* m_position;
     /* 0010 */ WOWGUID m_transportGUID;
-    /* 0018 */ uint32_t m_playAnim;
-    /* 001C */ uint32_t m_harmful;
-    /* 0020 */ uint32_t unused_0020;
-    /* 0024 */ uint32_t unused_0024;
+    /* 0018 */ BOOL m_playAnim;
+    /* 001C */ BOOL m_harmful;
+    /* 0020 */ BOOL m_skipBeamWait;
+    /* 0024 */ uint32_t m_lightningAttachment;
     /* 0028 */ WOWGUID m_someGUID;
     /* 0030 */ uint32_t m_effectFadeTime;
 
-    PlaySpellVisuaKitData(const SpellRec* spellRec, const SpellVisualKitRec* impactVisualKit, uint32_t kitType);
+    PlaySpellVisuaKitData(const SpellRec* spellRec, const SpellVisualKitRec* impactVisualKit, SPELL_VISUAL_KIT_TYPE kitType);
 };
 
 uint32_t FindEmptySwapIndex();
@@ -501,6 +626,13 @@ int32_t Packet_SMSG_LEARNED_SPELL(void* param, NETMESSAGE msgId, uint32_t time, 
 int32_t Packet_SMSG_REMOVED_SPELL(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
 int32_t Packet_SMSG_SUPERCEDED_SPELL(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
 int32_t Packet_SMSG_INITIAL_SPELLS(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
+// SMSG_ACTION_BUTTONS state byte; names inferred from what the handler does with each value.
+enum ACTION_BUTTONS_STATE : uint8_t {
+    ACTION_BUTTONS_STATE_LOAD = 0, // Reads the buttons only.
+    ACTION_BUTTONS_STATE_LOAD_AND_APPLY = 1, // Reads the buttons and puts the valid ones on the action bar.
+    ACTION_BUTTONS_STATE_PENDING = 2, // No buttons follow; marks the player's buttons as pending.
+};
+
 int32_t Packet_SMSG_ACTION_BUTTONS(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
 int32_t Packet_SMSG_GROUP_INVITE(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
 int32_t Packet_SMSG_GROUP_CANCEL(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
@@ -571,7 +703,7 @@ int32_t Packet_SMSG_COMBAT_LOG_MULTIPLE(void* param, NETMESSAGE msgId, uint32_t 
 int32_t Player_C_SetPlayerRenderDisabled(int32_t disabled);
 int32_t Player_C_TogglePlayerRender();
 void SetAttackSwingError(int32_t error);
-void __stdcall SignalPlayerAttackEvent(int32_t unused_a1);
+void __stdcall SignalPlayerAttackEvent(int32_t unused1);
 void SignalPlayerSkillStatEvents();
 void PlayerSignalSkillStatChanges();
 void SendQuestGiverStatusMultipleQuery();
@@ -596,6 +728,13 @@ void PlayerClientShutdown();
 void PlayerShutdownSounds();
 int32_t Player_C_ZoneUpdateHandler(const void* data, void* param);
 int32_t GetModalNextSpell();
+
+// SPELL_AURA_CHANGE_MODEL_FOR_ALL_HUMANOIDS misc value B bits (GetVisibleAuraEffectFlags).
+// With HOSTILE_PLAYERS_ONLY, IsHostileCritter keeps only players hated by the active player.
+// Name inferred.
+enum AURA_CHANGE_MODEL_FLAGS : uint32_t {
+    AURA_CHANGE_MODEL_HOSTILE_PLAYERS_ONLY = 0x1,
+};
 
 uint32_t GetVisibleAuraEffectDisplay();
 uint32_t GetVisibleAuraEffectFlags();

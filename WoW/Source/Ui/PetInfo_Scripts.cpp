@@ -7,6 +7,7 @@
 #include "WoW/Source/Magic/MagicClient/Spell_C.h"
 #include "WoW/Source/ObjectMgrClient/ObjectMgrClient.h"
 #include "WoW/Source/Object/ObjectClient/Unit_C.h"
+#include <cfloat>
 #include <cstdint>
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
@@ -37,7 +38,7 @@ static int32_t Script_GetPetActionInfo(lua_State* L) {
     }
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
-    PetAction* action = CGPetInfo::GetPet(0) && index < sizeof(CGPetInfo::m_actions) / sizeof(CGPetInfo::m_actions[0]) ? &CGPetInfo::m_actions[index] : nullptr;
+    const PetAction* action = GetPetAction(index);
 
     if (!action || !action->m_data) {
         for (uint32_t i = 0; i < 7; i++) {
@@ -47,22 +48,22 @@ static int32_t Script_GetPetActionInfo(lua_State* L) {
         return 7;
     }
 
-    uint32_t id = action->m_data & 0xFFFFFF;
+    uint32_t id = action->m_data & PetAction::PackingMasks::ID_MASK;
     bool autoCastEnabled = false;
     char buffer[64];
 
-    switch ((action->m_data >> 24) & 0x3F) {
-        case 1:
-        case 8:
-        case 9:
-        case 10:
-        case 11:
-        case 12:
-        case 13:
-        case 14:
-        case 15:
-        case 16:
-        case 17: {
+    switch ((action->m_data >> 24) & PetAction::PackingMasks::KIND_VALUE_MASK) {
+        case PetAction::Kind::SPELL:
+        case PetAction::Kind::UNKNOWN_8:
+        case PetAction::Kind::UNKNOWN_9:
+        case PetAction::Kind::UNKNOWN_10:
+        case PetAction::Kind::UNKNOWN_11:
+        case PetAction::Kind::UNKNOWN_12:
+        case PetAction::Kind::UNKNOWN_13:
+        case PetAction::Kind::UNKNOWN_14:
+        case PetAction::Kind::UNKNOWN_15:
+        case PetAction::Kind::UNKNOWN_16:
+        case PetAction::Kind::UNKNOWN_17: {
             SpellRec spell;
             int32_t found = g_spellDB.GetRecord(id, &spell);
 
@@ -85,8 +86,8 @@ static int32_t Script_GetPetActionInfo(lua_State* L) {
 
             lua_pushnil(L);
             lua_pushnil(L);
-            bool autoCastAllowed = found && (action->m_data & 0x80000000);
-            autoCastEnabled = found && (action->m_data & 0x40000000);
+            bool autoCastAllowed = found && (action->m_data & PetAction::AutocastFlags::AUTOCAST_ALLOWED);
+            autoCastEnabled = found && (action->m_data & PetAction::AutocastFlags::AUTOCAST_ENABLED);
 
             if (autoCastAllowed) {
                 lua_pushnumber(L, 1.0);
@@ -96,7 +97,7 @@ static int32_t Script_GetPetActionInfo(lua_State* L) {
 
             break;
         }
-        case 6: {
+        case PetAction::Kind::MODE: {
             SStrPrintf(buffer, sizeof(buffer), "PET_MODE_%s", CGPetInfo::GetModeToken(id));
             lua_pushstring(L, buffer);
             lua_pushnil(L);
@@ -113,7 +114,7 @@ static int32_t Script_GetPetActionInfo(lua_State* L) {
             lua_pushnil(L);
             break;
         }
-        case 7: {
+        case PetAction::Kind::ORDER: {
             SStrPrintf(buffer, sizeof(buffer), "PET_ACTION_%s", CGPetInfo::GetOrdersToken(id));
             lua_pushstring(L, buffer);
             lua_pushnil(L);
@@ -121,7 +122,7 @@ static int32_t Script_GetPetActionInfo(lua_State* L) {
             lua_pushstring(L, buffer);
             lua_pushnumber(L, 1.0);
 
-            if (id == 2 ? CGPetInfo::m_attackingTarget != 0 : (CGPetInfo::m_petMode >> 8) == id) {
+            if (id == PET_ORDER_ATTACK ? CGPetInfo::m_attackingTarget != 0 : (CGPetInfo::m_petMode >> CGPetInfo::PET_ORDERS_SHIFT) == id) {
                 lua_pushnumber(L, 1.0);
             } else {
                 lua_pushnil(L);
@@ -131,6 +132,7 @@ static int32_t Script_GetPetActionInfo(lua_State* L) {
             break;
         }
         default:
+            STORM_ASSERT(!"Unknown pet action type");
             lua_pushnil(L);
             break;
     }
@@ -161,7 +163,7 @@ static int32_t Script_IsPetAttackActive(lua_State* L) {
 // VERIFY: c4e057ce manual
 // OFFSET: 0x005D3180
 static int32_t Script_GetPetTimeRemaining(lua_State* L) {
-    uint32_t expiration = CGPetInfo::m_expirationTime;
+    uint32_t expiration = CGPetInfo::GetExpirationTime();
 
     if (!expiration) {
         lua_pushnil(L);
@@ -178,7 +180,7 @@ static int32_t Script_GetPetTimeRemaining(lua_State* L) {
 static int32_t Script_PetCanBeAbandoned(lua_State* L) {
     CGUnit_C* pet = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGPetInfo::GetPet(0), TYPE_UNIT, __FILE__, __LINE__));
 
-    if (pet && pet->m_unit->m_unitFieldSummonedby == ClntObjMgrGetActivePlayer() && (pet->m_unit->m_unitFieldBytes2[2] & 2)) {
+    if (pet && pet->m_unit->m_unitFieldSummonedby == ClntObjMgrGetActivePlayer() && (pet->m_unit->m_petFlags & UNIT_PET_FLAG_CAN_BE_ABANDONED)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -193,7 +195,7 @@ static int32_t Script_PetCanBeDismissed(lua_State* L) {
     CGUnit_C* pet = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGPetInfo::GetPet(0), TYPE_UNIT, __FILE__, __LINE__));
     SummonPropertiesRec* properties;
 
-    if (pet && pet->m_unit->m_unitFieldCreatedby == ClntObjMgrGetActivePlayer() && (properties = pet->GetSummonProperties()) && (properties->m_flags & 0x20)) {
+    if (pet && pet->m_unit->m_unitFieldCreatedby == ClntObjMgrGetActivePlayer() && (properties = pet->GetSummonProperties()) && (properties->m_flags & SUMMON_PROPERTIES_FLAG_CANNOT_DISMISS_PET)) {
         lua_pushnil(L);
     } else {
         lua_pushnumber(L, 1.0);
@@ -207,7 +209,7 @@ static int32_t Script_PetCanBeDismissed(lua_State* L) {
 static int32_t Script_PetCanBeRenamed(lua_State* L) {
     CGUnit_C* pet = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGPetInfo::GetPet(0), TYPE_UNIT, __FILE__, __LINE__));
 
-    if (pet && pet->m_unit->m_unitFieldSummonedby == ClntObjMgrGetActivePlayer() && (pet->m_unit->m_unitFieldBytes2[2] & 1)) {
+    if (pet && pet->m_unit->m_unitFieldSummonedby == ClntObjMgrGetActivePlayer() && (pet->m_unit->m_petFlags & UNIT_PET_FLAG_CAN_BE_RENAMED)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -290,16 +292,16 @@ static int32_t Script_GetPetActionCooldown(lua_State* L) {
     }
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
-    PetAction* action = CGPetInfo::GetPet(0) && index < sizeof(CGPetInfo::m_actions) / sizeof(CGPetInfo::m_actions[0]) ? &CGPetInfo::m_actions[index] : nullptr;
+    const PetAction* action = GetPetAction(index);
     uint32_t start = 0;
     uint32_t duration = 0;
     uint32_t enable = 0;
 
     if (action && action->m_data) {
-        uint32_t type = (action->m_data >> 24) & 0x3F;
+        uint32_t kind = (action->m_data >> 24) & PetAction::PackingMasks::KIND_VALUE_MASK;
 
-        if (type == 1 || type - 8 <= 9) {
-            Spell_C_GetSpellCooldown(action->m_data & 0xFFFFFF, 1, &duration, &start, &enable);
+        if (kind == PetAction::Kind::SPELL || kind - PetAction::Kind::UNKNOWN_8 <= (PetAction::Kind::UNKNOWN_17 - PetAction::Kind::UNKNOWN_8)) {
+            Spell_C_GetSpellCooldown(action->m_data & PetAction::PackingMasks::ID_MASK, 1, &duration, &start, &enable);
         }
     }
 
@@ -312,7 +314,7 @@ static int32_t Script_GetPetActionCooldown(lua_State* L) {
 // VERIFY: 716497e3 auto
 // OFFSET: 0x005D3720
 static int32_t Script_PetHasActionBar(lua_State* L) {
-    if (s_pets.Count() && s_pets.m_data[0] && !(CGActionBar::m_tempPageActiveFlags & 1) && CGPetInfo::IsPetBarUsed()) {
+    if (s_pets.Count() && s_pets.m_data[0] && !(CGActionBar::GetTemporaryActionBarFlags() & CGActionBar::TEMP_PAGE_PET) && CGPetInfo::IsPetBarUsed()) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -351,7 +353,7 @@ static int32_t Script_GetPossessInfo(lua_State* L) {
                 return 3;
             }
         } else if (index == 2) {
-            SpellIconRec* icon = g_spellIconDB.GetRecord(693);
+            SpellIconRec* icon = g_spellIconDB.GetRecord(SPELL_ICON_ID_SACRIFICIAL_SHIELD);
 
             if (icon) {
                 lua_pushstring(L, icon->m_textureFilename);
@@ -359,10 +361,10 @@ static int32_t Script_GetPossessInfo(lua_State* L) {
                 lua_pushnil(L);
             }
 
-            int32_t enabled = 1;
+            BOOL enabled = 1;
             SpellRec spell;
 
-            if (g_spellDB.GetRecord(CGPetInfo::m_possessSpell, &spell) && spell.m_attributes < 0) {
+            if (g_spellDB.GetRecord(CGPetInfo::m_possessSpell, &spell) && (spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_NO_AURA_CANCEL)) {
                 enabled = 0;
             }
 
@@ -413,7 +415,7 @@ static int32_t Script_GetPetFoodTypes(lua_State* L) {
         return 0;
     }
 
-    for (int32_t i = 0; i < g_itemPetFoodDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_itemPetFoodDB.GetNumRecords(); i++) {
         ItemPetFoodRec* food = g_itemPetFoodDB.GetRecordByIndex(i);
 
         if (food && ((1 << (food->m_id - 1)) & family->m_petFoodMask)) {
@@ -433,7 +435,7 @@ static int32_t Script_GetPetTalentTree(lua_State* L) {
     CreatureFamilyRec* family;
 
     if (pet && pet->CanGainXP() && (family = g_creatureFamilyDB.GetRecord(pet->GetCreatureFamily())) && family->m_petTalentType >= 0) {
-        for (int32_t i = 0; i < g_talentTabDB.m_numRecords; i++) {
+        for (int32_t i = 0; i < g_talentTabDB.GetNumRecords(); i++) {
             TalentTabRec* tab = g_talentTabDB.GetRecordByIndex(i);
 
             if (tab->m_categoryEnumID && ((1 << family->m_petTalentType) & tab->m_categoryEnumID)) {
@@ -481,7 +483,7 @@ static int32_t Script_GetPetActionSlotUsable(lua_State* L) {
 static int32_t Script_PetPassiveMode(lua_State* L) {
     WOWGUID target = WOWGUID();
     PetAction action;
-    action.m_data = 0x06000000;
+    action.m_data = PetAction::PackedKind::PACKED_MODE | PET_MODE_PASSIVE;
     CGPetInfo::SendPetAction(action, target, 0);
     return 0;
 }
@@ -491,7 +493,7 @@ static int32_t Script_PetPassiveMode(lua_State* L) {
 static int32_t Script_PetDefensiveMode(lua_State* L) {
     WOWGUID target = WOWGUID();
     PetAction action;
-    action.m_data = 0x06000001;
+    action.m_data = PetAction::PackedKind::PACKED_MODE | PET_MODE_DEFENSIVE;
     CGPetInfo::SendPetAction(action, target, 0);
     return 0;
 }
@@ -501,7 +503,7 @@ static int32_t Script_PetDefensiveMode(lua_State* L) {
 static int32_t Script_PetAggressiveMode(lua_State* L) {
     WOWGUID target = WOWGUID();
     PetAction action;
-    action.m_data = 0x06000002;
+    action.m_data = PetAction::PackedKind::PACKED_MODE | PET_MODE_AGGRESSIVE;
     CGPetInfo::SendPetAction(action, target, 0);
     return 0;
 }
@@ -511,7 +513,7 @@ static int32_t Script_PetAggressiveMode(lua_State* L) {
 static int32_t Script_PetWait(lua_State* L) {
     WOWGUID target = WOWGUID();
     PetAction action;
-    action.m_data = 0x07000000;
+    action.m_data = PetAction::PackedKind::PACKED_ORDER | PET_ORDER_WAIT;
     CGPetInfo::SendPetAction(action, target, 0);
     return 0;
 }
@@ -521,7 +523,7 @@ static int32_t Script_PetWait(lua_State* L) {
 static int32_t Script_PetFollow(lua_State* L) {
     WOWGUID target = WOWGUID();
     PetAction action;
-    action.m_data = 0x07000001;
+    action.m_data = PetAction::PackedKind::PACKED_ORDER | PET_ORDER_FOLLOW;
     CGPetInfo::SendPetAction(action, target, 0);
     return 0;
 }
@@ -529,21 +531,21 @@ static int32_t Script_PetFollow(lua_State* L) {
 // VERIFY: 4e80b8d7 auto
 // OFFSET: 0x005D55B0
 static int32_t Script_PetAttack(lua_State* L) {
-    int32_t a3 = 0;
+    BOOL useGiven = 0;
     WOWGUID target = WOWGUID();
     const char* token = lua_tolstring(L, 1, nullptr);
 
     if (token && *token) {
         if (!Script_GetGUIDFromToken(token, target, false)) {
-            target = CGGameUI::ClosestObjectMatch(token, 8, 1, StringToBOOL(L, 2, 0), 3.4028235e38f, 1);
+            target = CGGameUI::ClosestObjectMatch(token, 8, UNIT_TARGET_ENEMY, StringToBOOL(L, 2, 0), FLT_MAX, 1);
         }
 
-        a3 = 1;
+        useGiven = 1;
     }
 
     PetAction action;
-    action.m_data = 0x07000002;
-    CGPetInfo::SendPetAction(action, target, a3);
+    action.m_data = PetAction::PackedKind::PACKED_ORDER | PET_ORDER_ATTACK;
+    CGPetInfo::SendPetAction(action, target, useGiven);
     return 0;
 }
 
@@ -577,7 +579,7 @@ static int32_t Script_PetRename(lua_State* L) {
         return 0;
     }
 
-    if (!(pet->m_unit->m_unitFieldBytes2[2] & 0x1)) {
+    if (!(pet->m_unit->m_petFlags & UNIT_PET_FLAG_CAN_BE_RENAMED)) {
         CGGameUI::DisplayError(ERR_PET_NOT_RENAMEABLE);
         return 0;
     }
@@ -599,9 +601,9 @@ static int32_t Script_PetRename(lua_State* L) {
         return 0;
     }
 
-    char declinedNames[5][96];
+    char declinedNames[NUM_DECLINED_NAME_CASES][96];
 
-    for (int32_t i = 0; i < 5; i++) {
+    for (int32_t i = 0; i < NUM_DECLINED_NAME_CASES; i++) {
         const char* declined = lua_tolstring(L, i + 2, nullptr);
 
         if (!declined || !*declined) {
@@ -626,18 +628,19 @@ static int32_t Script_PickupPetAction(lua_State* L) {
 
     uint32_t slot = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (slot > 10) {
+    // Original client bug: accepts slot NUM_PET_ACTION_SLOTS, one past the last slot.
+    if (slot > NUM_PET_ACTION_SLOTS) {
         luaL_error(L, "Invalid slot in PickupPetAction");
         return 0;
     }
 
-    if (!CGGameUI::CanPerformAction(14)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_ACTION_MANIPULATION)) {
         return 0;
     }
 
     CGUnit_C* pet = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGPetInfo::GetPet(0), TYPE_UNIT, __FILE__, __LINE__));
 
-    if (!pet || (pet->m_unit->m_unitFieldFlags & 0x1000000)) {
+    if (!pet || (pet->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED)) {
         return 0;
     }
 
@@ -654,7 +657,7 @@ static int32_t Script_PickupPetAction(lua_State* L) {
     if (action) {
         CGGameUI::SetCursorPetAction(action);
 
-        if (((action->m_data >> 24) & 0x3F) == 1) {
+        if (((action->m_data >> 24) & PetAction::PackingMasks::KIND_VALUE_MASK) == PetAction::Kind::SPELL) {
             CGPetInfo::PickupAction(slot, 1);
         }
     }
@@ -672,7 +675,8 @@ static int32_t Script_TogglePetAutocast(lua_State* L) {
 
     uint32_t slot = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (slot > 10) {
+    // Original client bug: accepts slot NUM_PET_ACTION_SLOTS, one past the last slot.
+    if (slot > NUM_PET_ACTION_SLOTS) {
         luaL_error(L, "Invalid slot in TogglePetAutocast");
         return 0;
     }
@@ -699,14 +703,15 @@ static int32_t Script_CastPetAction(lua_State* L) {
 
     uint32_t slot = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (slot > 10) {
+    // Original client bug: accepts slot NUM_PET_ACTION_SLOTS, one past the last slot.
+    if (slot > NUM_PET_ACTION_SLOTS) {
         luaL_error(L, "Invalid slot in CastPetAction");
         return 0;
     }
 
     CGUnit_C* pet = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGPetInfo::GetPet(0), TYPE_UNIT, __FILE__, __LINE__));
 
-    if (pet && !(pet->m_unit->m_unitFieldFlags & 0x1000000)) {
+    if (pet && !(pet->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED)) {
         PetAction cursorAction = CGGameUI::m_cursorPetAction;
         CGGameUI::ClearCursor(1, 1);
 

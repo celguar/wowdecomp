@@ -2,6 +2,7 @@
 #define WOW_SOURCE_UI_ACHIEVEMENTINFO_H
 
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Net/Types.h"
@@ -12,11 +13,17 @@ class Achievement_CriteriaRec;
 class CDataStore;
 struct lua_State;
 
+// Criteria progress flags from SMSG_CRITERIA_UPDATE; name inferred from UpdateCriteria dropping the entry.
+enum CRITERIA_PROGRESS_FLAGS : uint32_t {
+    CRITERIA_PROGRESS_FLAG_NONE = 0x0,
+    CRITERIA_PROGRESS_FLAG_RESET = 0x1,
+};
+
 struct CLIENT_ACHIEVEMENT_CRITERIA : public TSLinkedNode<CLIENT_ACHIEVEMENT_CRITERIA> {
     /* 0008 */ int32_t m_id;
     /* 000C */ uint32_t unused_000C;
     /* 0010 */ uint64_t m_counter;
-    /* 0018 */ uint32_t m_flags;
+    /* 0018 */ uint32_t m_flags; // CRITERIA_PROGRESS_FLAGS
     /* 001C */ WowTime m_date;
     /* 003C */ uint32_t unused_003C;
     /* 0040 */ WOWGUID m_player;
@@ -58,7 +65,7 @@ class CGAchievementInfo {
     public:
     static void LeaveWorld();
     static void SaveTrackedAchievements();
-    static int32_t m_showAchievementUI;
+    static BOOL m_showAchievementUI;
     static void LoadTrackedAchievements();
     static void RemoveTrackedAchievement(int32_t id);
     static WOWGUID m_inspect;

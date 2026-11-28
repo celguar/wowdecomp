@@ -1,4 +1,5 @@
 #include <cstddef>
+#include "Engine/Source/Tempest/Color.h"
 #include <cstdint>
 #include <cstring>
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
@@ -53,7 +54,7 @@ static int32_t s_createBlpAsync = 1;
 static TSExplicitList<CTexture, offsetof(CTexture, m_link)> s_textureList;
 
 // STATIC: 0x00AC3354
-static uint32_t s_defaultColor = 0xFF00FF00;
+static CImVector s_defaultColor = { COLOR_GREEN_BGRA };
 
 // STATIC: 0x00AC3358
 static TSExplicitList<CGxTexCache, offsetof(CGxTexCache, m_link)> s_gxTexCacheFree;
@@ -65,10 +66,10 @@ static TSExplicitList<CMipBitsCache, offsetof(CMipBitsCache, m_link)> s_mipBitsC
 static TSExplicitList<CTextureAtlas, offsetof(CTextureAtlas, m_link)> s_atlasList;
 
 // STATIC: 0x00AC337C
-static TSExplicitList<CAsyncObject, offsetof(CAsyncObject, m_link)> s_asyncLoadList;
+static TSExplicitList<CAsyncObject, offsetof(CAsyncObject, link)> s_asyncLoadList;
 
 // STATIC: 0x00AC3388
-static TSExplicitList<CAsyncObject, offsetof(CAsyncObject, m_link)> s_asyncTextureList;
+static TSExplicitList<CAsyncObject, offsetof(CAsyncObject, link)> s_asyncTextureList;
 
 // STATIC: 0x00B49C78
 static uint32_t s_currentTime;
@@ -118,6 +119,20 @@ bool HASHKEY_TEXTUREFILE::operator==(const HASHKEY_TEXTUREFILE& key) const {
 }
 
 // INLINED
+CGxTexCache::CGxTexCache() {
+    this->gxTex = nullptr;
+    this->m_time = 0;
+    this->m_size = 0;
+}
+
+// INLINED
+CGxTexCache::~CGxTexCache() {
+    if (this->gxTex) {
+        GxTexDestroy(this->gxTex);
+    }
+}
+
+// INLINED
 CMipBitsCache::CMipBitsCache() {
     this->m_bits = nullptr;
 }
@@ -137,22 +152,25 @@ void GxTexNullUserFunc(EGxTexCommand command, uint32_t width, uint32_t height, u
 // VERIFY: 9d282c43 auto
 // OFFSET: 0x004B50C0
 EGxTexFormat TexturePixelFormatToGxTexFormat(PIXEL_FORMAT format) {
-    return s_pixelFormatToGxTexFormat[format];
+    EGxTexFormat gxTexFormat = s_pixelFormatToGxTexFormat[format];
+    STORM_ASSERT(gxTexFormat != GxTex_Unknown);
+
+    return gxTexFormat;
 }
 
 // VERIFY: 10032e81 auto
 // OFFSET: 0x004B50D0
 void CTextureAtlas::Update(CTexture* texture) {
-    this->m_updateSlot = texture->m_atlasBlockIndex;
-    GxTexUpdate(this->m_gxTex, (texture->m_atlasBlockIndex & 7) * this->m_width, ((texture->m_atlasBlockIndex >> 3) & 7) * this->m_height, (texture->m_atlasBlockIndex & 7) * this->m_width + this->m_width, ((texture->m_atlasBlockIndex >> 3) & 7) * this->m_height + this->m_height, 1);
+    this->m_updateSlot = texture->atlasBlockIndex;
+    GxTexUpdate(this->m_gxTex, (texture->atlasBlockIndex & 7) * this->m_width, ((texture->atlasBlockIndex >> 3) & 7) * this->m_height, (texture->atlasBlockIndex & 7) * this->m_width + this->m_width, ((texture->atlasBlockIndex >> 3) & 7) * this->m_height + this->m_height, 1);
     this->m_updateSlot = -1;
 }
 
 // VERIFY: 89c9895e manual
 // OFFSET: 0x004B5130
 void AsyncTextureDestroyedCallback(CAsyncObject* object) {
-    s_asyncLoadBufferUsed -= object->m_size;
-    void* buffer = object->m_buffer;
+    s_asyncLoadBufferUsed -= object->size;
+    void* buffer = object->buffer;
     AsyncFileReadDestroyObject(object);
     SMemFree(buffer, __FILE__, __LINE__, 0);
 }
@@ -207,6 +225,8 @@ int32_t TextureBuildAliasPath(char* buffer, const char* fileName) {
 // VERIFY: a6ae9dde manual
 // OFFSET: 0x004B5280
 MipBits* GetDefaultTexture(uint32_t width, uint32_t height) {
+    STORM_ASSERT(s_mipBits);
+
     MipBits* images = s_mipBits;
     MipBits* level = images;
 
@@ -229,9 +249,9 @@ MipBits* GetDefaultTexture(uint32_t width, uint32_t height) {
 // VERIFY: ec360367 manual
 // OFFSET: 0x004B5300
 void AsyncTextureFailureCallback(CTexture* texture) {
-    CAsyncObject* object = texture->m_asyncObject;
-    s_asyncLoadBufferUsed -= object->m_size;
-    void* buffer = object->m_buffer;
+    CAsyncObject* object = texture->asyncObject;
+    s_asyncLoadBufferUsed -= object->size;
+    void* buffer = object->buffer;
     AsyncFileReadDestroyObject(object);
     SMemFree(buffer, __FILE__, __LINE__, 0);
 }
@@ -255,7 +275,7 @@ SFileImpl* TextureCreateOpenFile(const char* fileName, int32_t flags) {
 
 // VERIFY: 47fab888 auto
 // OFFSET: 0x004B5390
-void TextureEnableAtlas(int32_t enable) {
+void TextureEnableAtlas(BOOL enable) {
     s_atlasEnable = enable;
 }
 
@@ -303,7 +323,7 @@ int32_t TextureOnAtlas(CTexture* texture) {
         return 0;
     }
 
-    return texture->m_atlas != nullptr;
+    return texture->atlas != nullptr;
 }
 
 // VERIFY: 26865c8c auto
@@ -314,13 +334,15 @@ int32_t TextureGetAtlasOffsetAndScale(CTexture* texture, C2Vector& offset, float
         return 0;
     }
 
-    if (!texture->m_atlas) {
+    if (!texture->atlas) {
         return 0;
     }
 
+    STORM_ASSERT(texture->atlasBlockIndex != -1);
+
     scale = 0.125f;
-    offset.x = 0.125f * (texture->m_atlasBlockIndex & 7);
-    offset.y = ((texture->m_atlasBlockIndex >> 3) & 7) * scale;
+    offset.x = 0.125f * (texture->atlasBlockIndex & 7);
+    offset.y = ((texture->atlasBlockIndex >> 3) & 7) * scale;
 
     return 1;
 }
@@ -333,7 +355,7 @@ int32_t TextureIsOpaque(CTexture* texture) {
         return 0;
     }
 
-    return texture->m_flags & 1;
+    return texture->m_flags & CTexture::FLAGS::IS_OPAQUE;
 }
 
 // VERIFY: 693ca984 manual
@@ -450,7 +472,7 @@ const char* TextureGetFilename(CTexture* texture) {
 // VERIFY: 2c853d09 manual
 // OFFSET: 0x004B5710
 int32_t TextureIsLoaded(CTexture* texture) {
-    return texture && !texture->m_asyncObject;
+    return texture && !texture->asyncObject;
 }
 
 // VERIFY: b492d3ae auto
@@ -497,7 +519,7 @@ void TextureComputeLoadProgress(CTexture* texture, int64_t& loaded, int64_t& tot
     SFile::FileGetIsLocalAmount(texture->m_filename, loaded, total);
     total++;
 
-    if (!texture->m_asyncObject) {
+    if (!texture->asyncObject) {
         loaded++;
     }
 
@@ -507,7 +529,7 @@ void TextureComputeLoadProgress(CTexture* texture, int64_t& loaded, int64_t& tot
 // VERIFY: d1f055eb auto
 // OFFSET: 0x004B5800
 int32_t TextureIsBlob(CTexture* texture) {
-    return texture->m_asyncObject && texture->m_gxTex;
+    return texture->asyncObject && texture->m_gxTex;
 }
 
 // VERIFY: 762ce4de manual
@@ -521,6 +543,7 @@ void ResolveMipLevel(EGxTexCommand command, uint32_t width, uint32_t height, uin
     }
 
     CTextureAtlas* atlas = static_cast<CTextureAtlas*>(userArg);
+    STORM_ASSERT(atlas);
 
     if (atlas->m_updateSlot == -1) {
         atlas->m_dirty |= 1;
@@ -556,9 +579,13 @@ void ResolveMipLevel(EGxTexCommand command, uint32_t width, uint32_t height, uin
 
 // VERIFY: 30b88d54 manual
 // OFFSET: 0x004B5A00
-uint32_t LoadPredrawnMips(CTgaFile* image, const char* format, int32_t flags, MipBits* images) {
+uint32_t LoadPredrawnMips(CTgaFile* image, const char* format, int32_t flags, MipBits* buffer) {
+    STORM_ASSERT(buffer);
+
     uint32_t level = 1;
-    uint32_t count = TextureCalcMipCount(image->Width(), image->Height()) - 1;
+    uint32_t levels = TextureCalcMipCount(image->Width(), image->Height());
+    STORM_ASSERT(levels > 0);
+    uint32_t count = levels - 1;
     uint32_t width = image->Width() >> 1;
     uint32_t height = image->Height() >> 1;
 
@@ -589,7 +616,7 @@ uint32_t LoadPredrawnMips(CTgaFile* image, const char* format, int32_t flags, Mi
         mip.SetTopDown(1);
 
         const TGA32Pixel* source = mip.ImageTGA32Pixel();
-        C4Pixel* dest = images->m_mip[level++];
+        C4Pixel* dest = buffer->m_mip[level++];
 
         for (uint32_t pixels = width * height; pixels; pixels--) {
             dest->m_b = source->m_b;
@@ -641,6 +668,8 @@ void RequestImageDimensions(uint32_t* width, uint32_t* height, uint32_t* bestMip
 // VERIFY: b37c3e13 manual
 // OFFSET: 0x004B5C30
 int32_t TextureLoadBlpMips(char* fileName, char* extension, int32_t flags, MipBits** images, uint32_t* width, uint32_t* height, EGxTexFormat* gxTexFormat, int32_t* opaque, uint32_t* alphaBits, PIXEL_FORMAT* pixelFormat) {
+    STORM_ASSERT(fileName);
+
     if (extension) {
         SStrCopy(extension, ".blp", STORM_MAX_STR);
     }
@@ -750,7 +779,7 @@ void UpdateBlpTextureAsync(EGxTexCommand command, uint32_t width, uint32_t heigh
 
     switch (command) {
         case GxTex_Lock:
-            if (!s_pumping && !LoadBlpWithAlias(texture->m_filename, texture->m_flags & 2, &s_mipBits)) {
+            if (!s_pumping && !LoadBlpWithAlias(texture->m_filename, texture->m_flags & CTexture::FLAGS::UNKNOWN_2, &s_mipBits)) {
                 GetDefaultTexture(width, height);
                 GetGlobalStatusObj().Add(STATUS_ERROR, "Texture %s not loaded -- replaced with default.\n", texture->m_filename);
             }
@@ -772,36 +801,37 @@ void UpdateBlpTextureAsync(EGxTexCommand command, uint32_t width, uint32_t heigh
             texels = bits;
 
             if (texture->m_gxTexTarget == GxTex_CubeMap) {
+                // Cube faces are stored side by side in the order +X, -Z, -X, +Z, +Y, -Y.
                 uint32_t order = face;
 
                 switch (face) {
-                    case 0:
+                    case GxTex_PositiveX:
                         order = 0;
                         break;
 
-                    case 1:
+                    case GxTex_NegativeX:
                         order = 2;
                         break;
 
-                    case 2:
+                    case GxTex_PositiveY:
                         order = 4;
                         break;
 
-                    case 3:
+                    case GxTex_NegativeY:
                         order = 5;
                         break;
 
-                    case 4:
+                    case GxTex_PositiveZ:
                         order = 3;
                         break;
 
-                    case 5:
+                    case GxTex_NegativeZ:
                         order = 1;
                         break;
                 }
 
                 texels = bits + order * texelStrideInBytes;
-                texelStrideInBytes *= 6;
+                texelStrideInBytes *= GxTexCubeFaces_Last;
             }
 
             break;
@@ -887,6 +917,7 @@ void TextureGetTextureFormats(PIXEL_FORMAT& pixelFormat, EGxTexFormat& gxTexForm
             break;
 
         default:
+            STORM_ASSERT(0);  // 12213: "1"
             break;
     }
 }
@@ -966,6 +997,8 @@ int32_t TextureCanUpdate(CTexture* texture) {
 // VERIFY: 835e236e auto
 // OFFSET: 0x004B6300
 uint32_t TextureCalcGxTexSize(EGxTexFormat format, uint32_t width, uint32_t height, EGxTexFilter filter) {
+    STORM_ASSERT(format < GxTexFormats_Last);
+
     uint32_t baseMip = g_theGxDevicePtr->DeviceBaseMipLevel();
     width >>= baseMip;
     height >>= baseMip;
@@ -1010,8 +1043,9 @@ void CTextureAtlas::Reload() {
         }
 
         s_pumping = 1;
+        STORM_ASSERT(s_mipBits);
 
-        if (!LoadBlpWithAlias(texture->m_filename, texture->m_flags & 2, &s_mipBits)) {
+        if (!LoadBlpWithAlias(texture->m_filename, texture->m_flags & CTexture::FLAGS::UNKNOWN_2, &s_mipBits)) {
             GetGlobalStatusObj().Add(STATUS_ERROR, "Texture %s not loaded.\n", texture->m_filename);
         }
 
@@ -1024,24 +1058,24 @@ void CTextureAtlas::Reload() {
 
 // VERIFY: 7f5ee904 manual
 // OFFSET: 0x004B64E0
-void AsyncTextureProcess(CAsyncObject* object, int32_t immediate) {
-    object->m_link.Unlink();
-    object->m_buffer = SMemAlloc(object->m_size, __FILE__, __LINE__, 0);
-    s_asyncLoadBufferUsed += object->m_size;
+void AsyncTextureProcess(CAsyncObject* object, BOOL immediate) {
+    object->link.Unlink();
+    object->buffer = SMemAlloc(object->size, __FILE__, __LINE__, 0);
+    s_asyncLoadBufferUsed += object->size;
     AsyncFileReadObject(object, immediate);
 }
 
 // VERIFY: 22d68fde auto
 // OFFSET: 0x004B6550
 void AsyncTextureWait(CTexture* texture) {
-    CAsyncObject* object = texture->m_asyncObject;
+    CAsyncObject* object = texture->asyncObject;
 
     if (object) {
-        if (!object->m_buffer) {
+        if (!object->buffer) {
             AsyncTextureProcess(object, 1);
         }
 
-        AsyncFileReadWait(texture->m_asyncObject);
+        AsyncFileReadWait(texture->asyncObject);
     }
 }
 
@@ -1080,19 +1114,19 @@ void TextureNotifyGxRestart() {
 
 // VERIFY: 7a43e0c3 auto
 // OFFSET: 0x004B6610
-int32_t TextureGetDimensions(CTexture* texture, uint32_t* width, uint32_t* height, int32_t wait) {
-    CAsyncObject* object = texture->m_asyncObject;
+int32_t TextureGetDimensions(CTexture* texture, uint32_t* width, uint32_t* height, BOOL wait) {
+    CAsyncObject* object = texture->asyncObject;
 
     if (object) {
         if (!wait) {
             return 0;
         }
 
-        if (!object->m_buffer) {
+        if (!object->buffer) {
             AsyncTextureProcess(object, 1);
         }
 
-        AsyncFileReadWait(texture->m_asyncObject);
+        AsyncFileReadWait(texture->asyncObject);
     }
 
     if (width) {
@@ -1110,7 +1144,7 @@ int32_t TextureGetDimensions(CTexture* texture, uint32_t* width, uint32_t* heigh
 // OFFSET: 0x004B6700
 CTextureAtlas::CTextureAtlas() {
     this->m_slots = 64;
-    this->m_count = 0;
+    this->m_refCount = 0;
     this->m_dirty = 0;
     this->m_width = 0;
     this->m_height = 0;
@@ -1125,19 +1159,19 @@ CTextureAtlas::CTextureAtlas() {
 // VERIFY: 00142d3e manual
 // OFFSET: 0x004B6760
 CGxTex* TextureAllocGxTex(EGxTexTarget target, uint32_t width, uint32_t height, uint32_t depth, EGxTexFormat format, CGxTexFlags flags, void* userArg, GxTexUserFunc userFunc, EGxTexFormat dataFormat, const char* name) {
-    CGxTexParms parms;
-    parms.m_target = target;
-    parms.m_width = width;
-    parms.m_height = height;
-    parms.m_depth = depth;
-    parms.m_format = format;
-    parms.m_dataFormat = dataFormat;
-    parms.m_flags = flags;
-    parms.m_flags.m_generateMipMaps = 0;
-    parms.m_userArg = userArg;
-    parms.m_userFunc = userFunc;
+    CGxTexParms gxTexParms;
+    gxTexParms.m_target = target;
+    gxTexParms.m_width = width;
+    gxTexParms.m_height = height;
+    gxTexParms.m_depth = depth;
+    gxTexParms.m_format = format;
+    gxTexParms.m_dataFormat = dataFormat;
+    gxTexParms.m_flags = flags;
+    gxTexParms.m_flags.m_generateMipMaps = 0;
+    gxTexParms.m_userArg = userArg;
+    gxTexParms.m_userFunc = userFunc;
 
-    if (GxTexReusable(parms) && width - 32 <= 480 && height - 32 <= 480) {
+    if (GxTexReusable(gxTexParms) && width - 32 <= 480 && height - 32 <= 480) {
         uint32_t w = width >> 5;
         uint32_t h = height >> 5;
         uint32_t x = 0;
@@ -1157,21 +1191,23 @@ CGxTex* TextureAllocGxTex(EGxTexTarget target, uint32_t width, uint32_t height, 
             } while (!(h & 1));
         }
 
-        CGxTexParms cached;
+        CGxTexParms gxTexParms2;
         TSExplicitList<CGxTexCache, offsetof(CGxTexCache, m_link)>& list = s_gxTexCache[x][y];
 
         for (CGxTexCache* entry = list.Head(); entry; entry = list.Next(entry)) {
-            GxTexParameters(entry->m_gxTex, cached);
+            GxTexParameters(entry->gxTex, gxTexParms2);
+            STORM_ASSERT(gxTexParms2.m_width == gxTexParms.m_width);  // 12213: "gxTexParms2.width == gxTexParms.width"
+            STORM_ASSERT(gxTexParms2.m_height == gxTexParms.m_height);  // 12213: "gxTexParms2.height == gxTexParms.height"
 
-            if (parms.m_flags.m_filter == cached.m_flags.m_filter && cached.m_format == parms.m_format && cached.m_target == parms.m_target && cached.m_depth == parms.m_depth) {
+            if (gxTexParms.m_flags.m_filter == gxTexParms2.m_flags.m_filter && gxTexParms2.m_format == gxTexParms.m_format && gxTexParms2.m_target == gxTexParms.m_target && gxTexParms2.m_depth == gxTexParms.m_depth) {
                 s_gxTexCacheSize -= entry->m_size;
                 entry->m_link.Unlink();
-                CGxTex* gxTex = entry->m_gxTex;
-                entry->m_gxTex = nullptr;
+                CGxTex* gxTex = entry->gxTex;
+                entry->gxTex = nullptr;
                 s_gxTexCacheFree.LinkToHead(entry);
-                GxTexSetDataFormat(gxTex, parms.m_dataFormat);
-                GxTexSetUserData(gxTex, parms.m_userFunc, parms.m_userArg);
-                GxTexSetFlags(gxTex, parms.m_flags);
+                GxTexSetDataFormat(gxTex, gxTexParms.m_dataFormat);
+                GxTexSetUserData(gxTex, gxTexParms.m_userFunc, gxTexParms.m_userArg);
+                GxTexSetFlags(gxTex, gxTexParms.m_flags);
 
                 return gxTex;
             }
@@ -1179,7 +1215,7 @@ CGxTex* TextureAllocGxTex(EGxTexTarget target, uint32_t width, uint32_t height, 
     }
 
     CGxTex* gxTex = nullptr;
-    GxTexCreate(parms, gxTex);
+    GxTexCreate(gxTexParms, gxTex);
 
     return gxTex;
 }
@@ -1187,12 +1223,16 @@ CGxTex* TextureAllocGxTex(EGxTexTarget target, uint32_t width, uint32_t height, 
 // VERIFY: ead404bb manual
 // OFFSET: 0x004B6920
 void FillInSolidTexture(const CImVector& color, CTexture* texture) {
+    STORM_ASSERT(texture->atlas == NULL);
+    STORM_ASSERT(texture->m_gxTex == NULL);
+
     texture->m_gxTex = TextureAllocGxTex(GxTex_2d, 8, 8, 0, GxTex_Argb8888, CGxTexFlags(), reinterpret_cast<void*>(static_cast<uintptr_t>(*reinterpret_cast<const uint32_t*>(&color))), GxuUpdateSingleColorTexture, GxTex_Argb8888, texture->m_filename);
+    STORM_ASSERT(texture->m_gxTex);
 
     if (color.a < 0xFE) {
-        texture->m_flags &= ~1;
+        texture->m_flags &= ~CTexture::FLAGS::IS_OPAQUE;
     } else {
-        texture->m_flags |= 1;
+        texture->m_flags |= CTexture::FLAGS::IS_OPAQUE;
     }
 
     texture->m_dataFormat = GxTex_Argb8888;
@@ -1212,9 +1252,9 @@ void AsyncTextureHandler() {
     for (CAsyncObject* object = s_asyncLoadList.Head(); !s_asyncLoadList.IsEnd(object); ) {
         CAsyncObject* next = s_asyncLoadList.RawNext(object);
 
-        if (available >= object->m_size) {
+        if (available >= object->size) {
             AsyncTextureProcess(object, 0);
-            available -= object->m_size;
+            available -= object->size;
         }
 
         object = next;
@@ -1223,9 +1263,9 @@ void AsyncTextureHandler() {
     for (CAsyncObject* object = s_asyncTextureList.Head(); !s_asyncTextureList.IsEnd(object); ) {
         CAsyncObject* next = s_asyncTextureList.RawNext(object);
 
-        if (available >= object->m_size) {
+        if (available >= object->size) {
             AsyncTextureProcess(object, 0);
-            available -= object->m_size;
+            available -= object->size;
         }
 
         object = next;
@@ -1256,9 +1296,10 @@ void TextureCacheUpdate() {
 
             while (entry && destroyed < maxDestroyed && s_gxTexCacheSize > s_gxTexCacheMaxSize) {
                 s_gxTexCacheSize -= entry->m_size;
-                GxTexDestroy(entry->m_gxTex);
+                STORM_ASSERT(entry->gxTex);  // 12213: "gxTexCache->gxTex"
+                GxTexDestroy(entry->gxTex);
                 destroyed++;
-                entry->m_gxTex = nullptr;
+                entry->gxTex = nullptr;
                 entry->m_size = 0;
                 entry->m_time = 0xFFFFFFFF;
 
@@ -1278,32 +1319,32 @@ void TextureIncreasePriority(CTexture* texture) {
         return;
     }
 
-    if (texture->m_asyncObject->m_buffer) {
+    if (texture->asyncObject->buffer) {
         AsyncFile::EnterQueueLock();
-        CAsyncObject* object = texture->m_asyncObject;
+        CAsyncObject* object = texture->asyncObject;
 
-        if (!object->m_isCurrent && !object->m_isRead && !object->m_isProcessed) {
-            AsyncFileReadIncreasePriority(texture->m_asyncObject);
+        if (!object->isCurrent && !object->isRead && !object->isProcessed) {
+            AsyncFileReadIncreasePriority(texture->asyncObject);
         }
 
         AsyncFile::LeaveQueueLock();
     } else {
-        s_asyncLoadList.LinkToHead(texture->m_asyncObject);
+        s_asyncLoadList.LinkToHead(texture->asyncObject);
     }
 }
 
 // VERIFY: 3c936638 auto
 // OFFSET: 0x004B6CB0
-CGxTex* TextureGetGxTex(CTexture* texture, int32_t wait, CStatus* status) {
+CGxTex* TextureGetGxTex(CTexture* texture, BOOL wait, CStatus* status) {
     if (!texture) {
         DebugValidate("textureptr");
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return nullptr;
     }
 
-    if (texture->m_flags & 4) {
-        if (texture->m_asyncObject) {
-            if (wait != 1 && (wait != 2 || texture->m_asyncObject->m_char24)) {
+    if (texture->m_flags & CTexture::FLAGS::USE_ATLAS) {
+        if (texture->asyncObject) {
+            if (wait != 1 && (wait != 2 || texture->asyncObject->m_char24)) {
                 TextureIncreasePriority(texture);
                 return nullptr;
             }
@@ -1315,21 +1356,21 @@ CGxTex* TextureGetGxTex(CTexture* texture, int32_t wait, CStatus* status) {
             }
         }
 
-        if (texture->m_atlas) {
-            if (texture->m_atlas->m_dirty & 1) {
-                texture->m_atlas->Reload();
+        if (texture->atlas) {
+            if (texture->atlas->m_dirty & 1) {
+                texture->atlas->Reload();
             }
 
-            return texture->m_atlas->m_gxTex;
+            return texture->atlas->m_gxTex;
         }
     }
 
-    if (texture->m_asyncObject) {
+    if (texture->asyncObject) {
         TextureIncreasePriority(texture);
     }
 
     if (!texture->m_gxTex) {
-        if (wait != 1 && (wait != 2 || texture->m_asyncObject->m_char24)) {
+        if (wait != 1 && (wait != 2 || texture->asyncObject->m_char24)) {
             return nullptr;
         }
 
@@ -1347,6 +1388,8 @@ CGxTex* TextureGetGxTex(CTexture* texture, int32_t wait, CStatus* status) {
 // OFFSET: 0x004B6E90
 CTextureAtlas* CTextureAtlas::Alloc(uint32_t width, uint32_t height, EGxTexFormat format, EGxTexFormat dataFormat, CGxTexFlags flags) {
     CTextureAtlas* atlas = new (__FILE__, __LINE__) CTextureAtlas;
+    STORM_ASSERT(atlas);
+    STORM_ASSERT(width * 8 <= 1024 && height * 8 <= 1024);  // 12213: "atlasWidth <= 1024 && atlasHeight <= 1024"
     atlas->m_height = height;
     atlas->m_width = width;
     atlas->m_used = 0;
@@ -1363,6 +1406,8 @@ CTextureAtlas* CTextureAtlas::Alloc(uint32_t width, uint32_t height, EGxTexForma
 // VERIFY: a49b1a09 auto
 // OFFSET: 0x004B6F30
 CTexture* TextureCacheGetTexture(const char* fileName) {
+    STORM_ASSERT(fileName);
+
     uint32_t hashval = SStrHashHT(fileName);
     HASHKEY_TEXTUREFILE key;
     key.m_anyTexFlags = 1;
@@ -1379,6 +1424,8 @@ CTexture* TextureCacheGetTexture(const char* fileName) {
 // VERIFY: 841c7f74 auto
 // OFFSET: 0x004B6FA0
 CTexture* TextureCacheGetTexture(char* fileName, char* extension, CGxTexFlags texFlags) {
+    STORM_ASSERT(fileName);
+
     if (extension) {
         *extension = '\0';
     }
@@ -1419,6 +1466,8 @@ CTexture* TextureCacheGetTexture(const CImVector& color) {
 // VERIFY: fb7f7312 manual
 // OFFSET: 0x004B70A0
 void TextureFreeGxTex(CGxTex* gxTex, const char* name) {
+    STORM_ASSERT(gxTex);
+
     CGxTexParms parms;
     GxTexParameters(gxTex, parms);
 
@@ -1442,19 +1491,21 @@ void TextureFreeGxTex(CGxTex* gxTex, const char* name) {
             } while (!(h & 1));
         }
 
-        CGxTexCache* entry = s_gxTexCacheFree.Head();
+        CGxTexCache* gxTexCache = s_gxTexCacheFree.Head();
 
-        if (!entry) {
-            entry = s_gxTexCacheFree.NewNode(1, 0, 0);
+        if (!gxTexCache) {
+            gxTexCache = s_gxTexCacheFree.NewNode(TSLIST_LINK_AFTER, 0, 0);
         }
 
-        entry->m_link.Unlink();
-        entry->m_gxTex = gxTex;
-        entry->m_time = s_currentTime;
-        entry->m_size = TextureCalcGxTexSize(parms.m_format, parms.m_width, parms.m_height, static_cast<EGxTexFilter>(parms.m_flags.m_filter));
-        s_gxTexCache[x][y].LinkToTail(entry);
-        s_gxTexCacheSize += entry->m_size;
-        GxTexSetUserData(entry->m_gxTex, GxTexNullUserFunc, nullptr);
+        STORM_ASSERT(gxTexCache);
+
+        gxTexCache->m_link.Unlink();
+        gxTexCache->gxTex = gxTex;
+        gxTexCache->m_time = s_currentTime;
+        gxTexCache->m_size = TextureCalcGxTexSize(parms.m_format, parms.m_width, parms.m_height, static_cast<EGxTexFilter>(parms.m_flags.m_filter));
+        s_gxTexCache[x][y].LinkToTail(gxTexCache);
+        s_gxTexCacheSize += gxTexCache->m_size;
+        GxTexSetUserData(gxTexCache->gxTex, GxTexNullUserFunc, nullptr);
     } else {
         TextureCalcGxTexSize(parms.m_format, parms.m_width, parms.m_height, static_cast<EGxTexFilter>(parms.m_flags.m_filter));
         GxTexDestroy(gxTex);
@@ -1547,7 +1598,7 @@ void TextureFreeMippedImg(MipBits* bits, PIXEL_FORMAT format, uint32_t width, ui
     CMipBitsCache* entry = s_mipBitsCacheFree.Head();
 
     if (!entry) {
-        entry = s_mipBitsCacheFree.NewNode(2, 0, 0);
+        entry = s_mipBitsCacheFree.NewNode(TSLIST_LINK_BEFORE, 0, 0);
         entry->m_link.Unlink();
     }
 
@@ -1558,6 +1609,8 @@ void TextureFreeMippedImg(MipBits* bits, PIXEL_FORMAT format, uint32_t width, ui
 // VERIFY: a81fc586 manual
 // OFFSET: 0x004B76E0
 CTextureAtlas::~CTextureAtlas() {
+    STORM_ASSERT(m_refCount == 0);
+
     if (this->m_gxTex) {
         TextureFreeGxTex(this->m_gxTex, "ATLAS");
     }
@@ -1594,23 +1647,25 @@ CTextureAtlas* CTextureAtlas::Get(CTexture* texture) {
         s_atlasList.LinkToTail(atlas);
     }
 
-    texture->m_atlasBlockIndex = -1;
+    texture->atlasBlockIndex = -1;
 
     if (atlas->m_freeSlot == -1) {
         for (uint32_t i = 0; i < 64; i++) {
             if (!atlas->m_textures[i]) {
-                texture->m_atlasBlockIndex = i;
+                texture->atlasBlockIndex = i;
                 break;
             }
         }
     } else {
-        texture->m_atlasBlockIndex = atlas->m_freeSlot;
+        texture->atlasBlockIndex = atlas->m_freeSlot;
         atlas->m_freeSlot = -1;
     }
 
+    STORM_ASSERT(texture->atlasBlockIndex != -1);
+
     atlas->m_used++;
-    atlas->m_count++;
-    atlas->m_textures[texture->m_atlasBlockIndex] = texture;
+    atlas->m_refCount++;
+    atlas->m_textures[texture->atlasBlockIndex] = texture;
 
     return atlas;
 }
@@ -1618,6 +1673,8 @@ CTextureAtlas* CTextureAtlas::Get(CTexture* texture) {
 // VERIFY: b9a802ce manual
 // OFFSET: 0x004B78A0
 int32_t LoadTgaMips(char* fileName, char* extension, int32_t flags, MipBits** images, uint32_t* width, uint32_t* height, EGxTexFormat* gxTexFormat, int32_t* opaque, uint32_t* alphaBits, PIXEL_FORMAT* pixelFormat) {
+    STORM_ASSERT(fileName);
+
     if (extension) {
         strcpy(extension, ".tga");
     }
@@ -1706,7 +1763,7 @@ void UpdateTgaTexture(EGxTexCommand command, uint32_t width, uint32_t height, ui
         case GxTex_Lock:
             if (!s_pumping) {
                 char* extension = texture->m_filename + SStrLen(texture->m_filename);
-                int32_t result = LoadTgaMips(texture->m_filename, extension, texture->m_flags & 2, &s_mipBits, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+                int32_t result = LoadTgaMips(texture->m_filename, extension, texture->m_flags & CTexture::FLAGS::UNKNOWN_2, &s_mipBits, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
                 *extension = '\0';
 
                 if (!result) {
@@ -1724,36 +1781,37 @@ void UpdateTgaTexture(EGxTexCommand command, uint32_t width, uint32_t height, ui
             texels = bits;
 
             if (texture->m_gxTexTarget == GxTex_CubeMap) {
+                // Cube faces are stored side by side in the order +X, -Z, -X, +Z, +Y, -Y.
                 uint32_t order = face;
 
                 switch (face) {
-                    case 0:
+                    case GxTex_PositiveX:
                         order = 0;
                         break;
 
-                    case 1:
+                    case GxTex_NegativeX:
                         order = 2;
                         break;
 
-                    case 2:
+                    case GxTex_PositiveY:
                         order = 4;
                         break;
 
-                    case 3:
+                    case GxTex_NegativeY:
                         order = 5;
                         break;
 
-                    case 4:
+                    case GxTex_PositiveZ:
                         order = 3;
                         break;
 
-                    case 5:
+                    case GxTex_NegativeZ:
                         order = 1;
                         break;
                 }
 
                 texels = bits + order * texelStrideInBytes;
-                texelStrideInBytes *= 6;
+                texelStrideInBytes *= GxTexCubeFaces_Last;
             }
 
             break;
@@ -1766,22 +1824,28 @@ void UpdateTgaTexture(EGxTexCommand command, uint32_t width, uint32_t height, ui
 
 // VERIFY: c0a503e5 manual
 // OFFSET: 0x004B7BD0
-int32_t PumpBlpTextureAsync(CTexture* texture, void* data) {
+int32_t PumpBlpTextureAsync(CTexture* texture, void* textureBuffer) {
+    STORM_ASSERT(textureBuffer);
+
     CBLPFile image;
 
-    if (!image.Source(data)) {
+    if (!image.Source(textureBuffer)) {
         texture->m_status.Add(STATUS_FATAL, "BLP Texture failure: \"%s\" invalid file version\n", texture->m_filename);
         return 0;
     }
 
-    if ((texture->m_flags & 4) && !(image.m_header.m_hasMips & 0x10)) {
-        texture->m_flags &= ~4;
+    if (texture->m_flags & CTexture::FLAGS::USE_ATLAS) {
+        STORM_ASSERT(texture->m_gxTex == NULL);
+
+        if (!(image.m_header.m_hasMips & 0x10)) {
+            texture->m_flags &= ~CTexture::FLAGS::USE_ATLAS;
+        }
     }
 
     texture->m_alphaBits = image.m_header.m_alphaSize;
 
     if (!image.m_header.m_alphaSize) {
-        texture->m_flags |= 1;
+        texture->m_flags |= CTexture::FLAGS::IS_OPAQUE;
     }
 
     uint32_t width = image.m_header.m_width;
@@ -1794,6 +1858,7 @@ int32_t PumpBlpTextureAsync(CTexture* texture, void* data) {
     EGxTexFormat gxTexFormat;
     TextureGetTextureFormats(pixelFormat, gxTexFormat, static_cast<PIXEL_FORMAT>(image.m_header.m_preferredFormat), image.m_header.m_alphaSize);
 
+    STORM_ASSERT(s_mipBits);
     s_pumping = 1;
 
     if (!image.LockChain2(texture->m_filename, pixelFormat, s_mipBits, texture->m_bestMip, 1)) {
@@ -1805,9 +1870,9 @@ int32_t PumpBlpTextureAsync(CTexture* texture, void* data) {
     uint32_t faceWidth = width;
     EGxTexTarget target = GxTex_2d;
 
-    if (width == 6 * height) {
+    if (width == GxTexCubeFaces_Last * height) {
         target = GxTex_CubeMap;
-        faceWidth = width / 6;
+        faceWidth = width / GxTexCubeFaces_Last;
     }
 
     texture->m_gxHeight = height;
@@ -1820,17 +1885,17 @@ int32_t PumpBlpTextureAsync(CTexture* texture, void* data) {
         texture->m_gxTexFlags.m_filter = GxTex_Nearest;
     }
 
-    if (texture->m_flags & 4) {
-        texture->m_atlas = CTextureAtlas::Get(texture);
+    if (texture->m_flags & CTexture::FLAGS::USE_ATLAS) {
+        texture->atlas = CTextureAtlas::Get(texture);
 
-        if (texture->m_atlas) {
-            texture->m_atlas->Update(texture);
+        if (texture->atlas) {
+            texture->atlas->Update(texture);
         } else {
-            texture->m_flags &= ~4;
+            texture->m_flags &= ~CTexture::FLAGS::USE_ATLAS;
         }
     }
 
-    if (!texture->m_atlas) {
+    if (!texture->atlas) {
         if (texture->m_gxTex) {
             TextureFreeGxTex(texture->m_gxTex, texture->m_filename);
             texture->m_gxTex = nullptr;
@@ -1855,20 +1920,20 @@ int32_t PumpBlpTextureAsync(CTexture* texture, void* data) {
 // VERIFY: 85a7ce70 manual
 // OFFSET: 0x004B7E80
 void AsyncTextureSuccessCallback(CTexture* texture) {
-    if (!PumpBlpTextureAsync(texture, texture->m_asyncObject->m_buffer)) {
+    if (!PumpBlpTextureAsync(texture, texture->asyncObject->buffer)) {
         if (!texture->m_status.IsEmpty()) {
             SysMsgAdd(&texture->m_status);
         }
 
-        FillInSolidTexture(*reinterpret_cast<const CImVector*>(&s_defaultColor), texture);
+        FillInSolidTexture(s_defaultColor, texture);
     }
 
-    SFileCloseFile(texture->m_asyncObject->m_file);
-    texture->m_asyncObject->m_file = nullptr;
-    s_asyncLoadBufferUsed -= texture->m_asyncObject->m_size;
-    SMemFree(texture->m_asyncObject->m_buffer, __FILE__, __LINE__, 0);
-    AsyncFileReadDestroyObject(texture->m_asyncObject);
-    texture->m_asyncObject = nullptr;
+    SFileCloseFile(texture->asyncObject->file);
+    texture->asyncObject->file = nullptr;
+    s_asyncLoadBufferUsed -= texture->asyncObject->size;
+    SMemFree(texture->asyncObject->buffer, __FILE__, __LINE__, 0);
+    AsyncFileReadDestroyObject(texture->asyncObject);
+    texture->asyncObject = nullptr;
 }
 
 // VERIFY: f4bfd60d manual
@@ -1891,6 +1956,7 @@ int32_t AsyncTextureStatus() {
 // OFFSET: 0x004B7F80
 void TextureInitialize() {
     s_mipBits = static_cast<MipBits*>(SMemAlloc(MippedImgCalcSize(PIXEL_ARGB8888, 1024, 1024), __FILE__, __LINE__, 0));
+    STORM_ASSERT(s_mipBits);
     AsyncFileReadAddPollHandler(AsyncTextureHandler);
     AsyncFileReadAddStatusHandler(AsyncTextureStatus);
     s_currentTime = OsGetAsyncTimeMs();
@@ -2061,33 +2127,35 @@ void TextureDestroy() {
 // VERIFY: 3e889496 manual
 // OFFSET: 0x004B8720
 void CTextureAtlas::Free(CTextureAtlas* atlas, CTexture* texture) {
-    atlas->m_textures[texture->m_atlasBlockIndex] = nullptr;
-    atlas->m_count--;
-    atlas->m_used--;
-    atlas->m_freeSlot = texture->m_atlasBlockIndex;
+    STORM_ASSERT(texture->atlasBlockIndex != -1);
 
-    if (static_cast<int16_t>(atlas->m_count) < 1) {
+    atlas->m_textures[texture->atlasBlockIndex] = nullptr;
+    atlas->m_refCount--;
+    atlas->m_used--;
+    atlas->m_freeSlot = texture->atlasBlockIndex;
+
+    if (static_cast<int16_t>(atlas->m_refCount) < 1) {
         delete atlas;
     }
 
-    texture->m_atlasBlockIndex = -1;
+    texture->atlasBlockIndex = -1;
 }
 
 // VERIFY: 0882c3ed manual
 // OFFSET: 0x004B8770
 CTexture::CTexture() {
-    this->m_flags = 0;
+    this->m_flags = CTexture::FLAGS::NONE;
     this->m_bestMip = 0;
     this->m_alphaBits = 0;
-    this->m_asyncObject = nullptr;
+    this->asyncObject = nullptr;
     this->m_gxTex = nullptr;
     this->m_gxTexTarget = GxTex_2d;
     this->m_gxWidth = 0;
     this->m_gxHeight = 0;
     this->m_gxTexFormat = GxTex_Unknown;
     this->m_dataFormat = GxTex_Unknown;
-    this->m_atlas = nullptr;
-    this->m_atlasBlockIndex = 0;
+    this->atlas = nullptr;
+    this->atlasBlockIndex = 0;
     this->m_filename[0] = '\0';
     s_textureList.LinkToTail(this);
 }
@@ -2105,20 +2173,20 @@ CTexture::~CTexture() {
         TextureFreeGxTex(this->m_gxTex, this->m_filename);
     }
 
-    if (this->m_atlas) {
-        CTextureAtlas::Free(this->m_atlas, this);
+    if (this->atlas) {
+        CTextureAtlas::Free(this->atlas, this);
     }
 
-    if (this->m_asyncObject) {
-        if (this->m_flags & 0x20) {
-            this->m_asyncObject->m_userArg = this->m_asyncObject;
-            this->m_asyncObject->m_userPostUnloadCallback = reinterpret_cast<void*>(AsyncTextureDestroyedCallback);
-            this->m_asyncObject->m_userPostloadCallback = this->m_asyncObject->m_userPostUnloadCallback;
+    if (this->asyncObject) {
+        if (this->m_flags & CTexture::FLAGS::STREAMING_ASYNC) {
+            this->asyncObject->userArg = this->asyncObject;
+            this->asyncObject->userPostUnloadCallback = reinterpret_cast<CAsyncObject::POST_CALLBACK>(AsyncTextureDestroyedCallback);
+            this->asyncObject->userPostloadCallback = this->asyncObject->userPostUnloadCallback;
         } else {
-            void* buffer = this->m_asyncObject->m_buffer;
+            void* buffer = this->asyncObject->buffer;
 
-            if (AsyncFile::Cancel(this->m_asyncObject, AsyncTextureDestroyedCallback)) {
-                s_asyncLoadBufferUsed -= this->m_asyncObject->m_size;
+            if (AsyncFile::Cancel(this->asyncObject, AsyncTextureDestroyedCallback)) {
+                s_asyncLoadBufferUsed -= this->asyncObject->size;
                 SMemFree(buffer, __FILE__, __LINE__, 0);
             }
         }
@@ -2147,11 +2215,11 @@ CTexture* CreateBlpSync(const char* fileName, char* extension, uint32_t flags, C
     texture->m_gxTexFlags = texFlags;
 
     if (flags & 2) {
-        texture->m_flags |= 2;
+        texture->m_flags |= CTexture::FLAGS::UNKNOWN_2;
     }
 
     if ((flags & 4) && s_atlasEnable) {
-        texture->m_flags |= 4;
+        texture->m_flags |= CTexture::FLAGS::USE_ATLAS;
     }
 
     if (extension) {
@@ -2167,7 +2235,7 @@ CTexture* CreateBlpSync(const char* fileName, char* extension, uint32_t flags, C
     }
 
     if (!PumpBlpTextureAsync(texture, data)) {
-        FillInSolidTexture(*reinterpret_cast<const CImVector*>(&s_defaultColor), texture);
+        FillInSolidTexture(s_defaultColor, texture);
     }
 
     SFileCloseFile(file);
@@ -2208,15 +2276,15 @@ CTexture* CreateBlpAsync(char* extension, const char* fileName, uint32_t flags, 
     texture->m_gxTexFlags = texFlags;
 
     if (flags & 2) {
-        texture->m_flags |= 2;
+        texture->m_flags |= CTexture::FLAGS::UNKNOWN_2;
     }
 
     if ((flags & 4) && s_atlasEnable) {
-        texture->m_flags |= 4;
+        texture->m_flags |= CTexture::FLAGS::USE_ATLAS;
     }
 
     if ((flags & 0x20) && SFile::IsStreamingMode()) {
-        texture->m_flags |= 0x20;
+        texture->m_flags |= CTexture::FLAGS::STREAMING_ASYNC;
     }
 
     SStrCopy(texture->m_filename, fileName, STORM_MAX_STR);
@@ -2225,25 +2293,26 @@ CTexture* CreateBlpAsync(char* extension, const char* fileName, uint32_t flags, 
         CTextureBlob::CreateTexture(texture, blobTexture);
     }
 
-    texture->m_asyncObject = AsyncFileReadAllocObject();
-    texture->m_asyncObject->m_userArg = texture;
-    texture->m_asyncObject->m_userPostloadCallback = reinterpret_cast<void*>(AsyncTextureSuccessCallback);
-    texture->m_asyncObject->m_userPostUnloadCallback = reinterpret_cast<void*>(AsyncTextureFailureCallback);
-    texture->m_asyncObject->m_file = file;
-    texture->m_asyncObject->m_size = SFileGetFileSize(file, nullptr);
+    texture->asyncObject = AsyncFileReadAllocObject();
+    STORM_ASSERT(texture->asyncObject);
+    texture->asyncObject->userArg = texture;
+    texture->asyncObject->userPostloadCallback = reinterpret_cast<CAsyncObject::POST_CALLBACK>(AsyncTextureSuccessCallback);
+    texture->asyncObject->userPostUnloadCallback = reinterpret_cast<CAsyncObject::POST_CALLBACK>(AsyncTextureFailureCallback);
+    texture->asyncObject->file = file;
+    texture->asyncObject->size = SFileGetFileSize(file, nullptr);
 
     if (blobTexture) {
-        texture->m_asyncObject->m_priority = 131;
+        texture->asyncObject->priority = 131;
     } else if (flags & 0x10) {
-        texture->m_asyncObject->m_priority = 129;
+        texture->asyncObject->priority = 129;
     } else {
-        texture->m_asyncObject->m_priority = 130;
+        texture->asyncObject->priority = 130;
     }
 
-    CAsyncObject* object = texture->m_asyncObject;
+    CAsyncObject* object = texture->asyncObject;
 
-    if (0x400000 - s_asyncLoadBufferUsed < object->m_size) {
-        s_asyncTextureList.LinkNode(object, 2, nullptr);
+    if (0x400000 - s_asyncLoadBufferUsed < object->size) {
+        s_asyncTextureList.LinkNode(object, TSLIST_LINK_BEFORE, nullptr);
     } else {
         AsyncTextureProcess(object, 0);
     }
@@ -2287,13 +2356,14 @@ CTexture* TextureCreate(EGxTexTarget target, uint32_t width, uint32_t height, ui
 
     texFlags.m_maxAnisotropy = texFlags.m_filter == GxTex_Anisotropic ? s_maxAnisotropy : 1;
     texture->m_gxTex = TextureAllocGxTex(target, width, height, depth, format, texFlags, userArg, userFunc, dataFormat, name);
+    STORM_ASSERT(texture->m_gxTex);
     texture->m_dataFormat = dataFormat;
     texture->m_gxWidth = width;
     texture->m_gxTexFormat = format;
     texture->m_gxTexTarget = target;
     texture->m_gxHeight = height;
     texture->m_gxTexFlags = texFlags;
-    texture->m_asyncObject = nullptr;
+    texture->asyncObject = nullptr;
     SStrCopy(texture->m_filename, name ? name : "UniqueTexture", sizeof(texture->m_filename));
 
     return reinterpret_cast<CTexture*>(HandleCreate(texture, "HTEXTURE"));
@@ -2357,33 +2427,39 @@ CTexture* TextureCreate(uint32_t width, uint32_t height, EGxTexFormat format, EG
 
 // VERIFY: 70b37ccc auto
 // OFFSET: 0x004B9420
-void TextureCacheNewTexture(CTexture* texture) {
-    uint32_t hashval = SStrHashHT(texture->m_filename);
+void TextureCacheNewTexture(CTexture* textureptr) {
+    STORM_ASSERT(textureptr);
+
+    uint32_t hashval = SStrHashHT(textureptr->m_filename);
     HASHKEY_TEXTUREFILE key;
     key.m_anyTexFlags = 0;
-    key.m_texFlags = texture->m_gxTexFlags;
-    key.m_filename = texture->m_filename;
-    s_textureCache.Insert(texture, hashval, key);
+    key.m_texFlags = textureptr->m_gxTexFlags;
+    key.m_filename = textureptr->m_filename;
+    s_textureCache.Insert(textureptr, hashval, key);
 }
 
 // VERIFY: 07bcfe26 manual
 // OFFSET: 0x004B9480
-void TextureCacheNewTexture(CTexture* texture, CGxTexFlags texFlags) {
-    uint32_t hashval = SStrHashHT(texture->m_filename);
+void TextureCacheNewTexture(CTexture* textureptr, CGxTexFlags texFlags) {
+    STORM_ASSERT(textureptr);
+
+    uint32_t hashval = SStrHashHT(textureptr->m_filename);
     HASHKEY_TEXTUREFILE key;
-    key.m_filename = texture->m_filename;
+    key.m_filename = textureptr->m_filename;
     key.m_texFlags = texFlags;
-    s_textureCache.Insert(texture, hashval, key);
+    s_textureCache.Insert(textureptr, hashval, key);
 }
 
 // VERIFY: 27dbedb5 manual
 // OFFSET: 0x004B94E0
-void TextureCacheNewTexture(CTexture* texture, const CImVector& color) {
+void TextureCacheNewTexture(CTexture* textureptr, const CImVector& color) {
+    STORM_ASSERT(textureptr);
+
     CGxTexFlags texFlags;
     HASHKEY_TEXTUREFILE key;
     key.m_filename = const_cast<char*>("");
     key.m_texFlags = texFlags;
-    s_textureCache.Insert(texture, *reinterpret_cast<const uint32_t*>(&color), key);
+    s_textureCache.Insert(textureptr, *reinterpret_cast<const uint32_t*>(&color), key);
 }
 
 // VERIFY: 875e1f5e auto
@@ -2432,7 +2508,7 @@ CTexture* CreateTgaTexture(const char* fileName, char* extension, int32_t flags,
 
     if (width < 8 || height < 8) {
         status->Add(STATUS_FATAL, "Error loading file \"%s\": Texture size must be at least %dx%d\n", fileName, 8, 8);
-        return TextureCreateSolid(*reinterpret_cast<const CImVector*>(&s_defaultColor));
+        return TextureCreateSolid(s_defaultColor);
     }
 
     CTexture* texture = new ("HTEXTURE", SLOG_OBJECT) CTexture;
@@ -2444,11 +2520,11 @@ CTexture* CreateTgaTexture(const char* fileName, char* extension, int32_t flags,
     texture->m_alphaBits = image.AlphaBits();
 
     if (!texture->m_alphaBits) {
-        texture->m_flags |= 1;
+        texture->m_flags |= CTexture::FLAGS::IS_OPAQUE;
     }
 
     if (flags) {
-        texture->m_flags |= 2;
+        texture->m_flags |= CTexture::FLAGS::UNKNOWN_2;
     }
 
     if (extension) {
@@ -2456,6 +2532,8 @@ CTexture* CreateTgaTexture(const char* fileName, char* extension, int32_t flags,
     }
 
     SStrCopy(texture->m_filename, fileName, sizeof(texture->m_filename));
+    STORM_ASSERT(texture->atlas == NULL);
+    STORM_ASSERT(texture->m_gxTex == NULL);
     texture->m_gxTex = TextureAllocGxTex(target, width, height, 0, GxTex_Argb8888, texFlags, texture, UpdateTgaTexture, GxTex_Argb8888, texture->m_filename);
 
     if (!texture->m_gxTex) {
@@ -2538,5 +2616,5 @@ CTexture* TextureCreate(const char* fileName, CGxTexFlags texFlags, CStatus* sta
 
     TextureReportLoadError("texture", fileName, status);
 
-    return TextureCreateSolid(*reinterpret_cast<const CImVector*>(&s_defaultColor));
+    return TextureCreateSolid(s_defaultColor);
 }

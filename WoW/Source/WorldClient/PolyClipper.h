@@ -9,7 +9,9 @@ class C4Plane;
 class PCResultsIterator;
 
 class PolyClipper {
-    public:
+    private:
+    friend class PCResultsIterator;
+
     class PCDataProxy {
         public:
         /* 0000 */ mutable void* m_data;
@@ -35,13 +37,19 @@ class PolyClipper {
         /* 0008 */ bool m_clipped;
     };
 
-    /* 0000 */ PCVertex m_verts[32];
-    /* 0580 */ PCEdge m_edges[16];
-    /* 0640 */ int32_t m_vertCount;
-    /* 0644 */ int32_t m_edgeCount;
+    enum {
+        MAX_VTX_BUFFER_SIZE = 32,
+        MAX_EDGE_BUFFER_SIZE = 16,
+    };
+
+    /* 0000 */ PCVertex m_verts[MAX_VTX_BUFFER_SIZE];
+    /* 0580 */ PCEdge m_edges[MAX_EDGE_BUFFER_SIZE];
+    /* 0640 */ int32_t m_vtxCnt;
+    /* 0644 */ int32_t m_edgeCnt;
     /* 0648 */ uint32_t m_stamp;
     /* 064C */ int32_t m_firstEdge;
 
+    public:
     PolyClipper();
     ~PolyClipper();
     void AddVertex(const C3Vector& pos, const void* data);
@@ -52,7 +60,7 @@ class PolyClipper {
 };
 
 class PCResultsIterator {
-    public:
+    private:
     /* 0000 */ const PolyClipper* m_clipper;
     /* 0004 */ void* (*m_lerp)(const void*, const void*, float);
     /* 0008 */ int32_t m_front;
@@ -60,6 +68,7 @@ class PCResultsIterator {
     /* 0010 */ uint32_t m_step;
     /* 0014 */ bool m_finished;
 
+    public:
     PCResultsIterator(const PolyClipper* clipper, void* (*lerp)(const void*, const void*, float));
     ~PCResultsIterator();
     void GetVertex(C3Vector& pos, const void*& data) const;

@@ -6,6 +6,7 @@
 #include "Engine/Source/Storm/H/stpl.h"
 #include "ThirdParty/lgLcd/lglcd.h"
 #include "WoW/Source/Ui/UILCD/Windows/LCDConnection.h"
+#include "WoW/Source/Ui/UILCD/Windows/LCDBase.h"
 
 class CEzLcdPage;
 class CLCDBitmap;
@@ -14,9 +15,32 @@ class CLCDText;
 
 class CEzLcd {
     public:
+    // Named from the lgLcd applet capabilities Initialize requests for each value.
+    enum LCD_TYPE : int32_t {
+        LCD_TYPE_MONO = 0, // LGLCD_APPLET_CAP_BW
+        LCD_TYPE_COLOR = 1, // LGLCD_APPLET_CAP_QVGA
+        LCD_TYPE_DUAL = 2, // LGLCD_APPLET_CAP_BW | LGLCD_APPLET_CAP_QVGA
+        LCD_TYPE_NONE = 3, // Constructor value before Initialize (name inferred).
+    };
+
+    // ButtonReleased index; named from the LGLCDBUTTON_* mask each value tests.
+    enum BUTTON : int32_t {
+        BUTTON_0 = 0,
+        BUTTON_1 = 1,
+        BUTTON_2 = 2,
+        BUTTON_3 = 3,
+        BUTTON_LEFT = 4,
+        BUTTON_RIGHT = 5,
+        BUTTON_UP = 6,
+        BUTTON_DOWN = 7,
+        BUTTON_OK = 8,
+        BUTTON_CANCEL = 9,
+        BUTTON_MENU = 10,
+    };
+
     /* 0004 */ char m_friendlyName[260];
     /* 0108 */ CLCDConnection m_connection;
-    /* 0174 */ int32_t m_lcdType;
+    /* 0174 */ LCD_TYPE m_lcdType;
     /* 0178 */ TSGrowableArray<CEzLcdPage*> m_monoPages;
     /* 0188 */ TSGrowableArray<CEzLcdPage*> m_colorPages;
     /* 0198 */ CEzLcdPage* m_currentMonoPage;
@@ -28,10 +52,10 @@ class CEzLcd {
     /* 01B0 */ int32_t m_currentMonoPageIndex;
     /* 01B4 */ int32_t m_currentColorPageIndex;
     /* 01B8 */ int32_t unused_01B8;
-    /* 01BC */ int32_t m_initialized;
+    /* 01BC */ BOOL m_initialized;
     /* 01C0 */ lgLcdConfigureContext* m_configContext;
-    /* 01C4 */ int32_t m_isPersistent;
-    /* 01C8 */ int32_t m_isAutoStartable;
+    /* 01C4 */ BOOL m_isPersistent;
+    /* 01C8 */ BOOL m_isAutoStartable;
     /* 01CC */ uint32_t unused_01CC;
     /* 01D0 */ uint32_t unused_01D0;
     /* 01D4 */ int32_t unused_01D4;
@@ -48,11 +72,11 @@ class CEzLcd {
     CEzLcd();
     ~CEzLcd();
     virtual void OnSoftButtons(uint32_t buttons);
-    int32_t Initialize(const char* friendlyName, int32_t lcdType, int32_t isAutoStartable, int32_t isPersistent, lgLcdConfigureContext* configContext, lgLcdSoftbuttonsChangedContext* softbuttonsChangedContext);
-    int32_t IsConnected();
+    int32_t Initialize(const char* friendlyName, LCD_TYPE lcdType, BOOL isAutoStartable, BOOL isPersistent, lgLcdConfigureContext* configContext, lgLcdSoftbuttonsChangedContext* softbuttonsChangedContext);
+    BOOL IsConnected();
     void ShowSubscreen(int32_t subscreen);
-    HRESULT SetVisible(void* handle, int32_t visible);
-    int32_t IsDeviceAvailable(int32_t type);
+    HRESULT SetVisible(void* handle, BOOL visible);
+    BOOL IsDeviceAvailable(LCD_TYPE type);
     void Update();
     int32_t ShowPage(int32_t page);
     void HideGlobals();
@@ -68,7 +92,7 @@ class CEzLcd {
     void SetCurrentPage(CEzLcdPage* page);
     int32_t AddNewPage(int32_t page);
     void SetBackground(COLORREF color);
-    CLCDText* AddText(int32_t type, int32_t size, int32_t alignment, int32_t maxLengthPixels, int32_t userData, int32_t numberOfLines, int32_t fontWeight);
+    CLCDText* AddText(LCD_OBJECT_TYPE type, int32_t size, int32_t alignment, int32_t maxLengthPixels, int32_t userData, int32_t numberOfLines, int32_t fontWeight);
     CLCDBitmap* AddBitmap(int32_t width, int32_t height, int32_t bitmapWidth, int32_t bitmapHeight);
     CEzLcdPage* GetGlobalPage();
     HRESULT ModifyControlsOnPage(int32_t page);

@@ -1,4 +1,5 @@
 #include "MapLowDetail.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "WoW/Source/WorldClient/WorldConstants.h"
 #include <cmath>
 #include <cstring>
@@ -27,7 +28,7 @@ CMapAreaLow::CMapAreaLow() {
     this->m_horizonLink.m_next = nullptr;
     this->m_indexCount = 0;
     this->m_block = nullptr;
-    this->m_flags = 0;
+    this->m_flags = CMapAreaLow::FLAGS::NONE;
     this->m_heights = nullptr;
     this->m_holes = nullptr;
 }
@@ -41,20 +42,32 @@ CMapLowDetail::CMapLowDetail() {
     this->m_mapObjDefs = nullptr;
     this->m_mapObjDefCount = 0;
     this->m_areaOffsets = nullptr;
-    memset(this->m_areas, 0, sizeof(this->m_areas));
+    memset(this->m_areaTable, 0, sizeof(this->m_areaTable));
 }
+
+#if defined(WOWDECOMP_ASSERTIONS)
+CMapLowDetail::~CMapLowDetail() {
+    STORM_ASSERT(m_data == nullptr); // 12213: "m_data == __null"
+
+    for (uint32_t i = 0; i < MAP_AREA_COUNT; i++) {
+        STORM_ASSERT(m_areaTable[i] == nullptr); // 12213: "m_areaTable[i] == __null"
+    }
+
+    STORM_ASSERT(m_mapObjDefList.Count() == 0);
+}
+#endif
 
 // OFFSET: 0x007CBFE0
 void CMapLowDetail::Purge() {
     for (uint32_t i = 0; i < 4096; i++) {
-        CMapAreaLow* areaLow = this->m_areas[i];
+        CMapAreaLow* areaLow = this->m_areaTable[i];
 
         if (areaLow) {
             if (areaLow->m_block) {
                 CMap::s_vbbList.Release(areaLow->m_block);
             }
 
-            this->m_areas[i]->m_block = nullptr;
+            this->m_areaTable[i]->m_block = nullptr;
         }
     }
 }
@@ -67,7 +80,7 @@ void CMapLowDetail::CullHorizonAreas(const C3Vector* pos) {
     int32_t row = CMath::fint_(x - 0.5f);
     y = y * OO_COORD_TO_CHUNK;
     int32_t col = CMath::fint_(y - 0.5f);
-    int32_t radius = static_cast<int32_t>(static_cast<int64_t>(World::s_horizonFarClipScale * World::s_farClip * 0.030000001f));
+    int32_t radius = static_cast<int32_t>(static_cast<int64_t>(World::s_horizonFarClipScale * World::farClip * 0.030000001f));
 
     int32_t minCol = ((col - radius) >> 4) - 2;
     int32_t minRow = ((row - radius) >> 4) - 2;
@@ -82,23 +95,23 @@ void CMapLowDetail::CullHorizonAreas(const C3Vector* pos) {
         minCol = 0;
     }
 
-    if (maxCol >= 64) {
-        maxCol = 63;
+    if (maxCol >= MAP_AREAS_PER_AXIS) {
+        maxCol = MAP_AREAS_PER_AXIS - 1;
     }
 
-    if (maxRow >= 64) {
-        maxRow = 63;
+    if (maxRow >= MAP_AREAS_PER_AXIS) {
+        maxRow = MAP_AREAS_PER_AXIS - 1;
     }
 
     for (int32_t r = minRow; r <= maxRow; r++) {
         for (int32_t c = minCol; c <= maxCol; c++) {
-            CMapAreaLow* area = this->m_areas[64 * r + c];
+            CMapAreaLow* area = this->m_areaTable[CMap::GetAreaIndex(c, r)];
 
             if (!area || CWorldScene::FrustumCull(&area->m_bbox) || CWorldOcclusion::QueryVolumes(&area->m_sphere)) {
                 continue;
             }
 
-            if (World::s_farClip > 300.0f && CWorldOcclusion::QueryBuffer(&area->m_bbox, 40)) {
+            if (World::farClip > 300.0f && CWorldOcclusion::QueryBuffer(&area->m_bbox, CWorldOcclusion::QUERY_FLAG_UNKNOWN_20 | CWorldOcclusion::QUERY_FLAG_TEST_NEAR)) {
                 continue;
             }
 
@@ -109,7 +122,7 @@ void CMapLowDetail::CullHorizonAreas(const C3Vector* pos) {
     for (uint32_t i = 0; i < this->m_mapObjDefList.Count(); i++) {
         CMapObjDef* def = this->m_mapObjDefList.m_data[i];
 
-        if (def->m_owner->m_isGroupLoaded && !CWorldScene::FrustumCull(&def->m_bbox) && !CWorldOcclusion::QueryVolumes(&def->m_sphere)) {
+        if (def->mapObj->m_isGroupLoaded && !CWorldScene::FrustumCull(&def->m_bbox) && !CWorldOcclusion::QueryVolumes(&def->m_sphere)) {
             CWorldScene::AddHorizonMapObjDef(def);
         }
     }
@@ -130,40 +143,62 @@ void CMapLowDetail::Load(const char* mapPath, const char* mapName) {
 
     uint32_t size = SFileGetFileSize(file, nullptr);
     this->m_data = static_cast<char*>(SMemAlloc(size, __FILE__, __LINE__, 0));
+    STORM_ASSERT(m_data);
     SFileReadFile(file, this->m_data, size, nullptr, nullptr, 0);
     SFileCloseFile(file);
 
-    uint32_t* chunk = reinterpret_cast<uint32_t*>(this->m_data + reinterpret_cast<uint32_t*>(this->m_data)[1] + 8);
-    char* data = this->m_data + reinterpret_cast<uint32_t*>(this->m_data)[1] + 16;
+    auto* iffChunk = reinterpret_cast<const SIffChunk*>(this->m_data);
+    STORM_ASSERT(iffChunk->token == SIffChunk::TOKEN_MVER); // 12213: "iffChunk->token == 'MVER'"
+#if defined(WOWDECOMP_ASSERTIONS)
+    const auto* adtVersion = reinterpret_cast<const uint32_t*>(this->m_data + 8);
+#endif
+    STORM_ASSERT(*adtVersion == 0x0012);
 
-    if (chunk[0] == 0x4D574D4F) {
+    char* data = this->m_data + iffChunk->m_size + 8;
+    iffChunk = reinterpret_cast<const SIffChunk*>(data);
+    data += 8;
+
+    if (iffChunk->token == SIffChunk::TOKEN_MWMO) {
         this->m_mapObjNames = data;
-        uint32_t* mwid = reinterpret_cast<uint32_t*>(data + chunk[1]);
-        this->m_mapObjNameOffsets = mwid + 2;
-        uint32_t* modf = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(mwid) + mwid[1] + 8);
-        this->m_mapObjDefs = reinterpret_cast<SMMapObjDef*>(modf + 2);
-        this->m_mapObjDefCount = modf[1] >> 6;
-        data = reinterpret_cast<char*>(modf + 2) + modf[1] + 8;
+        data += iffChunk->m_size;
+        iffChunk = reinterpret_cast<const SIffChunk*>(data);
+        STORM_ASSERT(iffChunk->token == SIffChunk::TOKEN_MWID); // 12213: "iffChunk->token == 'MWID'"
+        data += 8;
+        this->m_mapObjNameOffsets = reinterpret_cast<const uint32_t*>(data);
+
+        data += iffChunk->m_size;
+        iffChunk = reinterpret_cast<const SIffChunk*>(data);
+        STORM_ASSERT(iffChunk->token == SIffChunk::TOKEN_MODF); // 12213: "iffChunk->token == 'MODF'"
+        data += 8;
+        this->m_mapObjDefs = reinterpret_cast<SMMapObjDef*>(data);
+        this->m_mapObjDefCount = iffChunk->m_size >> 6;
+        data += iffChunk->m_size;
+        iffChunk = reinterpret_cast<const SIffChunk*>(data);
+        data += 8;
     }
 
-    this->m_areaOffsets = reinterpret_cast<uint32_t*>(data);
+    STORM_ASSERT(iffChunk->token == SIffChunk::TOKEN_MAOF); // 12213: "iffChunk->token == 'MAOF'"
+    this->m_areaOffsets = reinterpret_cast<const uint32_t*>(data);
 
     uint32_t index = 0;
 
-    for (uint32_t y = 0; y < 1024; y += 16) {
-        for (uint32_t x = 0; x < 1024; x += 16) {
+    for (uint32_t y = 0; y < MAP_CHUNKS_PER_MAP_AXIS; y += MAP_CHUNKS_PER_AREA_AXIS) {
+        for (uint32_t x = 0; x < MAP_CHUNKS_PER_MAP_AXIS; x += MAP_CHUNKS_PER_AREA_AXIS) {
             if (this->m_areaOffsets[index]) {
-                char* mare = this->m_data + this->m_areaOffsets[index];
-                CMapAreaLow* area = CMap::AllocAreaLow();
-                this->m_areas[index] = area;
-                area->m_heights = reinterpret_cast<int16_t*>(mare + 8);
-                uint32_t* next = reinterpret_cast<uint32_t*>(mare + reinterpret_cast<uint32_t*>(mare)[1] + 8);
+                const char* mare = this->m_data + this->m_areaOffsets[index];
+                iffChunk = reinterpret_cast<const SIffChunk*>(mare);
+                STORM_ASSERT(iffChunk->token == SIffChunk::TOKEN_MARE); // 12213: "iffChunk->token == 'MARE'"
+                CMapAreaLow* mapAreaLow = CMap::AllocAreaLow();
+                STORM_ASSERT(mapAreaLow);
+                this->m_areaTable[index] = mapAreaLow;
+                mapAreaLow->m_heights = reinterpret_cast<const int16_t*>(mare + 8);
+                const auto* next = reinterpret_cast<const SIffChunk*>(mare + iffChunk->m_size + 8);
 
                 int32_t minHeight = 100000;
                 int32_t maxHeight = -100000;
 
-                for (uint32_t i = 0; i < 545; i++) {
-                    int32_t height = area->m_heights[i];
+                for (uint32_t i = 0; i < LOW_DETAIL_VERTEX_COUNT; i++) {
+                    int32_t height = mapAreaLow->m_heights[i];
 
                     if (height > maxHeight) {
                         maxHeight = height;
@@ -174,44 +209,44 @@ void CMapLowDetail::Load(const char* mapPath, const char* mapName) {
                     }
                 }
 
-                area->m_index.x = x >> 4;
-                area->m_index.y = y >> 4;
+                mapAreaLow->m_index.x = x >> 4;
+                mapAreaLow->m_index.y = y >> 4;
 
                 float top = 17066.666f - static_cast<float>(y) * 33.333332f;
-                area->m_topLeft.x = top;
-                area->m_bbox.t.x = top;
+                mapAreaLow->m_topLeft.x = top;
+                mapAreaLow->m_bbox.t.x = top;
 
                 float left = static_cast<float>(x) * -33.333332f + 17066.666f;
-                area->m_topLeft.y = left;
-                area->m_bbox.t.y = left;
-                area->m_bbox.t.z = static_cast<float>(maxHeight);
-                area->m_bbox.b.x = top - 533.33331f;
-                area->m_bbox.b.y = left - 533.33331f;
-                area->m_bbox.b.z = static_cast<float>(minHeight);
+                mapAreaLow->m_topLeft.y = left;
+                mapAreaLow->m_bbox.t.y = left;
+                mapAreaLow->m_bbox.t.z = static_cast<float>(maxHeight);
+                mapAreaLow->m_bbox.b.x = top - 533.33331f;
+                mapAreaLow->m_bbox.b.y = left - 533.33331f;
+                mapAreaLow->m_bbox.b.z = static_cast<float>(minHeight);
 
-                area->m_sphere.c.x = (area->m_bbox.t.x + area->m_bbox.b.x) * 0.5f;
-                area->m_sphere.c.y = (area->m_bbox.b.y + area->m_bbox.t.y) * 0.5f;
-                area->m_sphere.c.z = 0.5f * (area->m_bbox.b.z + area->m_bbox.t.z);
-                float dz = area->m_bbox.t.z - area->m_sphere.c.z;
-                float dy = area->m_bbox.t.y - area->m_sphere.c.y;
-                float dx = area->m_bbox.t.x - area->m_sphere.c.x;
-                area->m_sphere.r = sqrtf(dx * dx + dy * dy + dz * dz);
+                mapAreaLow->m_sphere.c.x = (mapAreaLow->m_bbox.t.x + mapAreaLow->m_bbox.b.x) * 0.5f;
+                mapAreaLow->m_sphere.c.y = (mapAreaLow->m_bbox.b.y + mapAreaLow->m_bbox.t.y) * 0.5f;
+                mapAreaLow->m_sphere.c.z = 0.5f * (mapAreaLow->m_bbox.b.z + mapAreaLow->m_bbox.t.z);
+                float dz = mapAreaLow->m_bbox.t.z - mapAreaLow->m_sphere.c.z;
+                float dy = mapAreaLow->m_bbox.t.y - mapAreaLow->m_sphere.c.y;
+                float dx = mapAreaLow->m_bbox.t.x - mapAreaLow->m_sphere.c.x;
+                mapAreaLow->m_sphere.r = sqrtf(dx * dx + dy * dy + dz * dz);
 
-                if (next[0] == 0x4D41484F) {
-                    uint16_t* holes = reinterpret_cast<uint16_t*>(next + 2);
-                    area->m_holes = holes;
-                    area->m_indexCount = 0;
+                if (next->token == SIffChunk::TOKEN_MAHO) {
+                    const auto* holes = reinterpret_cast<const uint16_t*>(reinterpret_cast<const char*>(next) + 8);
+                    mapAreaLow->m_holes = holes;
+                    mapAreaLow->m_indexCount = 0;
 
-                    for (uint32_t row = 0; row < 16; row++) {
-                        for (uint32_t bit = 0; bit < 16; bit++) {
+                    for (uint32_t row = 0; row < LOW_DETAIL_CELLS_PER_AXIS; row++) {
+                        for (uint32_t bit = 0; bit < LOW_DETAIL_CELLS_PER_AXIS; bit++) {
                             if (!((1 << bit) & holes[row])) {
-                                area->m_indexCount += 12;
+                                mapAreaLow->m_indexCount += LOW_DETAIL_INDICES_PER_CELL;
                             }
                         }
                     }
                 } else {
-                    area->m_holes = nullptr;
-                    area->m_indexCount = 3072;
+                    mapAreaLow->m_holes = nullptr;
+                    mapAreaLow->m_indexCount = LOW_DETAIL_INDEX_COUNT;
                 }
             }
 
@@ -227,7 +262,7 @@ void CMapLowDetail::Load(const char* mapPath, const char* mapName) {
         CMapObjDef* mapObjDef = CMap::CreateMapObjDef(this->m_mapObjNames + this->m_mapObjNameOffsets[def->m_nameId], def, &center, false);
 
         if (!CMap::s_isStreamingMode) {
-            CMapObj* mapObj = mapObjDef->m_owner;
+            CMapObj* mapObj = mapObjDef->mapObj;
 
             if (!mapObj->m_isGroupLoaded) {
                 mapObj->WaitLoad();
@@ -235,15 +270,16 @@ void CMapLowDetail::Load(const char* mapPath, const char* mapName) {
 
             uint32_t groupCount = mapObj->m_groupInfoCount;
 
-            for (uint32_t group = 0; group < groupCount; group++) {
-                if (!mapObj->IsGroupLoaded(group)) {
-                    mapObj->ReadGroup(group);
-                    mapObj->WaitLoadGroup(group);
+            for (uint32_t j = 0; j < groupCount; j++) {
+                if (!mapObj->IsGroupLoaded(j)) {
+                    STORM_ASSERT(mapObj->IsGroupLoading(j) == 0);
+                    mapObj->ReadGroup(j);
+                    mapObj->WaitLoadGroup(j);
                 }
             }
         }
 
-        mapObjDef->m_refCount++;
+        mapObjDef->AddRef();
         this->m_mapObjDefList.m_data[i] = mapObjDef;
     }
 }
@@ -280,14 +316,14 @@ void CMap::RenderLowDetail(CMapAreaLow* area) {
         area->m_block->m_lastUsedFrame = CWorld::frameCnt;
         GxPrimVertexPtr(area->m_block->m_buf, GxVBF_PC);
     } else {
-        CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, 16, 545);
+        CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, 16, LOW_DETAIL_VERTEX_COUNT);
         CMap::BuildLowDetailGridVertices(area, buf);
         GxPrimVertexPtr(buf, GxVBF_PC);
     }
 
     uint32_t count;
 
-    if (!(area->m_flags & 0x1) && area->m_indexCount == 3072) {
+    if (!(area->m_flags & CMapAreaLow::FLAGS::UNKNOWN_1) && area->m_indexCount == LOW_DETAIL_INDEX_COUNT) {
         GxRsSet(GxRs_Culling, 0);
         CGxBuf* indexBuf = CMap::lowDetailIndexBuf;
 
@@ -297,7 +333,7 @@ void CMap::RenderLowDetail(CMapAreaLow* area) {
         }
 
         g_theGxDevicePtr->PrimIndexPtr(indexBuf);
-        count = 3072;
+        count = LOW_DETAIL_INDEX_COUNT;
     } else {
         GxRsSet(GxRs_Culling, 0);
         CGxBuf* indexBuf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, 2, area->m_indexCount);
@@ -309,14 +345,14 @@ void CMap::RenderLowDetail(CMapAreaLow* area) {
         batch.m_start = 0;
         batch.m_count = area->m_indexCount;
         batch.m_minIndex = 0;
-        batch.m_maxIndex = 544;
+        batch.m_maxIndex = LOW_DETAIL_VERTEX_COUNT - 1;
         g_theGxDevicePtr->Draw(&batch, 1);
 
         GxRsSet(GxRs_Culling, 1);
-        indexBuf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, 2, 3072 - area->m_indexCount);
+        indexBuf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, 2, LOW_DETAIL_INDEX_COUNT - area->m_indexCount);
         CMap::BuildLowDetailGridIndices(area->m_holes, 1, indexBuf);
         g_theGxDevicePtr->PrimIndexPtr(indexBuf);
-        count = 3072 - area->m_indexCount;
+        count = LOW_DETAIL_INDEX_COUNT - area->m_indexCount;
     }
 
     CGxBatch batch;
@@ -324,7 +360,7 @@ void CMap::RenderLowDetail(CMapAreaLow* area) {
     batch.m_start = 0;
     batch.m_count = count;
     batch.m_minIndex = 0;
-    batch.m_maxIndex = 544;
+    batch.m_maxIndex = LOW_DETAIL_VERTEX_COUNT - 1;
     g_theGxDevicePtr->Draw(&batch, 1);
 
     g_theGxDevicePtr->RsPop();
@@ -338,14 +374,14 @@ void CMap::BuildLowDetailGridVertices(CMapAreaLow* area, CGxBuf* buf) {
     uint32_t index = 0;
     float x = area->m_topLeft.x;
 
-    for (int32_t row = 0; row < 17; row++) {
+    for (int32_t row = 0; row < LOW_DETAIL_OUTER_VERTICES_PER_AXIS; row++) {
         float y = area->m_topLeft.y;
 
-        for (int32_t col = 0; col < 17; col++) {
+        for (int32_t col = 0; col < LOW_DETAIL_OUTER_VERTICES_PER_AXIS; col++) {
             vertex->p.x = x;
             vertex->p.y = y;
             vertex->p.z = area->m_heights[index++];
-            vertex->c = CImVector(0xFF, 0xFF, 0xFF, 0xFF);
+            vertex->c = CImVector(COLOR_WHITE_BGRA);
             vertex++;
             y -= 33.333332f;
         }
@@ -355,14 +391,14 @@ void CMap::BuildLowDetailGridVertices(CMapAreaLow* area, CGxBuf* buf) {
 
     x = area->m_topLeft.x - 16.666666f;
 
-    for (int32_t row = 0; row < 16; row++) {
+    for (int32_t row = 0; row < LOW_DETAIL_CELLS_PER_AXIS; row++) {
         float y = area->m_topLeft.y - 16.666666f;
 
-        for (int32_t col = 0; col < 16; col++) {
+        for (int32_t col = 0; col < LOW_DETAIL_CELLS_PER_AXIS; col++) {
             vertex->p.x = x;
             vertex->p.y = y;
             vertex->p.z = area->m_heights[index++];
-            vertex->c = CImVector(0xFF, 0xFF, 0xFF, 0xFF);
+            vertex->c = CImVector(COLOR_WHITE_BGRA);
             vertex++;
             y -= 33.333332f;
         }
@@ -376,26 +412,26 @@ void CMap::BuildLowDetailGridVertices(CMapAreaLow* area, CGxBuf* buf) {
 
 // VERIFY: 7d2e0b07 manual
 // OFFSET: 0x007D5240
-void CMap::BuildLowDetailGridIndices(uint16_t* holes, int32_t pass, CGxBuf* buf) {
+void CMap::BuildLowDetailGridIndices(const uint16_t* holes, int32_t pass, CGxBuf* buf) {
     uint16_t* indices = reinterpret_cast<uint16_t*>(g_theGxDevicePtr->BufLock(buf));
     uint32_t outer = 0;
-    uint32_t inner = 289;
+    uint32_t inner = LOW_DETAIL_OUTER_VERTEX_COUNT;
 
-    for (uint32_t row = 0; row < 16; row++) {
-        for (int32_t col = 0; col < 16; col++) {
+    for (uint32_t row = 0; row < LOW_DETAIL_CELLS_PER_AXIS; row++) {
+        for (int32_t col = 0; col < LOW_DETAIL_CELLS_PER_AXIS; col++) {
             if (!holes || (pass ? (holes[row] & (1 << col)) != 0 : (holes[row] & (1 << col)) == 0)) {
                 *indices++ = inner;
                 *indices++ = outer + 1;
                 *indices++ = outer;
                 *indices++ = inner;
-                *indices++ = outer + 18;
+                *indices++ = outer + LOW_DETAIL_OUTER_VERTICES_PER_AXIS + 1;
                 *indices++ = outer + 1;
                 *indices++ = inner;
-                *indices++ = outer + 17;
-                *indices++ = outer + 18;
+                *indices++ = outer + LOW_DETAIL_OUTER_VERTICES_PER_AXIS;
+                *indices++ = outer + LOW_DETAIL_OUTER_VERTICES_PER_AXIS + 1;
                 *indices++ = inner;
                 *indices++ = outer;
-                *indices++ = outer + 17;
+                *indices++ = outer + LOW_DETAIL_OUTER_VERTICES_PER_AXIS;
             }
 
             outer++;
@@ -413,14 +449,14 @@ void CMap::BuildLowDetailGridIndices(uint16_t* holes, int32_t pass, CGxBuf* buf)
 // OFFSET: 0x007CC770
 void CMapLowDetail::Unload() {
     for (uint32_t i = 0; i < 4096; i++) {
-        if (this->m_areas[i]) {
-            CMap::FreeAreaLow(this->m_areas[i]);
-            this->m_areas[i] = nullptr;
+        if (this->m_areaTable[i]) {
+            CMap::FreeAreaLow(this->m_areaTable[i]);
+            this->m_areaTable[i] = nullptr;
         }
     }
 
     for (uint32_t i = 0; i < this->m_mapObjDefList.m_count; i++) {
-        this->m_mapObjDefList.m_data[i]->m_refCount--;
+        this->m_mapObjDefList.m_data[i]->ReleaseRef();
         CMap::PurgeMapObjDef(this->m_mapObjDefList.m_data[i]);
     }
 

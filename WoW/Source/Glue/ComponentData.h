@@ -10,8 +10,18 @@ class CM2Model;
 
 class ComponentData {
     public:
+    enum DATA_FLAGS : uint32_t {
+        NPC_SKIN = 0x1,
+        HIGH_RESOLUTION = 0x2,
+        INITIAL_CLEAR_MASK = 0x3u,
+    };
+
+    enum DATA_BITS : int32_t {
+        HIGH_RESOLUTION_BIT_INDEX = 1,
+    };
+
     /* 0000 */ CharacterPreferences m_preferences;
-    /* 0020 */ CM2Model* m_model;
+    /* 0020 */ CM2Model* model2;
     /* 0024 */ uint32_t m_flags;
     /* 0028 */ char m_npcSkinTexture [260];
     /* 012C */ uint32_t m_geosets [NUM_CHARGEOSETS];

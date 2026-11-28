@@ -3,8 +3,20 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 
 class SFileImpl;
+
+// SkillLineCategory.dbc rows the client tests directly.
+enum SKILL_LINE_CATEGORY_ID : int32_t {
+    SKILL_LINE_CATEGORY_SECONDARY_SKILLS = 9,
+    SKILL_LINE_CATEGORY_PROFESSIONS = 11,
+};
+
+// SkillLine.dbc rows the client tests directly, named after m_displayName.
+enum SKILL_LINE_ID : int32_t {
+    SKILL_LINE_COMPANIONS = 778,
+};
 
 class SkillLineRec {
     public:
@@ -19,7 +31,7 @@ class SkillLineRec {
     /* 0010 */ const char* m_description;
     /* 0014 */ int32_t m_spellIconID;
     /* 0018 */ const char* m_alternateVerb;
-    /* 001C */ int32_t m_canLink;
+    /* 001C */ BOOL m_canLink;
 
     SkillLineRec();
     ~SkillLineRec();

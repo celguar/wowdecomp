@@ -16,32 +16,43 @@ class FourCC {
 };
 
 namespace Protocol {
+namespace Meta {
+class Base;
+}
+
 class Protocol {
     public:
-    /* 0000 */ uint32_t m_bytecodeSize;
+    Protocol(const uint8_t* bytecodeData, uint32_t bytecodeSize, const void* const* codeInfoData, uint32_t codeInfoCount);
+    const uint8_t* TypeInfo(uint32_t t) const;
+    const uint8_t* DumpInfo(uint32_t t) const;
+    const char* DumpString(const uint8_t* dumpInfo, uint32_t index) const;
+    bool HasDumpInfo() const { return m_dumpInfoSize != 0; } // (inferred)
+
+    private:
+    friend class Meta::Base; // Access inferred from its direct code table lookup.
+    /* 0000 */ uint32_t bytecodeSize;
     /* 0004 */ const uint8_t* m_bytecode;
     /* 0008 */ uint32_t m_codeInfoCount;
     /* 000C */ const void* const* m_codeInfo;
     /* 0010 */ uint32_t m_version;
     /* 0014 */ uint32_t unk_0014;
-    /* 0018 */ uint32_t m_typeIdCount;
+    /* 0018 */ uint32_t typeIdCount;
     /* 001C */ uint32_t m_typeInfoSize;
     /* 0020 */ uint32_t m_dumpInfoSize;
     /* 0024 */ const uint8_t* m_typeOffsets;
     /* 0028 */ const uint8_t* m_typeInfo;
     /* 002C */ const uint8_t* m_dumpOffsets;
     /* 0030 */ const uint8_t* m_dumpInfo;
-
-    Protocol(const uint8_t* bytecode, uint32_t bytecodeSize, const void* const* codeInfo, uint32_t codeInfoCount);
-    const uint8_t* TypeInfo(uint32_t typeId) const;
-    const uint8_t* DumpInfo(uint32_t typeId) const;
-    const char* DumpString(const uint8_t* dumpInfo, uint32_t index) const;
 };
 
 uint32_t GetUInt32(const uint8_t*& cursor);
 
 namespace Type {
 struct Bounds {
+    // Non-fixed bounds byte, named after the fields it fills.
+    static const uint8_t VARIABLE_FLAG = 0x80;
+    static const uint8_t BITS_MASK = 0x7F;
+
     /* 0000 */ int32_t m_intType;
     /* 0004 */ uint32_t m_bits;
     /* 0008 */ uint64_t m_min;
@@ -56,8 +67,20 @@ struct Bounds {
 void GetTypeId(const uint8_t*& cursor, uint32_t& typeId);
 
 namespace Int {
+// Int type byte: bit 0 marks an unsigned value, the bits above it hold log2 of the
+// encoded byte size. Names inferred from Int::Get and Bounds::Contains.
+static const int32_t TYPE_UNSIGNED = 0x1;
+
+inline uint32_t ByteSize(int32_t intType) {
+    return 1 << (intType >> 1);
+}
+
+inline bool IsSigned(int32_t intType) {
+    return (intType & TYPE_UNSIGNED) == 0;
+}
+
 void Get(int32_t intType, const uint8_t*& cursor, uint64_t& value);
-void Get(int32_t intType, const uint8_t*& cursor, uint32_t& value);
+void Get(int32_t e, const uint8_t*& cursor, uint32_t& value);
 void GetSize(const uint8_t*& cursor, uint32_t& value);
 }
 }
@@ -104,7 +127,7 @@ class Real64 : public Base {
 
 class Int : public Base {
     public:
-    /* 0018 */ Type::Bounds m_bounds;
+    /* 0018 */ Type::Bounds bounds;
 
     Int(const Protocol* protocol, uint32_t typeId);
 };
@@ -140,7 +163,7 @@ class Array : public Base {
 
 class Enum : public Base {
     public:
-    /* 0018 */ Type::Bounds m_bounds;
+    /* 0018 */ Type::Bounds bounds;
     /* 0038 */ uint32_t m_count;
 
     Enum(const Protocol* protocol, uint32_t typeId);
@@ -149,7 +172,7 @@ class Enum : public Base {
 
 class Choice : public Base {
     public:
-    /* 0018 */ Type::Bounds m_bounds;
+    /* 0018 */ Type::Bounds bounds;
     /* 0038 */ uint32_t m_count;
 
     Choice(const Protocol* protocol, uint32_t typeId);
@@ -161,7 +184,7 @@ class Choice : public Base {
 class Struct : public Base {
     public:
     /* 0018 */ Type::Bounds m_bounds;
-    /* 0038 */ uint32_t m_count;
+    /* 0038 */ uint32_t fieldCount;
 
     Struct(const Protocol* protocol, uint32_t typeId);
     bool GetMember(uint32_t index, uint32_t& offset, uint32_t& typeId) const;
@@ -171,7 +194,7 @@ class String : public Base {
     public:
     static bool IsValid(uint32_t length, const uint8_t* data, uint32_t& count);
 
-    /* 0018 */ Type::Bounds m_bounds;
+    /* 0018 */ Type::Bounds bounds;
     /* 0038 */ Type::Bounds m_charBounds;
 
     String(const Protocol* protocol, uint32_t typeId);

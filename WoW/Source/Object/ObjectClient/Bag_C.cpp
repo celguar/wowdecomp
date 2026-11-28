@@ -60,7 +60,7 @@ int32_t CGBag_C::FindItemSlot(const CGItem_C* item) const {
     }
 
     for (uint32_t slot = 0; slot < static_cast<uint32_t>(this->m_numSlots); slot++) {
-        WOWGUID guid = slot < static_cast<uint32_t>(this->m_numSlots) ? this->m_slots[slot] : WOWGUID();
+        WOWGUID guid = WOWGUID{ this->GetItemGuid(slot) };
 
         if (ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__) == item) {
             return slot;
@@ -77,7 +77,7 @@ const CGItem_C* CGBag_C::GetItemPointer(int32_t slot) const {
         return nullptr;
     }
 
-    WOWGUID guid = static_cast<uint32_t>(slot) < static_cast<uint32_t>(this->m_numSlots) ? this->m_slots[slot] : WOWGUID();
+    WOWGUID guid = WOWGUID{ this->GetItemGuid(slot) };
 
     return static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
 }
@@ -89,7 +89,7 @@ CGItem_C* CGBag_C::GetItemPointer(int32_t slot) {
         return nullptr;
     }
 
-    WOWGUID guid = static_cast<uint32_t>(slot) < static_cast<uint32_t>(this->m_numSlots) ? this->m_slots[slot] : WOWGUID();
+    WOWGUID guid = WOWGUID{ this->GetItemGuid(slot) };
 
     return static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
 }
@@ -106,10 +106,10 @@ int32_t CGBag_C::GetNumFreeInvSlots() {
             }
 
             if (slot - INVSLOT_BAG0 <= INVSLOT_BAG3 - INVSLOT_BAG0) {
-                WOWGUID guid = slot < static_cast<uint32_t>(this->m_numSlots) ? this->m_slots[slot] : WOWGUID();
+                WOWGUID guid = WOWGUID{ this->GetItemGuid(slot) };
                 CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
 
-                if (item && item->GetClassID() == 1) {
+                if (item && item->GetClassID() == ITEM_CLASS::ITEM_CLASS_CONTAINER) {
                     freeSlots += item->GetBag()->GetNumFreeInvSlots();
                 }
 
@@ -148,15 +148,15 @@ uint32_t CGBag_C::GetAvgEquippedDurability() const {
             continue;
         }
 
-        WOWGUID guid = slot < static_cast<uint32_t>(this->m_numSlots) ? this->m_slots[slot] : WOWGUID();
+        WOWGUID guid = WOWGUID{ this->GetItemGuid(slot) };
         CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
 
         if (!item) {
             continue;
         }
 
-        durability += (item->m_item->m_itemFieldFlags >> 3) & 1 ? 0 : item->m_item->m_itemFieldDurability;
-        maxDurability += (item->m_item->m_itemFieldFlags >> 3) & 1 ? 0 : item->m_item->m_itemFieldMaxdurability;
+        durability += (item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) != 0 ? 0 : item->m_item->m_itemFieldDurability;
+        maxDurability += (item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) != 0 ? 0 : item->m_item->m_itemFieldMaxdurability;
     }
 
     if (!maxDurability) {
@@ -449,7 +449,7 @@ int32_t GetDisplayErrorByInventoryError(int32_t error) {
 int32_t GetItemTypeChargesCallback(const CGItem_C* item, void* param) {
     ItemTypeCountParam* count = static_cast<ItemTypeCountParam*>(param);
 
-    if ((static_cast<int32_t>(item->m_obj->m_entryID) == count->m_itemId || count->m_itemId == -1) && const_cast<CGItem_C*>(item)->GetEnchantmentSpell(0)) {
+    if ((static_cast<int32_t>(item->m_obj->m_entryID) == count->m_itemId || count->m_itemId == -1) && const_cast<CGItem_C*>(item)->GetEnchantmentSpell(SPELL_EFFECT_NONE)) {
         int32_t charges = const_cast<CGItem_C*>(item)->GetCurrentSpellCharges();
 
         if (charges <= 0) {
@@ -479,7 +479,7 @@ bool CGBag_C::FindTotemCategory(int32_t type, int32_t& mask, bool recurse, uint3
 
     while (slot < static_cast<uint32_t>(this->m_numSlots)) {
         if (!this->m_hasBank || SlotMatchesSearchFlags(slot, flags)) {
-            WOWGUID guid = slot < static_cast<uint32_t>(this->m_numSlots) ? this->m_slots[slot] : WOWGUID();
+            WOWGUID guid = WOWGUID{ this->GetItemGuid(slot) };
             CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
 
             if (item && (!this->m_hasBank || slot < BUYBACK_FIRST || slot > BUYBACK_LAST)) {
@@ -536,11 +536,11 @@ bool CGBag_C::ContainsItem(WOWGUID guid, bool recurse, uint32_t flags) const {
 
     while (slot < static_cast<uint32_t>(this->m_numSlots)) {
         if (!hasBank || SlotMatchesSearchFlags(slot, flags)) {
-            WOWGUID slotGuid = slot < static_cast<uint32_t>(this->m_numSlots) ? this->m_slots[slot] : WOWGUID();
+            WOWGUID slotGuid = WOWGUID{ this->GetItemGuid(slot) };
             CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(slotGuid, TYPE_ITEM, __FILE__, __LINE__));
 
             if (item && (!hasBank || slot < BUYBACK_FIRST || slot > BUYBACK_LAST)) {
-                WOWGUID itemGuid = slot < static_cast<uint32_t>(this->m_numSlots) ? this->m_slots[slot] : WOWGUID();
+                WOWGUID itemGuid = WOWGUID{ this->GetItemGuid(slot) };
 
                 if (itemGuid == guid) {
                     return true;
@@ -669,13 +669,13 @@ static int32_t FindItemLinkCallback(const CGItem_C* item, void* param) {
         return 0;
     }
 
-    if (object->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) {
-        if (link->m_enchants[0]) {
+    if (object->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) {
+        if (link->m_enchants[CGItemData::ENCHANTMENT_SLOT::PERMANENT]) {
             return 0;
         }
 
         for (uint32_t i = 0; i < 3; i++) {
-            if (link->m_enchants[2 + i]) {
+            if (link->m_enchants[CGItemData::ENCHANTMENT_SLOT::SOCKET_1 + i]) {
                 return 0;
             }
         }
@@ -687,12 +687,12 @@ static int32_t FindItemLinkCallback(const CGItem_C* item, void* param) {
         return !link->m_propertySeed;
     }
 
-    if (link->m_enchants[0] && link->m_enchants[0] != object->GetEnchantmentId(0)) {
+    if (link->m_enchants[CGItemData::ENCHANTMENT_SLOT::PERMANENT] && link->m_enchants[CGItemData::ENCHANTMENT_SLOT::PERMANENT] != object->GetEnchantmentId(CGItemData::ENCHANTMENT_SLOT::PERMANENT)) {
         return 0;
     }
 
     for (uint32_t i = 0; i < 3; i++) {
-        if (link->m_enchants[2 + i] && link->m_enchants[2 + i] != object->GetEnchantmentId(2 + i)) {
+        if (link->m_enchants[CGItemData::ENCHANTMENT_SLOT::SOCKET_1 + i] && link->m_enchants[CGItemData::ENCHANTMENT_SLOT::SOCKET_1 + i] != object->GetEnchantmentId(CGItemData::ENCHANTMENT_SLOT::SOCKET_1 + i)) {
             return 0;
         }
     }
@@ -781,7 +781,9 @@ CGItem_C* CGBag_C::FindItem(int32_t (*callback)(const CGItem_C* item, void* para
 
 // VERIFY: 35fbcc70 manual
 // OFFSET: 0x007546F0
-CGItem_C* CGBag_C::FindItem(int32_t (*callback)(const CGItem_C* item, void* param), void* param, WOWGUID& container, uint32_t& slot, uint32_t flags) {
+CGItem_C* CGBag_C::FindItem(int32_t (*func)(const CGItem_C* item, void* param), void* param, WOWGUID& container, uint32_t& slot, uint32_t flags) {
+    STORM_ASSERT(func);
+
     if (this->m_hasBank && !(flags & BAG_SEARCH_DEFAULT_LOCATIONS)) {
         flags |= BAG_SEARCH_DEFAULT_LOCATIONS;
     }
@@ -801,12 +803,15 @@ CGItem_C* CGBag_C::FindItem(int32_t (*callback)(const CGItem_C* item, void* para
             WOWGUID guid = index < numSlots ? this->m_slots[index] : WOWGUID();
             CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
 
-            if (item && !(item->m_modelFlags & 0x10000) && ((flags & BAG_SEARCH_IGNORE_ITEM_STATE) || (((item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) || !item->m_item->m_itemFieldMaxdurability || item->m_item->m_itemFieldDurability) && !(item->m_item->m_itemFieldFlags & 0x10))) && (!(flags & BAG_SEARCH_REQUIRE_CHARGES) || (item->GetBag() && !(flags & BAG_SEARCH_NO_RECURSE)) || (item->GetEnchantmentSpell(0) && item->GetCurrentSpellCharges()))) {
-                if (callback(item, param)) {
+            if (item
+                && !(item->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLED)
+                && ((flags & BAG_SEARCH_IGNORE_ITEM_STATE) || (((item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) || !item->m_item->m_itemFieldMaxdurability || item->m_item->m_itemFieldDurability) && !(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_UNUSABLE)))
+                && (!(flags & BAG_SEARCH_REQUIRE_CHARGES) || (item->GetBag() && !(flags & BAG_SEARCH_NO_RECURSE)) || (item->GetEnchantmentSpell(SPELL_EFFECT_NONE) && item->GetCurrentSpellCharges()))) {
+                if (func(item, param)) {
                     container = this->m_guid;
                     slot = index;
                 } else if (item->GetBag() && !(flags & BAG_SEARCH_NO_RECURSE)) {
-                    item = item->GetBag()->FindItem(callback, param, container, slot, flags);
+                    item = item->GetBag()->FindItem(func, param, container, slot, flags);
                 } else {
                     item = nullptr;
                 }
@@ -877,7 +882,7 @@ bool CGBag_C::ItemCountValid(int32_t itemId, const ItemStats_C* stats, int32_t c
             int32_t data[2] = { itemId, 0 };
             WOWGUID container;
             uint32_t slot;
-            this->FindItem(GetItemTypeCountCallback, data, container, slot, 79);
+            this->FindItem(GetItemTypeCountCallback, data, container, slot, inventoryFlags | BAG_SEARCH_BANK | BAG_SEARCH_KEYRING);
             current = data[1];
         }
 
@@ -895,7 +900,7 @@ bool CGBag_C::ItemCountValid(int32_t itemId, const ItemStats_C* stats, int32_t c
         int32_t data[2] = { static_cast<int32_t>(stats->m_itemLimitCategory), 0 };
         WOWGUID container;
         uint32_t slot;
-        this->FindItem(GetItemLimitCategoryCallback, data, container, slot, 79);
+        this->FindItem(GetItemLimitCategoryCallback, data, container, slot, inventoryFlags | BAG_SEARCH_BANK | BAG_SEARCH_KEYRING);
 
         if (count + data[1] > category->m_quantity) {
             if (showError) {

@@ -2,11 +2,22 @@
 #define WOW_SOURCE_UI_TRADESKILLFRAME_H
 
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
 
 struct lua_State;
 class SkillLineRec;
+
+// Trade skill slot filter bits continue the inventory slots (1 << INVSLOT_*) with
+// these extra entries, named after their s_invSlotTokens strings.
+enum TRADESKILL_INVSLOT : int32_t {
+    TRADESKILL_INVSLOT_ENCH_WEAPON   = 23, // ENCHSLOT_WEAPON
+    TRADESKILL_INVSLOT_ENCH_2HWEAPON = 24, // ENCHSLOT_2HWEAPON
+    TRADESKILL_INVSLOT_SHIELD        = 25, // SHIELDSLOT
+    TRADESKILL_INVSLOT_NONEQUIP      = 26, // NONEQUIPSLOT
+    NUM_TRADESKILL_INVSLOTS          = 27,
+};
 
 enum TRADESKILL_CATEGORY : int32_t {
     TRADESKILL_OPTIMAL = 0,
@@ -25,13 +36,13 @@ struct TradeSkillInfo {
     /* 0014 */ int32_t m_itemLevel;
     /* 0018 */ int32_t m_numAvailable;
     /* 001C */ int32_t m_skillLineRank;
-    /* 0020 */ int32_t m_visible;
+    /* 0020 */ BOOL m_visible;
 };
 
 struct TradeSkillSubClassInfo {
     /* 0000 */ int32_t m_itemClass;
     /* 0004 */ int32_t m_itemSubClass;
-    /* 0008 */ int32_t m_shown;
+    /* 0008 */ BOOL m_shown;
     /* 000C */ int32_t m_collapsed;
     /* 0010 */ uint32_t m_invTypeMask;
 };
@@ -44,8 +55,8 @@ class CGTradeSkillInfo {
     static uint32_t m_itemsPending;
     static uint32_t m_numDisplayEntries;
     static uint32_t m_numSubClasses;
-    static int32_t m_showOnlyMakeable;
-    static int32_t m_showOnlySkillUps;
+    static BOOL m_showOnlyMakeable;
+    static BOOL m_showOnlySkillUps;
     static uint32_t m_invSlots;
     static int32_t m_skillRank;
     static int32_t m_skillMaxRank;
@@ -56,7 +67,7 @@ class CGTradeSkillInfo {
     static uint32_t m_invTypeFilter;
     static uint32_t m_collapseFilter;
     static void ClearItemCallbacks();
-    static void SetInvTypeFilter(int32_t a1);
+    static void SetInvTypeFilter(BOOL applySubClassFilter);
     static int32_t GetSubClassIndexFromSkill(uint32_t index);
     static int32_t m_filteredSkills;
     static int32_t m_spellID;

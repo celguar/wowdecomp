@@ -3,12 +3,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/ShaderEffect/Types.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Tempest/C4Vector.h"
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Tempest/CFrustum.h"
+#include "Engine/Source/Tempest/CRect.h"
 
 class CGxTex;
 class CTexture;
@@ -33,14 +35,24 @@ struct CShadowBand {
 };
 
 struct CShadowCacheQueryData {
-    /* 0000 */ int32_t m_queryFlags[3];
+    // Caster classes CShadowQuery gathers for a band; names describe the 3.3.5 readers.
+    enum QUERY_FLAGS : int32_t {
+        QUERY_NONE = 0x0,
+        QUERY_UNITS = 0x1, // Unit entities (CMapBaseObj::Type_Entity models).
+        QUERY_INTERIOR = 0x2, // Interior pass: unit entities not flagged MAPOBJ_FLAG_EXTERIOR, below the cutoff height.
+        QUERY_BILLBOARDED = 0x4, // Doodads with billboard bones; also required for MAPOBJ_FLAG_NO_DEPTH_SORT map object definitions.
+        QUERY_STATIC = 0x8, // Other doodads and entities, and exterior WMO groups.
+        QUERY_WORLD_MASK = QUERY_BILLBOARDED | QUERY_STATIC,
+    };
+
+    /* 0000 */ int32_t m_queryFlags[3]; // QUERY_FLAGS
     /* 000C */ int32_t m_active[3];
     /* 0018 */ int32_t m_useCullFrustum[3];
     /* 0024 */ CAaBox m_extents[3];
     /* 006C */ CFrustum m_frustums[3];
     /* 0348 */ CFrustum m_cullFrustums[3];
     /* 0624 */ CFrustum m_bandFrustums[3];
-    /* 0900 */ float m_cullRects[3][4];
+    /* 0900 */ CRect m_cullRects[3]; // Normalized scissor bounds, native minY/minX/maxY/maxX order.
     /* 0930 */ C3Vector m_pos[3];
     /* 0954 */ uint8_t m_textureIndex[3];
     /* 0958 */ float m_radius[3];
@@ -48,7 +60,7 @@ struct CShadowCacheQueryData {
     /* 0994 */ float m_texBounds[3][4];
     /* 09C4 */ C44Matrix m_matrices[3];
     /* 0A84 */ int32_t m_lastBand;
-    /* 0A88 */ int32_t m_useFrustum;
+    /* 0A88 */ BOOL m_useFrustum;
 
     CShadowCacheQueryData();
 };
@@ -62,13 +74,13 @@ class CShadowCache {
     static float s_debugAspect;
     static int32_t s_debugLevel;
     static CShadowBand s_extDynShadow;
-    static float s_extDynShadowCullRect[4];
+    static CRect s_extDynShadowCullRect;
     static CShadowBand s_extShadowBands[3];
     static uint8_t s_frameCounter;
     static ShadowFrustumCallback s_frustumCallback;
     static CTexture* s_intDynShadow;
     static ShadowMatrixCallback s_matrixCallback;
-    static int32_t s_needsRebuild;
+    static BOOL s_needsRebuild;
     static C4Vector s_pcfOffsets[8];
     static ShadowQueryCallback s_queryCallback;
     static int32_t s_recreateTextures;
@@ -85,7 +97,7 @@ class CShadowCache {
 
     static void ClearBandTextures();
     static void Destroy();
-    static void GatherBands(CShadowCacheQueryData& data, const C3Vector& pos, CFrustum& frustum, int32_t useCullFrustum);
+    static void GatherBands(CShadowCacheQueryData& data, const C3Vector& pos, CFrustum& frustum, BOOL useCullFrustum);
     static uint32_t GetMaxShadowMode();
     static EShadowMode GetShadowMode();
     static const char* GetShadowModeDesc(uint32_t mode);
@@ -108,7 +120,7 @@ class CShadowCache {
     static void SetShadowMapTerrain();
     static int32_t SetShadowMode(EShadowMode mode);
     static void SetShadowScale(float scale);
-    static int32_t Update(const C3Vector& pos, int32_t useCullFrustum);
+    static int32_t Update(const C3Vector& pos, BOOL useCullFrustum);
     static int32_t ValidateShadowMode(EShadowMode mode);
 };
 

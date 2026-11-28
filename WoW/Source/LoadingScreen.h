@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C3Vector.h"
@@ -47,7 +48,7 @@ class CLoadingScreenShipInfo {
     void Initialize(WowClientDB<T>* nodeDB, uint32_t pathCount);
 };
 
-int32_t IsStillLoading();
+BOOL IsStillLoading();
 void LoadingScreenAsyncCallback(float progress, void* param);
 bool LoadingScreenDrawing();
 void LoadingScreenDisable();
@@ -85,8 +86,8 @@ void CLoadingScreenShipInfo<T>::Initialize(WowClientDB<T>* nodeDB, uint32_t path
     int32_t startNodeID = 0;
     int32_t endNodeID = 0;
 
-    for (int32_t i = 0; i < nodeDB->m_numRecords; i++) {
-        T* node = i >= 0 && i < nodeDB->m_numRecords ? &nodeDB->m_records[i] : nullptr;
+    for (int32_t i = 0; i < nodeDB->GetNumRecords(); i++) {
+        T* node = i >= 0 && i < nodeDB->GetNumRecords() ? &nodeDB->m_records[i] : nullptr;
 
         if (!prev || prev->m_pathID != node->m_pathID) {
             if (prev && startNodeID > 0) {

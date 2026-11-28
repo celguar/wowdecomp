@@ -1,4 +1,5 @@
 #include "ChatFrame.h"
+#include <cfloat>
 #include <cstdint>
 #include "Engine/Source/lua-5.1/src/lua.h"
 #include "Engine/Source/Base/CDataStore.h"
@@ -36,12 +37,12 @@
 #include "WoW/Source/Ui/ScriptEvents.h"
 
 // STATIC: 0x00AC7A48
-static const char* s_channelCategories[3] = { "CHANNEL_CATEGORY_GROUP", "CHANNEL_CATEGORY_WORLD", "CHANNEL_CATEGORY_CUSTOM" };
+static const char* s_channelCategories[DisplayChannel::HEADER_INDEX::NUM_HEADERS] = { "CHANNEL_CATEGORY_GROUP", "CHANNEL_CATEGORY_WORLD", "CHANNEL_CATEGORY_CUSTOM" };
 
 // VERIFY: 3ea62573 manual
 // OFFSET: 0x0050D170
 static int32_t Script_SendChatMessage(lua_State* L) {
-    if (!CGGameUI::CanPerformAction(10)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_CHAT)) {
         return 0;
     }
 
@@ -145,7 +146,7 @@ static int32_t Script_SendChatMessage(lua_State* L) {
 
         ChatChannel* channel = &CGChat::s_channels.m_data[number - 1];
 
-        if (channel->m_channelNumber != number || channel->m_unk9C) {
+        if (channel->m_channelNumber != number || channel->m_left) {
             return 0;
         }
 
@@ -169,7 +170,7 @@ static int32_t Script_SendChatMessage(lua_State* L) {
     }
 
     if (type == CHAT_MSG_DND) {
-        if (!(player->m_player->m_playerFlags & 0x4) && !*text) {
+        if (!(player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_DND) && !*text) {
             text = FrameScript_GetText("DEFAULT_DND_MESSAGE", -1, GENDER_NOT_APPLICABLE);
         }
 
@@ -187,7 +188,7 @@ static int32_t Script_SendChatMessage(lua_State* L) {
         return 0;
     }
 
-    CGTutorial::FlagTutorial(22);
+    CGTutorial::FlagTutorial(TUTORIAL::TUTORIAL_CHATTING);
 
     char parsed[256];
     ChatParserParseText(text, parsed, sizeof(parsed));
@@ -224,7 +225,7 @@ static int32_t Script_SendChatMessage(lua_State* L) {
         escape = SStrChr(next, '|');
     }
 
-    if ((type == CHAT_MSG_WHISPER || type == CHAT_MSG_CHANNEL || type == CHAT_MSG_BATTLENET) && language != 0xFFFFFFFF) {
+    if ((type == CHAT_MSG_WHISPER || type == CHAT_MSG_CHANNEL || type == CHAT_MSG_BATTLENET) && language != LANG_ADDON) {
         CGChat::ProcessThrottledChat();
 
         if (type == CHAT_MSG_WHISPER || type == CHAT_MSG_BATTLENET) {
@@ -372,7 +373,7 @@ static int32_t Script_SetSelectedDisplayChannel(lua_State* L) {
     int32_t type;
     const char* channel = CGChat::GetChannelStringForDisplay(static_cast<int32_t>(lua_tonumber(L, 1)) - 1, &type);
 
-    if (!channel || type == 4) {
+    if (!channel || type == DisplayChannel::TYPE::HEADER) {
         return 0;
     }
 
@@ -382,11 +383,11 @@ static int32_t Script_SetSelectedDisplayChannel(lua_State* L) {
 
     SetCurrentActiveDisplayChannel(channel, type);
 
-    if (!type) {
+    if (type == DisplayChannel::TYPE::CHANNEL) {
         ChannelDisplayCommand(L, CMSG_CHAT_CHANNEL_DISPLAY_LIST, "GetChannelRosterInfo");
-    } else if (type == 2) {
+    } else if (type == DisplayChannel::TYPE::PARTY) {
         BuildPartyDisplayList();
-    } else if (type == 3 || type == 1) {
+    } else if (type == DisplayChannel::TYPE::RAID || type == DisplayChannel::TYPE::BATTLEGROUND) {
         BuildRaidDisplayList(type);
     }
 
@@ -402,7 +403,7 @@ static int32_t Script_CollapseChannelHeader(lua_State* L) {
         if (index < s_numDisplayChannels) {
             uint32_t header = CGChat::s_displayChannels[index].m_headerIndex;
 
-            if (header <= 2) {
+            if (header <= DisplayChannel::HEADER_INDEX::CUSTOM_HEADER) {
                 s_collapsedHeaders[header] = 1;
                 RebuildDisplayChannelList(1);
             }
@@ -421,7 +422,7 @@ static int32_t Script_ExpandChannelHeader(lua_State* L) {
         if (index < s_numDisplayChannels) {
             uint32_t header = CGChat::s_displayChannels[index].m_headerIndex;
 
-            if (header <= 2) {
+            if (header <= DisplayChannel::HEADER_INDEX::CUSTOM_HEADER) {
                 s_collapsedHeaders[header] = 0;
                 RebuildDisplayChannelList(1);
             }
@@ -441,8 +442,8 @@ static int32_t Script_SetChatWindowLocked(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
-        s_chatWindows[index].m_unkD8 = StringToBOOL(L, 2, 0);
+    if (index < NUM_CHAT_WINDOWS) {
+        s_chatWindows[index].m_locked = StringToBOOL(L, 2, 0);
     }
 
     return 0;
@@ -458,8 +459,8 @@ static int32_t Script_SetChatWindowUninteractable(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
-        s_chatWindows[index].m_unkE4 = StringToBOOL(L, 2, 0);
+    if (index < NUM_CHAT_WINDOWS) {
+        s_chatWindows[index].m_uninteractable = StringToBOOL(L, 2, 0);
     }
 
     return 0;
@@ -475,7 +476,7 @@ static int32_t Script_SetChatWindowShown(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         s_chatWindows[index].m_shown = StringToBOOL(L, 2, 1);
     }
 
@@ -492,7 +493,7 @@ static int32_t Script_GetChatWindowSavedDimensions(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -511,7 +512,7 @@ static int32_t Script_SetChatWindowName(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         const char* name = "";
 
         if (lua_isstring(L, 2)) {
@@ -534,11 +535,11 @@ static int32_t Script_SetChatWindowSize(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         int32_t size = static_cast<int32_t>(lua_tonumber(L, 2));
 
         if (size > 0) {
-            s_chatWindows[index].m_unkD0 = size;
+            s_chatWindows[index].m_fontSize = size;
         }
     }
 
@@ -565,7 +566,7 @@ static int32_t Script_SetChatWindowAlpha(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         s_chatWindows[index].m_color.a = static_cast<uint8_t>(lua_tonumber(L, 2) * 255.0);
     }
 
@@ -582,7 +583,7 @@ static int32_t Script_SetChatWindowDocked(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < 10) {
+    if (index < NUM_CHAT_WINDOWS) {
         uint32_t docked = 0;
 
         if (lua_isnumber(L, 2)) {
@@ -605,7 +606,7 @@ static int32_t Script_SetChatWindowSavedDimensions(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -627,13 +628,13 @@ static int32_t Script_GetChatWindowSavedPosition(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10 || !s_chatWindows[index].m_unkF4) {
+    if (index >= NUM_CHAT_WINDOWS || !s_chatWindows[index].m_hasSavedLayout) {
         return 0;
     }
 
-    lua_pushstring(L, FramePointToString(static_cast<FRAMEPOINT>(s_chatWindows[index].m_unkE8)));
-    lua_pushnumber(L, s_chatWindows[index].m_unkEC);
-    lua_pushnumber(L, s_chatWindows[index].m_unkF0);
+    lua_pushstring(L, FramePointToString(s_chatWindows[index].m_anchorPoint));
+    lua_pushnumber(L, s_chatWindows[index].m_xOffsetRatio);
+    lua_pushnumber(L, s_chatWindows[index].m_yOffsetRatio);
     return 3;
 }
 
@@ -647,10 +648,10 @@ static int32_t Script_GetNumLanguages(lua_State* L) {
     }
 
     int32_t count = 0;
-    int32_t numRecords = g_languagesDB.m_numRecords;
+    int32_t numRecords = g_languagesDB.GetNumRecords();
 
     for (int32_t i = 0; i < numRecords; i++) {
-        const LanguagesRec* rec = (i >= 0 && i < g_languagesDB.m_numRecords) ? &g_languagesDB.m_records[i] : nullptr;
+        const LanguagesRec* rec = (i >= 0 && i < g_languagesDB.GetNumRecords()) ? &g_languagesDB.m_records[i] : nullptr;
         uint32_t skill;
 
         if (rec && player->GetLanguageSkill(rec->m_id, skill)) {
@@ -677,11 +678,11 @@ static int32_t Script_GetLanguageByIndex(lua_State* L) {
     }
 
     int32_t wanted = static_cast<int32_t>(lua_tonumber(L, 1));
-    int32_t numRecords = g_languagesDB.m_numRecords;
+    int32_t numRecords = g_languagesDB.GetNumRecords();
     int32_t found = 0;
 
     for (int32_t i = 0; i < numRecords; i++) {
-        const LanguagesRec* rec = (i >= 0 && i < g_languagesDB.m_numRecords) ? &g_languagesDB.m_records[i] : nullptr;
+        const LanguagesRec* rec = (i >= 0 && i < g_languagesDB.GetNumRecords()) ? &g_languagesDB.m_records[i] : nullptr;
         uint32_t skill;
 
         if (rec && player->GetLanguageSkill(rec->m_id, skill) && ++found == wanted) {
@@ -703,7 +704,7 @@ static int32_t Script_SetChatWindowSavedPosition(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -715,12 +716,12 @@ static int32_t Script_SetChatWindowSavedPosition(lua_State* L) {
     }
 
     ChatWindowInfo* window = &s_chatWindows[index];
-    window->m_unkE8 = point;
+    window->m_anchorPoint = point;
     float x = static_cast<float>(lua_tonumber(L, 3));
     float y = static_cast<float>(lua_tonumber(L, 4));
-    window->m_unkEC = x;
-    window->m_unkF0 = y;
-    window->m_unkF4 = 1;
+    window->m_xOffsetRatio = x;
+    window->m_yOffsetRatio = y;
+    window->m_hasSavedLayout = 1;
     return 0;
 }
 
@@ -733,7 +734,7 @@ static int32_t Script_ListChannels(lua_State* L) {
     for (uint32_t i = 0; i < CGChat::s_channels.Count(); i++) {
         ChatChannel* channel = &CGChat::s_channels.m_data[i];
 
-        if (channel->m_channelNumber && !channel->m_unk9C) {
+        if (channel->m_channelNumber && !channel->m_left) {
             char entry[138];
             SStrPrintf(entry, sizeof(entry), "[%d. %s] ", channel->m_channelNumber, channel->m_name);
 
@@ -760,7 +761,7 @@ static int32_t Script_SetChatWindowColor(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -781,12 +782,12 @@ static int32_t Script_GetChatWindowInfo(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
     lua_pushstring(L, s_chatWindows[index].m_name);
-    lua_pushnumber(L, s_chatWindows[index].m_unkD0);
+    lua_pushnumber(L, s_chatWindows[index].m_fontSize);
     lua_pushnumber(L, s_chatWindows[index].m_color.r * (1.0f / 255.0f));
     lua_pushnumber(L, s_chatWindows[index].m_color.g * (1.0f / 255.0f));
     lua_pushnumber(L, s_chatWindows[index].m_color.b * (1.0f / 255.0f));
@@ -798,7 +799,7 @@ static int32_t Script_GetChatWindowInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    if (s_chatWindows[index].m_unkD8) {
+    if (s_chatWindows[index].m_locked) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -812,7 +813,7 @@ static int32_t Script_GetChatWindowInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    int32_t uninteractable = s_chatWindows[index].m_unkE4;
+    int32_t uninteractable = s_chatWindows[index].m_uninteractable;
 
     if (uninteractable) {
         lua_pushnumber(L, uninteractable);
@@ -904,7 +905,7 @@ static int32_t Script_SendAddonMessage(lua_State* L) {
     CDataStore msg;
     msg.Put(static_cast<uint32_t>(CMSG_MESSAGECHAT));
     msg.Put(static_cast<uint32_t>(type));
-    msg.Put(static_cast<uint32_t>(0xFFFFFFFF));
+    msg.Put(LANG_ADDON);
 
     if (type == CHAT_MSG_WHISPER) {
         msg.PutString(target);
@@ -928,7 +929,7 @@ static int32_t Script_ChangeChatColor(lua_State* L) {
     uint8_t r = static_cast<uint8_t>(lua_tonumber(L, 2) * 255.0);
     uint8_t g = static_cast<uint8_t>(lua_tonumber(L, 3) * 255.0);
     uint8_t b = static_cast<uint8_t>(lua_tonumber(L, 4) * 255.0);
-    int32_t found = 0;
+    BOOL found = 0;
 
     for (uint32_t i = 0; i < CHAT_MSG_MAX; i++) {
         if (!SStrCmpI(type, s_chatColors[i].m_name, STORM_MAX_STR)) {
@@ -967,11 +968,11 @@ static int32_t Script_SetChatColorNameByClass(lua_State* L) {
 
     const char* type = lua_tolstring(L, 1, nullptr);
     bool colorNameByClass = StringToBOOL(L, 2, 0) != 0;
-    int32_t found = 0;
+    BOOL found = 0;
 
     for (uint32_t i = 0; i < CHAT_MSG_MAX; i++) {
         if (!SStrCmpI(type, s_chatColors[i].m_name, STORM_MAX_STR)) {
-            s_chatColors[i].m_unk48 = colorNameByClass;
+            s_chatColors[i].m_colorNameByClass = colorNameByClass;
             found = 1;
             break;
         }
@@ -979,7 +980,7 @@ static int32_t Script_SetChatColorNameByClass(lua_State* L) {
 
     for (uint32_t i = 0; i < s_channelColors.Count(); i++) {
         if (!SStrCmpI(type, s_channelColors.m_data[i].m_name, STORM_MAX_STR)) {
-            s_channelColors.m_data[i].m_unk48 = colorNameByClass;
+            s_channelColors.m_data[i].m_colorNameByClass = colorNameByClass;
             found = 1;
             break;
         }
@@ -1028,7 +1029,7 @@ static int32_t Script_GetChannelList(lua_State* L) {
     for (uint32_t i = 0; i < CGChat::s_channels.Count(); i++) {
         ChatChannel* channel = &CGChat::s_channels.m_data[i];
 
-        if (channel->m_channelNumber && !channel->m_unk9C) {
+        if (channel->m_channelNumber && !channel->m_left) {
             lua_pushnumber(L, channel->m_channelNumber);
             ChatChannelsRec* rec = channel->m_zoneChannelID ? g_chatChannelsDB.GetRecord(channel->m_zoneChannelID) : nullptr;
 
@@ -1058,7 +1059,7 @@ static int32_t Script_GetChannelName(lua_State* L) {
         } else {
             channel = &CGChat::s_channels.m_data[number - 1];
 
-            if (channel->m_channelNumber != number || channel->m_unk9C) {
+            if (channel->m_channelNumber != number || channel->m_left) {
                 channel = nullptr;
             }
         }
@@ -1073,7 +1074,7 @@ static int32_t Script_GetChannelName(lua_State* L) {
 
     lua_pushnumber(L, channel ? channel->m_channelNumber : 0);
     lua_pushstring(L, channel ? channel->m_name : nullptr);
-    lua_pushnumber(L, channel ? channel->m_unk98 : 0);
+    lua_pushnumber(L, channel ? channel->m_instanceID : 0);
     return 3;
 }
 
@@ -1092,7 +1093,7 @@ static int32_t Script_IsVoiceChatAllowed(lua_State* L) {
 // VERIFY: b67ad7f0 auto
 // OFFSET: 0x004FCBF0
 static int32_t Script_IsVoiceChatEnabled(lua_State* L) {
-    int32_t enabled = s_cvarEnableVoiceChat && s_cvarEnableVoiceChat->m_intValue;
+    BOOL enabled = s_cvarEnableVoiceChat && s_cvarEnableVoiceChat->m_intValue;
     int32_t disabledByClient = ComSatClient_IsComsatDisabledByClient();
 
     if (CGChat::m_voiceChatSystemStatus && enabled && !disabledByClient) {
@@ -1114,13 +1115,13 @@ static int32_t Script_GetChatWindowMessages(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
     int32_t count = 0;
 
-    for (uint32_t i = 0; i < 46; i++) {
+    for (uint32_t i = 0; i < NUM_CHAT_MESSAGE_GROUPS; i++) {
         if (s_chatWindows[index].m_messageGroups[i]) {
             lua_checkstack(L, 1);
             lua_pushstring(L, s_chatMessageGroups[i].m_name);
@@ -1141,13 +1142,13 @@ static int32_t Script_AddChatWindowMessages(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
     const char* group = lua_tolstring(L, 2, nullptr);
 
-    for (uint32_t i = 0; i < 46; i++) {
+    for (uint32_t i = 0; i < NUM_CHAT_MESSAGE_GROUPS; i++) {
         if (!SStrCmpI(group, s_chatMessageGroups[i].m_name, STORM_MAX_STR)) {
             s_chatWindows[index].m_messageGroups[i] = 1;
             return 0;
@@ -1167,13 +1168,13 @@ static int32_t Script_RemoveChatWindowMessages(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
     const char* group = lua_tolstring(L, 2, nullptr);
 
-    for (uint32_t i = 0; i < 46; i++) {
+    for (uint32_t i = 0; i < NUM_CHAT_MESSAGE_GROUPS; i++) {
         if (!SStrCmpI(group, s_chatMessageGroups[i].m_name, STORM_MAX_STR)) {
             s_chatWindows[index].m_messageGroups[i] = 0;
             return 0;
@@ -1199,7 +1200,7 @@ static int32_t Script_GetChannelDisplayInfo(lua_State* L) {
 
     DisplayChannel* display = &CGChat::s_displayChannels[index];
 
-    if (display->m_headerIndex >= 0) {
+    if (display->m_headerIndex >= DisplayChannel::HEADER_INDEX::GROUP_HEADER) {
         lua_pushstring(L, FrameScript_GetText(s_channelCategories[display->m_headerIndex], -1, GENDER_NOT_APPLICABLE));
         lua_pushnumber(L, 1.0);
 
@@ -1230,15 +1231,15 @@ static int32_t Script_GetChannelDisplayInfo(lua_State* L) {
         const char* token;
 
         switch (channelIndex) {
-            case -1:
+            case DisplayChannel::PARTY_INDEX:
                 token = "CHAT_MSG_PARTY";
                 break;
 
-            case -2:
+            case DisplayChannel::RAID_INDEX:
                 token = "CHAT_MSG_RAID";
                 break;
 
-            case -3:
+            case DisplayChannel::BATTLEGROUND_INDEX:
                 token = "CHAT_MSG_BATTLEGROUND";
                 break;
 
@@ -1267,7 +1268,7 @@ static int32_t Script_GetChannelDisplayInfo(lua_State* L) {
             lua_pushnil(L);
         }
 
-        lua_pushstring(L, s_channelCategories[0]);
+        lua_pushstring(L, s_channelCategories[DisplayChannel::HEADER_INDEX::GROUP_HEADER]);
     } else {
         const char* name = CGChat::GetChannelShortName(channelIndex + 1, true);
         lua_pushstring(L, name ? name : "");
@@ -1287,7 +1288,7 @@ static int32_t Script_GetChannelDisplayInfo(lua_State* L) {
             lua_pushnil(L);
         }
 
-        lua_pushstring(L, display->m_flags & 1 ? s_channelCategories[1] : s_channelCategories[2]);
+        lua_pushstring(L, display->m_flags & DisplayChannel::FLAGS::WORLD_CHANNEL ? s_channelCategories[DisplayChannel::HEADER_INDEX::WORLD_HEADER] : s_channelCategories[DisplayChannel::HEADER_INDEX::CUSTOM_HEADER]);
     }
 
     if (display->m_voiceEnabled) {
@@ -1329,7 +1330,7 @@ static int32_t Script_GetChatWindowChannels(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -1383,7 +1384,7 @@ static int32_t Script_GetChannelRosterInfo(lua_State* L) {
     int32_t type;
     const char* name = CGChat::GetChannelStringForDisplay(static_cast<int32_t>(lua_tonumber(L, 1)) - 1, &type);
 
-    if (!name || type == 4) {
+    if (!name || type == DisplayChannel::TYPE::HEADER) {
         return 0;
     }
 
@@ -1391,16 +1392,16 @@ static int32_t Script_GetChannelRosterInfo(lua_State* L) {
         SetCurrentActiveDisplayChannel(name, type);
 
         switch (type) {
-            case 0:
+            case DisplayChannel::TYPE::CHANNEL:
                 ChannelDisplayCommand(L, CMSG_CHAT_CHANNEL_DISPLAY_LIST, "GetChannelRosterInfo");
                 return 0;
 
-            case 2:
+            case DisplayChannel::TYPE::PARTY:
                 BuildPartyDisplayList();
                 return 0;
 
-            case 1:
-            case 3:
+            case DisplayChannel::TYPE::BATTLEGROUND:
+            case DisplayChannel::TYPE::RAID:
                 BuildRaidDisplayList(type);
                 break;
         }
@@ -1433,31 +1434,31 @@ static int32_t Script_GetChannelRosterInfo(lua_State* L) {
         lua_pushstring(L, FrameScript_GetText("UNKNOWN", -1, GENDER_NOT_APPLICABLE));
     }
 
-    if (user->m_flags & 0x1) {
+    if (user->m_flags & CGChat::CHANNEL_MEMBER_FLAGS::OWNER) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (user->m_flags & 0x2) {
+    if (user->m_flags & CGChat::CHANNEL_MEMBER_FLAGS::MODERATOR) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (user->m_flags & 0x20) {
+    if (user->m_flags & PENDINGUSERLIST::VOICE_FLAGS::VOICE_MUTED_OR_SQUELCHED) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (user->m_flags & 0x40) {
+    if (user->m_flags & PENDINGUSERLIST::VOICE_FLAGS::VOICE_SESSION_MEMBER) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
     }
 
-    if (user->m_flags & 0x80) {
+    if (user->m_flags & PENDINGUSERLIST::VOICE_FLAGS::VOICE_MEMBER_STATUS) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1467,11 +1468,11 @@ static int32_t Script_GetChannelRosterInfo(lua_State* L) {
 }
 
 // STATIC: 0x00AC7A40
-static const char* s_chatLogNames[2] = { "Logs\\WoWChatLog.txt", "Logs\\WoWCombatLog.txt" };
+static const char* s_chatLogNames[CGChat::LOG_TYPE::NUM_LOG_TYPES] = { "Logs\\WoWChatLog.txt", "Logs\\WoWCombatLog.txt" };
 
 // VERIFY: 2b604692 auto
 // OFFSET: 0x004FBC60
-static int32_t EnableLogging(lua_State* L, int32_t index) {
+static int32_t EnableLogging(lua_State* L, CGChat::LOG_TYPE index) {
     if (lua_gettop(L) > 0) {
         s_chatLogging[index] = StringToBOOL(L, 1, 1);
 
@@ -1496,13 +1497,13 @@ static int32_t EnableLogging(lua_State* L, int32_t index) {
 // VERIFY: feb7e35b auto
 // OFFSET: 0x004FBD00
 static int32_t Script_LoggingChat(lua_State* L) {
-    return EnableLogging(L, 0);
+    return EnableLogging(L, CGChat::LOG_TYPE::CHAT_LOG);
 }
 
 // VERIFY: 70d23c41 auto
 // OFFSET: 0x004FBD20
 static int32_t Script_LoggingCombat(lua_State* L) {
-    return EnableLogging(L, 1);
+    return EnableLogging(L, CGChat::LOG_TYPE::COMBAT_LOG);
 }
 
 // VERIFY: c5c8be87 auto
@@ -1560,7 +1561,7 @@ static void ChannelPlayerCommand(lua_State* L, uint32_t msgId, const char* name)
 
     const char* player = lua_tolstring(L, 2, nullptr);
 
-    if (player && SStrLen(player) > 48) {
+    if (player && SStrLen(player) > MAX_PLAYER_NAME_LENGTH) {
         luaL_error(L, "Name too long");
         return;
     }
@@ -1737,7 +1738,7 @@ static int32_t Script_RemoveChatWindowChannel(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -1749,7 +1750,7 @@ static int32_t Script_RemoveChatWindowChannel(lua_State* L) {
 
     const char* zoneText = CGGameUI::m_zoneText;
 
-    for (int32_t i = 0; i < g_chatChannelsDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_chatChannelsDB.GetNumRecords(); i++) {
         ChatChannelsRec* rec = g_chatChannelsDB.GetRecordByIndex(i);
 
         if (SStrCmpUTF8I(rec->m_shortcut, channel, STORM_MAX_STR)) {
@@ -1775,7 +1776,7 @@ static int32_t Script_RemoveChatWindowChannel(lua_State* L) {
 // VERIFY: 42e197eb manual
 // OFFSET: 0x004FF200
 static int32_t Script_EnumerateServerChannels(lua_State* L) {
-    int32_t count = g_chatChannelsDB.m_numRecords;
+    int32_t count = g_chatChannelsDB.GetNumRecords();
     lua_checkstack(L, count);
     AreaTableRec* area = g_areaTableDB.GetRecord(CGGameUI::m_areaID);
 
@@ -1788,7 +1789,7 @@ static int32_t Script_EnumerateServerChannels(lua_State* L) {
     for (int32_t i = 0; i < count; i++) {
         ChatChannelsRec* rec = g_chatChannelsDB.GetRecordByIndex(i);
 
-        if (!(rec->m_flags & 0x10) || (area->m_flags & 0x8)) {
+        if (!(rec->m_flags & CHAT_CHANNEL_FLAG_ONLY_IN_CITIES) || (area->m_flags & AREA_FLAG_ALLOW_TRADE_CHANNEL)) {
             lua_pushstring(L, *rec->m_shortcut ? rec->m_shortcut : rec->m_name);
             pushed++;
         }
@@ -1832,7 +1833,7 @@ static int32_t Script_GetSavedInstanceInfo(lua_State* L) {
     lua_pushboolean(L, info->m_locked);
     lua_pushboolean(L, info->m_extended);
     lua_pushnumber(L, static_cast<uint32_t>(info->m_instanceID >> 32));
-    lua_pushboolean(L, map->m_instanceType == 2);
+    lua_pushboolean(L, map->m_instanceType == MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_RAID_DUNGEON);
     lua_pushnumber(L, GetMaxPlayersForMap(map, info->m_difficulty));
     MapDifficultyRec* entry = GetMapDifficultyEntryByMapIdAndDifficulty(mapId, difficulty, nullptr);
 
@@ -1850,7 +1851,7 @@ static int32_t Script_GetSavedInstanceInfo(lua_State* L) {
 static int32_t Script_IsDisplayChannelOwner(lua_State* L) {
     uint32_t index = CGChat::FindDisplayChannelIndex(CGChat::s_activeDisplayChannelName, s_activeDisplayChannelType);
 
-    if (index && CGChat::s_displayChannels[index - 1].m_headerIndex < 0 && (s_activeDisplayChannelFlags & 0x1)) {
+    if (index && CGChat::s_displayChannels[index - 1].m_headerIndex < DisplayChannel::HEADER_INDEX::GROUP_HEADER && (s_activeDisplayChannelFlags & CGChat::CHANNEL_MEMBER_FLAGS::OWNER)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1864,7 +1865,7 @@ static int32_t Script_IsDisplayChannelOwner(lua_State* L) {
 static int32_t Script_IsDisplayChannelModerator(lua_State* L) {
     uint32_t index = CGChat::FindDisplayChannelIndex(CGChat::s_activeDisplayChannelName, s_activeDisplayChannelType);
 
-    if (index && CGChat::s_displayChannels[index - 1].m_headerIndex < 0 && (s_activeDisplayChannelFlags & 0x3)) {
+    if (index && CGChat::s_displayChannels[index - 1].m_headerIndex < DisplayChannel::HEADER_INDEX::GROUP_HEADER && (s_activeDisplayChannelFlags & CGChat::CHANNEL_MEMBER_FLAGS::OWNER_OR_MODERATOR)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1896,7 +1897,7 @@ static int32_t Script_IsSilenced(lua_State* L) {
                 continue;
             }
 
-            if (!(s_pendingUsers.m_data[i].m_flags & 0x10)) {
+            if (!(s_pendingUsers.m_data[i].m_flags & PENDINGUSERLIST::VOICE_FLAGS::VOICE_UNSQUELCHED)) {
                 lua_pushnumber(L, 1.0);
                 return 1;
             }
@@ -1932,7 +1933,7 @@ static int32_t Script_DoEmote(lua_State* L) {
         return 0;
     }
 
-    int32_t i = g_emotesTextDB.m_numRecords;
+    int32_t i = g_emotesTextDB.GetNumRecords();
 
     if (!i) {
         return 0;
@@ -1957,7 +1958,7 @@ static int32_t Script_DoEmote(lua_State* L) {
     const char* token = lua_tolstring(L, 2, nullptr);
 
     if (token && *token && *token != '%') {
-        target = CGGameUI::ClosestObjectMatch(token, TYPE_PLAYER, 0, 0, 3.4028235e38f, 0);
+        target = CGGameUI::ClosestObjectMatch(token, TYPE_PLAYER, UNIT_TARGET_ANY, 0, FLT_MAX, 0);
     }
 
     CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
@@ -2113,7 +2114,7 @@ static int32_t Script_AddChatWindowChannel(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index >= 10) {
+    if (index >= NUM_CHAT_WINDOWS) {
         return 0;
     }
 
@@ -2122,7 +2123,7 @@ static int32_t Script_AddChatWindowChannel(lua_State* L) {
     int32_t channelId = 0;
     const char* zoneText = CGGameUI::m_zoneText;
 
-    for (int32_t i = 0; i < g_chatChannelsDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_chatChannelsDB.GetNumRecords(); i++) {
         ChatChannelsRec* rec = g_chatChannelsDB.GetRecordByIndex(i);
 
         if (SStrCmpUTF8I(rec->m_shortcut, channel, STORM_MAX_STR)) {
@@ -2151,20 +2152,20 @@ static int32_t Script_ResetChatWindows(lua_State* L) {
         s_chatColors[i].m_color[0] = s_chatTypeInfo[i].m_color[0];
         s_chatColors[i].m_color[1] = s_chatTypeInfo[i].m_color[1];
         s_chatColors[i].m_color[2] = s_chatTypeInfo[i].m_color[2];
-        s_chatColors[i].m_unk48 = s_chatTypeInfo[i].m_unk48;
+        s_chatColors[i].m_colorNameByClass = s_chatTypeInfo[i].m_colorNameByClass;
     }
 
-    s_channelColors.SetCount(10);
+    s_channelColors.SetCount(MAX_WOW_CHAT_CHANNELS);
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < MAX_WOW_CHAT_CHANNELS; i++) {
         SStrPrintf(s_channelColors.m_data[i].m_name, sizeof(s_channelColors.m_data[i].m_name), "CHANNEL%d", i + 1);
         s_channelColors.m_data[i].m_color[0] = s_chatColors[CHAT_MSG_CHANNEL].m_color[0];
         s_channelColors.m_data[i].m_color[1] = s_chatColors[CHAT_MSG_CHANNEL].m_color[1];
         s_channelColors.m_data[i].m_color[2] = s_chatColors[CHAT_MSG_CHANNEL].m_color[2];
-        s_channelColors.m_data[i].m_unk48 = s_chatColors[CHAT_MSG_CHANNEL].m_unk48;
+        s_channelColors.m_data[i].m_colorNameByClass = s_chatColors[CHAT_MSG_CHANNEL].m_colorNameByClass;
     }
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < NUM_CHAT_WINDOWS; i++) {
         memset(s_chatWindows[i].m_messageGroups, 0, sizeof(s_chatWindows[i].m_messageGroups));
         s_chatWindows[i].Reset();
         s_chatWindows[i].Init();
@@ -2172,7 +2173,7 @@ static int32_t Script_ResetChatWindows(lua_State* L) {
         if (i == 0) {
             s_chatWindows[0].m_shown = 1;
 
-            for (uint32_t j = 0; j < 40; j++) {
+            for (uint32_t j = 0; j < CHAT_MESSAGE_GROUP_FIRST_COMBAT_LOG; j++) {
                 s_chatWindows[0].m_messageGroups[j] = s_chatMessageGroups[j].m_default != 0;
             }
 
@@ -2180,21 +2181,21 @@ static int32_t Script_ResetChatWindows(lua_State* L) {
         } else if (i == 1) {
             s_chatWindows[1].m_shown = 1;
             s_chatWindows[1].m_docked = 2;
-            s_chatWindows[1].m_messageGroups[40] = 1;
-            s_chatWindows[1].m_messageGroups[41] = 1;
-            s_chatWindows[1].m_messageGroups[42] = 1;
-            s_chatWindows[1].m_messageGroups[43] = 1;
-            s_chatWindows[1].m_messageGroups[44] = 1;
-            s_chatWindows[1].m_messageGroups[45] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_OPENING] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_TRADESKILLS] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_PET_INFO] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_COMBAT_XP_GAIN] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_COMBAT_HONOR_GAIN] = 1;
+            s_chatWindows[1].m_messageGroups[CHAT_MESSAGE_GROUP_COMBAT_MISC_INFO] = 1;
         }
     }
 
-    int32_t count = g_chatChannelsDB.m_numRecords;
+    int32_t count = g_chatChannelsDB.GetNumRecords();
 
     for (int32_t i = 0; i < count; i++) {
         ChatChannelsRec* rec = g_chatChannelsDB.GetRecordByIndex(i);
 
-        if (!(rec->m_flags & 0x1)) {
+        if (!(rec->m_flags & CHAT_CHANNEL_FLAG_AUTO_JOIN)) {
             continue;
         }
 
@@ -2210,13 +2211,13 @@ static int32_t Script_ResetChatWindows(lua_State* L) {
 
     for (uint32_t i = 0; i < CHAT_MSG_MAX; i++) {
         FrameScript_SignalEvent(SCRIPT_EVENT_UPDATE_CHAT_COLOR, "%s%f%f%f", s_chatColors[i].m_name, s_chatColors[i].m_color[0] * (1.0f / 255.0f), s_chatColors[i].m_color[1] * (1.0f / 255.0f), s_chatColors[i].m_color[2] * (1.0f / 255.0f));
-        FrameScript_SignalEvent(SCRIPT_EVENT_UPDATE_CHAT_COLOR_NAME_BY_CLASS, "%s%b", s_chatColors[i].m_name, s_chatColors[i].m_unk48);
+        FrameScript_SignalEvent(SCRIPT_EVENT_UPDATE_CHAT_COLOR_NAME_BY_CLASS, "%s%b", s_chatColors[i].m_name, s_chatColors[i].m_colorNameByClass);
     }
 
     for (uint32_t i = 0; i < s_channelColors.Count(); i++) {
         ChatColorInfo* color = &s_channelColors.m_data[i];
         FrameScript_SignalEvent(SCRIPT_EVENT_UPDATE_CHAT_COLOR, "%s%f%f%f", color->m_name, color->m_color[0] * (1.0f / 255.0f), color->m_color[1] * (1.0f / 255.0f), color->m_color[2] * (1.0f / 255.0f));
-        FrameScript_SignalEvent(SCRIPT_EVENT_UPDATE_CHAT_COLOR_NAME_BY_CLASS, "%s%b", color->m_name, color->m_unk48);
+        FrameScript_SignalEvent(SCRIPT_EVENT_UPDATE_CHAT_COLOR_NAME_BY_CLASS, "%s%b", color->m_name, color->m_colorNameByClass);
     }
 
     return 0;
@@ -2233,7 +2234,7 @@ static int32_t Script_GetNumChannelMembers(lua_State* L) {
     int32_t type;
     const char* channel = CGChat::GetChannelStringForDisplay(static_cast<int32_t>(lua_tonumber(L, 1)) - 1, &type);
 
-    if (!channel || type == 4) {
+    if (!channel || type == DisplayChannel::TYPE::HEADER) {
         lua_pushnil(L);
         return 1;
     }
@@ -2244,17 +2245,17 @@ static int32_t Script_GetNumChannelMembers(lua_State* L) {
         SetCurrentActiveDisplayChannel(channel, type);
 
         switch (type) {
-            case 0:
+            case DisplayChannel::TYPE::CHANNEL:
                 ChannelDisplayCommand(L, CMSG_CHAT_CHANNEL_DISPLAY_LIST, "GetNumChannelMembers");
                 lua_pushnil(L);
                 return 1;
 
-            case 2:
+            case DisplayChannel::TYPE::PARTY:
                 count = BuildPartyDisplayList();
                 break;
 
-            case 1:
-            case 3:
+            case DisplayChannel::TYPE::BATTLEGROUND:
+            case DisplayChannel::TYPE::RAID:
                 count = BuildRaidDisplayList(type);
                 break;
 

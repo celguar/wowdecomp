@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "Engine/Source/Frame/CSimpleModel.h"
+#include "WoW/Source/Object/ObjectClient/Types.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
 #include "Engine/Source/Model2/M2Light.h"
@@ -172,9 +173,9 @@ static int32_t Script_SetSequence(lua_State* L) {
 
     uint32_t sequence = static_cast<uint32_t>(lua_tonumber(L, 2));
 
-    if (sequence >= 506) {
+    if (sequence >= ANIM_COUNT) {
         const char* name = model->GetName();
-        luaL_error(L, "Error: %s:SetSequence(sequence) exceeds valid range of 0 - %d", name ? name : "<unnamed>", 506);
+        luaL_error(L, "Error: %s:SetSequence(sequence) exceeds valid range of 0 - %d", name ? name : "<unnamed>", ANIM_COUNT);
         return 0;
     }
 
@@ -258,9 +259,9 @@ int32_t CSimpleModel::SetLightHelper(lua_State* L, int32_t index, CM2Light* ligh
         next += 3;
     }
 
-    light->m_ambColor.x = ambColor.r * 0.0039215689f * ambIntensity;
-    light->m_ambColor.y = ambColor.g * 0.0039215689f * ambIntensity;
-    light->m_ambColor.z = ambColor.b * 0.0039215689f * ambIntensity;
+    light->m_ambColor.x = ambColor.r * ONE_OVER_255 * ambIntensity;
+    light->m_ambColor.y = ambColor.g * ONE_OVER_255 * ambIntensity;
+    light->m_ambColor.z = ambColor.b * ONE_OVER_255 * ambIntensity;
 
     if (lua_isnumber(L, next)) {
         float dirIntensity = lua_tonumber(L, next);
@@ -275,9 +276,9 @@ int32_t CSimpleModel::SetLightHelper(lua_State* L, int32_t index, CM2Light* ligh
             FrameScript_GetColorNoAlpha(L, next, dirColor);
         }
 
-        light->m_dirColor.x = dirColor.r * 0.0039215689f * dirIntensity;
-        light->m_dirColor.y = dirColor.g * 0.0039215689f * dirIntensity;
-        light->m_dirColor.z = dirColor.b * 0.0039215689f * dirIntensity;
+        light->m_dirColor.x = dirColor.r * ONE_OVER_255 * dirIntensity;
+        light->m_dirColor.y = dirColor.g * ONE_OVER_255 * dirIntensity;
+        light->m_dirColor.z = dirColor.b * ONE_OVER_255 * dirIntensity;
     }
 
     return 1;

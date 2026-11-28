@@ -1,4 +1,6 @@
+#include "Engine/Source/Tempest/CMath.h"
 #include "WoW/Source/WorldClient/DayNight__DNInfo.h"
+#include "WoW/Source/Object/ObjectClient/Types.h"
 #include <cmath>
 #include <new>
 #include <typeinfo>
@@ -32,7 +34,11 @@
 #include "WoW/Source/WorldClient/WorldParam.h"
 #include "Engine/Source/Gxu/Gxu.h"
 #include "WoW/Source/Ui/WorldFrame.h"
+#ifdef WOWDECOMP_TOOL_FEATURES
+#include "WoW/Source/WorldClient/WorldEditHooks.h"
+#endif
 #include "Engine/Source/ShaderEffect/Types.h"
+#include "WoW/Source/DebugFeatures.h"
 
 static const float SUNRISE = 0.22916667f;
 static const float NOON = 0.5f;
@@ -175,7 +181,7 @@ DayNight::DNInfo DayNight::g_dnInfo;
 static C2Vector s_highlightCurve[6] = { C2Vector(0.125f, 0.0f), C2Vector(0.27083334f, 1.0f), C2Vector(0.29166669f, 0.0f), C2Vector(0.85416663f, 0.0f), C2Vector(0.89583331f, 1.0f), C2Vector(0.99930555f, 0.0f) };
 
 // STATIC: 0x00AF4BAC
-static C2Vector s_skyFaceCurve[6] = { C2Vector(0.125f, 1.0f), C2Vector(0.375f, 0.0f), C2Vector(0.5f, -0.5f), C2Vector(0.625f, -0.69999999f), C2Vector(0.75f, -0.5f), C2Vector(0.875f, 0.0f) };
+static C2Vector s_skyFaceCurve[6] = { C2Vector(0.125f, 1.0f), C2Vector(0.375f, 0.0f), C2Vector(0.5f, -0.5f), C2Vector(0.625f, -0.7f), C2Vector(0.75f, -0.5f), C2Vector(0.875f, 0.0f) };
 
 enum SKY_CONSTANTS : int32_t {
     SKY_NUMBANDS = 7,
@@ -247,33 +253,13 @@ static const uint32_t s_cloudLodSize[5] = { 128, 256, 512, 1024, 2048 };
 static const uint32_t s_cloudLodShift[5] = { 7, 8, 9, 10, 11 };
 
 // STATIC: 0x00A41AD4
-static const float s_cloudThetaTable[12] = { 0.0f, 0.025f, 0.050000001f, 0.075000003f, 0.1f, 0.125f, 0.15000001f, 0.175f, 0.205f, 0.23f, 0.245f, 0.25f };
+static const float s_cloudThetaTable[12] = { 0.0f, 0.025f, 0.05f, 0.075f, 0.1f, 0.125f, 0.15f, 0.175f, 0.205f, 0.23f, 0.245f, 0.25f };
 
 // STATIC: 0x00A41B04
 static const uint8_t s_cloudAlphaTable[12] = { 255, 255, 255, 255, 255, 255, 255, 255, 255, 128, 0, 0 };
 
 // STATIC: 0x00AF4BE0
 static C2Vector s_cloudLightCurve[8] = { C2Vector(0.16666667f, 1.0f), C2Vector(0.19444445f, 1.0f), C2Vector(0.2013889f, 1.0f), C2Vector(0.22916667f, 1.0f), C2Vector(0.89583331f, 1.0f), C2Vector(0.9236111f, 1.0f), C2Vector(0.88888890f, 1.0f), C2Vector(0.91666669f, 1.0f) };
-
-// VERIFY: 5ec68a40 auto
-// OFFSET: 0x007A0C70
-void DayNight::LightQueue::Erase(uint32_t index, uint32_t count) {
-    if (index >= this->m_count) {
-        return;
-    }
-
-    if (index + count > this->m_count) {
-        count = this->m_count - index;
-    }
-
-    uint32_t tail = this->m_count - index - count;
-
-    if (tail) {
-        memmove(this->m_data + sizeof(LightQE) * index, this->m_data + sizeof(LightQE) * (index + count), sizeof(LightQE) * tail);
-    }
-
-    this->m_count -= count;
-}
 
 // VERIFY: bd10d666 manual
 // OFFSET: 0x007EB160
@@ -353,21 +339,18 @@ void DayNight::BlendColors(CurrentLight* dst, const CurrentLight* src, float t) 
 
     dst->m_diffuse = DayNight::InterpColor(dst->m_diffuse, src->m_diffuse, t);
     dst->m_ambient = DayNight::InterpColor(dst->m_ambient, src->m_ambient, t);
-    dst->m_skyColors[0] = DayNight::InterpColor(dst->m_skyColors[0], src->m_skyColors[0], t);
-    dst->m_skyColors[1] = DayNight::InterpColor(dst->m_skyColors[1], src->m_skyColors[1], t);
-    dst->m_skyColors[2] = DayNight::InterpColor(dst->m_skyColors[2], src->m_skyColors[2], t);
-    dst->m_skyColors[3] = DayNight::InterpColor(dst->m_skyColors[3], src->m_skyColors[3], t);
-    dst->m_skyColors[4] = DayNight::InterpColor(dst->m_skyColors[4], src->m_skyColors[4], t);
-    dst->m_skyColors[5] = DayNight::InterpColor(dst->m_skyColors[5], src->m_skyColors[5], t);
-    dst->m_sunCloudColors[0] = DayNight::InterpColor(dst->m_sunCloudColors[0], src->m_sunCloudColors[0], t);
-    dst->m_sunCloudColors[1] = DayNight::InterpColor(dst->m_sunCloudColors[1], src->m_sunCloudColors[1], t);
-    dst->m_sunCloudColors[2] = DayNight::InterpColor(dst->m_sunCloudColors[2], src->m_sunCloudColors[2], t);
-    dst->m_sunCloudColors[3] = DayNight::InterpColor(dst->m_sunCloudColors[3], src->m_sunCloudColors[3], t);
-    dst->m_sunCloudColors[4] = DayNight::InterpColor(dst->m_sunCloudColors[4], src->m_sunCloudColors[4], t);
-    dst->m_waterColors[0] = DayNight::InterpColor(dst->m_waterColors[0], src->m_waterColors[0], t);
-    dst->m_waterColors[1] = DayNight::InterpColor(dst->m_waterColors[1], src->m_waterColors[1], t);
-    dst->m_waterColors[2] = DayNight::InterpColor(dst->m_waterColors[2], src->m_waterColors[2], t);
-    dst->m_waterColors[3] = DayNight::InterpColor(dst->m_waterColors[3], src->m_waterColors[3], t);
+    for (uint32_t i = 0; i < CurrentLight::NUM_SKY_COLORS; i++) {
+        dst->m_skyColors[i] = DayNight::InterpColor(dst->m_skyColors[i], src->m_skyColors[i], t);
+    }
+
+    for (uint32_t i = 0; i < CurrentLight::NUM_SUN_CLOUD_COLORS; i++) {
+        dst->m_sunCloudColors[i] = DayNight::InterpColor(dst->m_sunCloudColors[i], src->m_sunCloudColors[i], t);
+    }
+
+    for (uint32_t i = 0; i < CurrentLight::NUM_WATER_COLORS; i++) {
+        dst->m_waterColors[i] = DayNight::InterpColor(dst->m_waterColors[i], src->m_waterColors[i], t);
+    }
+
     dst->m_fogEnd = (src->m_fogEnd - dst->m_fogEnd) * t + dst->m_fogEnd;
     dst->m_fogStartMul = (src->m_fogStartMul - dst->m_fogStartMul) * t + dst->m_fogStartMul;
     dst->m_fogRate = (src->m_fogRate - dst->m_fogRate) * t + dst->m_fogRate;
@@ -385,20 +368,20 @@ void DayNight::BlendColors(CurrentLight* dst, const CurrentLight* src, float t) 
 void DayNight::LightLoad(TSGrowableArray<const LightRec*>& lights, int32_t mapId) {
     uint32_t count = 1;
 
-    for (int32_t i = 0; i < g_lightDB.m_numRecords; i++) {
-        const LightRec* light = i >= 0 && i < g_lightDB.m_numRecords ? &g_lightDB.m_records[i] : nullptr;
+    for (int32_t i = 0; i < g_lightDB.GetNumRecords(); i++) {
+        const LightRec* light = i >= 0 && i < g_lightDB.GetNumRecords() ? &g_lightDB.m_records[i] : nullptr;
 
         if (light->m_continentID == mapId && (light->m_gameCoords[0] != 0.0f || light->m_gameCoords[1] != 0.0f || light->m_gameCoords[2] != 0.0f)) {
             count++;
         }
     }
 
-    int32_t hasDefault = 0;
+    BOOL hasDefault = 0;
     lights.SetCount(count);
     uint32_t index = 1;
 
-    for (int32_t i = 0; i < g_lightDB.m_numRecords; i++) {
-        const LightRec* light = i >= 0 && i < g_lightDB.m_numRecords ? &g_lightDB.m_records[i] : nullptr;
+    for (int32_t i = 0; i < g_lightDB.GetNumRecords(); i++) {
+        const LightRec* light = i >= 0 && i < g_lightDB.GetNumRecords() ? &g_lightDB.m_records[i] : nullptr;
 
         if (light->m_continentID != mapId) {
             continue;
@@ -413,7 +396,7 @@ void DayNight::LightLoad(TSGrowableArray<const LightRec*>& lights, int32_t mapId
     }
 
     if (!hasDefault) {
-        lights.m_data[0] = g_lightDB.GetRecord(1);
+        lights.m_data[0] = g_lightDB.GetRecord(LIGHT_ID_DEFAULT);
     }
 }
 
@@ -542,7 +525,7 @@ void DayNight::SyncSkyAnimWithTime(DNOverrideSky* sky, int32_t minutes) {
 
     if (!sky->m_animLengthMs) {
         M2BoneSequenceInfo info;
-        sky->m_model->GetBoneSequenceInfo(0xFFFFFFFF, info);
+        sky->m_model->GetBoneSequenceInfo(M2_KEY_BONE_NONE, info);
         sky->m_animLengthMs = info.m_endTime - info.m_startTime;
     }
 
@@ -552,10 +535,10 @@ void DayNight::SyncSkyAnimWithTime(DNOverrideSky* sky, int32_t minutes) {
         return;
     }
 
-    if (abs(minutes - static_cast<int32_t>(sky->m_lastTimeOfDay)) >= 2 && (sky->m_flags & 1)) {
+    if (abs(minutes - static_cast<int32_t>(sky->m_lastTimeOfDay)) >= 2 && (sky->m_flags & LIGHT_SKYBOX_FLAG_FULL_DAY)) {
         float speed = 0.000000011574074f * length;
         uint32_t time = static_cast<uint32_t>(length * (minutes * 0.00069444446f));
-        sky->m_model->SetBoneSequence(0xFFFFFFFF, 0, 0xFFFFFFFF, time, speed, 1, 1);
+        sky->m_model->SetBoneSequence(M2_KEY_BONE_NONE, ANIM_STAND, M2_RANDOM_VARIATION, time, speed, 1, 1);
     }
 
     sky->m_lastTimeOfDay = minutes;
@@ -578,7 +561,7 @@ bool DayNight::LightQE::HasHigherPriority(const LightQE& a, const LightQE& b) {
         return b.m_key <= a.m_key;
     }
 
-    return (*b.m_light)->m_gameFalloffStart <= (*a.m_light)->m_gameFalloffStart;
+    return (*b.m_light)->m_gameFalloff.m_l <= (*a.m_light)->m_gameFalloff.m_l;
 }
 
 // VERIFY: 464db582 auto
@@ -792,7 +775,7 @@ void DayNight::ClearOverrideFog() {
 
 // VERIFY: fd35bd95 auto
 // OFFSET: 0x007ED870
-void DayNight::SetOverrideFog(float startScalar, float end, CImVector color, int32_t showSky) {
+void DayNight::SetOverrideFog(float startScalar, float end, CImVector color, BOOL showSky) {
     if (!s_fogOverride) {
         s_savedFogEnd = DayNight::g_dnInfo.m_bands.m_fogEnd;
         s_savedSkyFog = DayNight::g_dnInfo.m_bands.m_skyColors[5];
@@ -815,21 +798,18 @@ DayNight::CurrentLight& DayNight::CurrentLight::operator=(const CurrentLight& so
     this->m_ambient = source.m_ambient;
     this->m_diffuse = source.m_diffuse;
     this->m_shadowOpacity = source.m_shadowOpacity;
-    this->m_skyColors[0] = source.m_skyColors[0];
-    this->m_skyColors[1] = source.m_skyColors[1];
-    this->m_skyColors[2] = source.m_skyColors[2];
-    this->m_skyColors[3] = source.m_skyColors[3];
-    this->m_skyColors[4] = source.m_skyColors[4];
-    this->m_skyColors[5] = source.m_skyColors[5];
-    this->m_sunCloudColors[0] = source.m_sunCloudColors[0];
-    this->m_sunCloudColors[1] = source.m_sunCloudColors[1];
-    this->m_sunCloudColors[2] = source.m_sunCloudColors[2];
-    this->m_sunCloudColors[3] = source.m_sunCloudColors[3];
-    this->m_sunCloudColors[4] = source.m_sunCloudColors[4];
-    this->m_waterColors[0] = source.m_waterColors[0];
-    this->m_waterColors[1] = source.m_waterColors[1];
-    this->m_waterColors[2] = source.m_waterColors[2];
-    this->m_waterColors[3] = source.m_waterColors[3];
+    for (uint32_t i = 0; i < NUM_SKY_COLORS; i++) {
+        this->m_skyColors[i] = source.m_skyColors[i];
+    }
+
+    for (uint32_t i = 0; i < NUM_SUN_CLOUD_COLORS; i++) {
+        this->m_sunCloudColors[i] = source.m_sunCloudColors[i];
+    }
+
+    for (uint32_t i = 0; i < NUM_WATER_COLORS; i++) {
+        this->m_waterColors[i] = source.m_waterColors[i];
+    }
+
     this->m_fogEnd = source.m_fogEnd;
     this->m_fogStartMul = source.m_fogStartMul;
     this->m_fogRate = source.m_fogRate;
@@ -856,15 +836,17 @@ DayNight::CurrentLight& DayNight::CurrentLight::operator=(const CurrentLight& so
 
 // VERIFY: 9e94a499 manual
 // OFFSET: 0x007EDA90
-void __stdcall DayNight::DNClouds::Collide(const C3Vector* origin, const C3Vector* dir, C3Vector* out) {
+void __stdcall DayNight::DNClouds::Collide(const C3Vector& origin, const C3Vector* dir, C3Vector* out) {
+    STORM_ASSERT(origin.x == 0 && origin.y == 0 && origin.z == 0);
+
     float offset = -cos(0.7853981852531433);
     float r0;
     float r1;
     CMath::solvequad_(dir->x * dir->x + dir->y * dir->y + dir->z * dir->z, -offset * dir->z + -offset * dir->z, offset * offset - 1.0f, r0, r1);
 
-    float x = dir->x * r1 + origin->x + DayNight::g_dnInfo.m_cameraPos.x;
-    float y = dir->y * r1 + origin->y + DayNight::g_dnInfo.m_cameraPos.y;
-    float z = r1 * dir->z + origin->z + DayNight::g_dnInfo.m_cameraPos.z;
+    float x = dir->x * r1 + origin.x + DayNight::g_dnInfo.m_cameraPos.x;
+    float y = dir->y * r1 + origin.y + DayNight::g_dnInfo.m_cameraPos.y;
+    float z = r1 * dir->z + origin.z + DayNight::g_dnInfo.m_cameraPos.z;
     out->x = x;
     out->y = y;
     out->z = z;
@@ -927,8 +909,8 @@ void DayNight::DNPlanet::ClipGeometry(C3Vector* verts, C2Vector* texCoords, CImV
         texCoords[3].y = t;
     }
 
-    float fadeTop = verts[0].z + dz - 0.40000001f;
-    float fadeBottom = verts[2].z + dz - 0.40000001f;
+    float fadeTop = verts[0].z + dz - 0.4f;
+    float fadeBottom = verts[2].z + dz - 0.4f;
 
     if (fadeTop > 0.001f && fadeBottom < 0.001f) {
         *vertCount = 6;
@@ -945,10 +927,10 @@ void DayNight::DNPlanet::ClipGeometry(C3Vector* verts, C2Vector* texCoords, CImV
     }
 
     for (uint32_t i = 0; i < *vertCount; i++) {
-        float fade = dz + verts[i].z - 0.40000001f;
+        float fade = dz + verts[i].z - 0.4f;
 
         if (fade < 0.001f) {
-            float alpha = (0.40000001f + fade) * 2.5f;
+            float alpha = (0.4f + fade) * 2.5f;
 
             if (alpha < 0.0f) {
                 alpha = 0.0f;
@@ -978,11 +960,11 @@ void DayNight::InitSunGlare() {
     DayNight::g_sunGlare.m_enable = 1;
     DayNight::g_sunGlare.m_skipOcclusionOnce = 1;
     DayNight::g_sunGlare.m_fadeInRate = 4.0f;
-    DayNight::g_sunGlare.m_alphaMin = 0.5f;
-    DayNight::g_sunGlare.m_alphaMax = 1.0f;
-    DayNight::g_sunGlare.m_scaleMin = 3.0f;
-    DayNight::g_sunGlare.m_scaleMax = 20.0f;
-    DayNight::g_sunGlare.m_minDot = 0.69999999f;
+    DayNight::g_sunGlare.m_alphaRange.m_l = 0.5f;
+    DayNight::g_sunGlare.m_alphaRange.m_h = 1.0f;
+    DayNight::g_sunGlare.m_scaleRange.m_l = 3.0f;
+    DayNight::g_sunGlare.m_scaleRange.m_h = 20.0f;
+    DayNight::g_sunGlare.m_minDot = 0.7f;
     DayNight::g_sunGlare.m_screenGlow = 0.0f;
     DayNight::g_sunGlare.m_alphaCurve[0].m_time = 0.27083334f;
     DayNight::g_sunGlare.m_alphaCurve[0].m_value = 0.0f;
@@ -1004,11 +986,11 @@ void DayNight::InitMoonGlare() {
     DayNight::g_moonGlare.m_enable = 1;
     DayNight::g_moonGlare.m_skipOcclusionOnce = 1;
     DayNight::g_moonGlare.m_fadeInRate = 3.030303f;
-    DayNight::g_moonGlare.m_alphaMin = 0.1f;
-    DayNight::g_moonGlare.m_alphaMax = 1.0f;
-    DayNight::g_moonGlare.m_scaleMin = 1.0f;
-    DayNight::g_moonGlare.m_scaleMax = 1.0f;
-    DayNight::g_moonGlare.m_minDot = 0.69999999f;
+    DayNight::g_moonGlare.m_alphaRange.m_l = 0.1f;
+    DayNight::g_moonGlare.m_alphaRange.m_h = 1.0f;
+    DayNight::g_moonGlare.m_scaleRange.m_l = 1.0f;
+    DayNight::g_moonGlare.m_scaleRange.m_h = 1.0f;
+    DayNight::g_moonGlare.m_minDot = 0.7f;
     DayNight::g_moonGlare.m_alphaCurve[0].m_time = 0.083333336f;
     DayNight::g_moonGlare.m_alphaCurve[0].m_value = 1.0f;
     DayNight::g_moonGlare.m_alphaCurve[1].m_time = 0.13541667f;
@@ -1076,8 +1058,8 @@ void DayNight::BlendAreaLight(CurrentLight* dst, const LightRec* light, int32_t 
     float distance = sqrt(dx * dx + dz * dz + dy * dy);
     float weight = 1.0f;
 
-    if (light->m_gameFalloffStart < distance) {
-        float fade = 1.0f - (distance - light->m_gameFalloffStart) / (light->m_gameFalloffEnd - light->m_gameFalloffStart);
+    if (light->m_gameFalloff.m_l < distance) {
+        float fade = 1.0f - (distance - light->m_gameFalloff.m_l) / (light->m_gameFalloff.m_h - light->m_gameFalloff.m_l);
         weight = fade >= 0.0f ? fade : 0.0f;
     }
 
@@ -1090,7 +1072,7 @@ void DayNight::BlendZoneLight(CurrentLight* dst, const LightRec* light, int32_t 
     CurrentLight blend;
     DayNight::BlendAreaLightColors(&blend, light, underwater);
 
-    float fade = (100.0f - distPct) * 0.0099999998f;
+    float fade = (100.0f - distPct) * 0.01f;
     float weight;
 
     if (fade <= 0.0f) {
@@ -1133,10 +1115,10 @@ void DayNight::SetLightColors() {
     *reinterpret_cast<uint32_t*>(&info.m_light1.m_mid1) = bright;
     info.m_light1.m_mid0 = toAmbient;
     info.m_light0.m_mid0 = info.m_light1.m_mid0;
-    info.m_light0.m_desatR = info.m_light1.m_desatR;
-    info.m_light0.m_desatG = info.m_light1.m_desatG;
-    info.m_light0.m_desatB = info.m_light1.m_desatB;
-    info.m_light0.m_desatA = info.m_light1.m_desatA;
+    info.m_light0.m_desaturatedAmbient.x = info.m_light1.m_desaturatedAmbient.x;
+    info.m_light0.m_desaturatedAmbient.y = info.m_light1.m_desaturatedAmbient.y;
+    info.m_light0.m_desaturatedAmbient.z = info.m_light1.m_desaturatedAmbient.z;
+    info.m_light0.m_desaturatedAmbient.w = info.m_light1.m_desaturatedAmbient.w;
     info.m_light0.m_diffuse = bands.m_diffuse;
     info.m_light0.m_ambient = bands.m_ambient;
 
@@ -1155,10 +1137,10 @@ void DayNight::SetLightColors() {
     hsv.y = hsv.y * SATURATION_SCALE;
     hsv.z = hsv.z * VALUE_SCALE;
     HSVtoRGB(hsv, rgb);
-    info.m_light1.m_desatR = rgb.x;
-    info.m_light1.m_desatG = rgb.y;
-    info.m_light1.m_desatB = rgb.z;
-    info.m_light1.m_desatA = 1.0f;
+    info.m_light1.m_desaturatedAmbient.x = rgb.x;
+    info.m_light1.m_desaturatedAmbient.y = rgb.y;
+    info.m_light1.m_desaturatedAmbient.z = rgb.z;
+    info.m_light1.m_desaturatedAmbient.w = 1.0f;
 }
 
 // VERIFY: 8ddbd15b manual
@@ -1240,9 +1222,9 @@ void DayNight::SetPlanets() {
     planets.m_moon.m_position.y = y * scale + info.m_cameraPos.y;
     planets.m_moon.m_position.z = cosTheta * scale + info.m_cameraPos.z;
     planets.m_moon.m_scale = DayNight::InterpTable(s_moonScale, 4, info.m_dayProgression) * planets.m_moon.m_baseScale;
-    DayNight::g_moonGlare.m_scaleMin = planets.m_moon.m_scale;
+    DayNight::g_moonGlare.m_scaleRange.m_l = planets.m_moon.m_scale;
     DayNight::g_moonGlare.m_position = planets.m_moon.m_position;
-    DayNight::g_moonGlare.m_scaleMax = planets.m_moon.m_scale;
+    DayNight::g_moonGlare.m_scaleRange.m_h = planets.m_moon.m_scale;
 
     int32_t day = CMath::fint_(info.m_day * 65536.0f - 0.5f);
     int32_t progression = CMath::fint_(info.m_dayProgression * 65536.0f - 0.5f);
@@ -1295,7 +1277,7 @@ void DayNight::DNClouds::WorldToTexture(const C3Vector* world, C2Vector* uv) {
     dir.z = static_cast<float>(world->z - DayNight::g_dnInfo.m_cameraPos.z - -cos(0.7853981852531433));
 
     C3Vector up(0.0f, 0.0f, 1.0f);
-    float angle = static_cast<float>(acos((dir.x * up.x + dir.y * up.y + dir.z * up.z) / (sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z) * sqrt(up.x * up.x + up.y * up.y + up.z * up.z))));
+    float angle = static_cast<float>(acos((dir.x * up.x + dir.y * up.y + dir.z * up.z) / (sqrt(dir.SquaredMag()) * sqrt(up.SquaredMag()))));
 
     if (angle > 0.78539819f) {
         angle = 0.78539819f;
@@ -1335,14 +1317,14 @@ float DayNight::DNClouds::GetDensity(const C3Vector* position, float scale) {
     uint32_t y = static_cast<uint32_t>(static_cast<int64_t>(uv.y));
 
     if (x > max) {
-        x = ~(static_cast<int32_t>(x) >> 31) & max;
+        x = static_cast<int32_t>(x) < 0 ? 0 : max;
     }
 
     if (y > max) {
-        y = ~(static_cast<int32_t>(y) >> 31) & max;
+        y = static_cast<int32_t>(y) < 0 ? 0 : max;
     }
 
-    return this->m_densities.m_data[(y << this->m_shift) + x] * 0.0039215689f;
+    return this->m_densities.m_data[(y << this->m_shift) + x] * ONE_OVER_255;
 }
 
 // VERIFY: e28145b2 manual
@@ -1362,7 +1344,7 @@ void DayNight::DNClouds::SetupBumpMap(C3Vector* shadeColor, C3Vector* sunColor, 
     C3Vector hit(0.0f, 0.0f, 0.0f);
     C2Vector uv(0.0f, 0.0f);
 
-    DayNight::DNClouds::Collide(&origin, &dir, &hit);
+    DayNight::DNClouds::Collide(origin, &dir, &hit);
     this->WorldToTexture(&hit, &uv);
 
     info.m_cloudSun = uv;
@@ -1374,20 +1356,9 @@ void DayNight::DNClouds::SetupBumpMap(C3Vector* shadeColor, C3Vector* sunColor, 
     sunPos->y = uv.y;
     sunPos->z = 64.0f;
 
-    const CImVector& shade = info.m_bands.m_sunCloudColors[2];
-    shadeColor->x = shade.r * 0.0039215689f;
-    shadeColor->y = shade.g * 0.0039215689f;
-    shadeColor->z = shade.b * 0.0039215689f;
-
-    const CImVector& sun = info.m_bands.m_sunCloudColors[1];
-    sunColor->x = sun.r * 0.0039215689f;
-    sunColor->y = sun.g * 0.0039215689f;
-    sunColor->z = sun.b * 0.0039215689f;
-
-    const CImVector& base = info.m_bands.m_sunCloudColors[3];
-    baseColor->x = base.r * 0.0039215689f;
-    baseColor->y = base.g * 0.0039215689f;
-    baseColor->z = 0.0039215689f * base.b;
+    *shadeColor = C3Vector(info.m_bands.m_sunCloudColors[2]);
+    *sunColor = C3Vector(info.m_bands.m_sunCloudColors[1]);
+    *baseColor = C3Vector(info.m_bands.m_sunCloudColors[3]);
 
     *intensity = DayNight::InterpTable(s_cloudLightCurve, 8, info.m_dayProgression) * *intensity;
     sunPos->z = info.m_stormBlend * 192.0f + sunPos->z;
@@ -1429,13 +1400,13 @@ void DayNight::DNClouds::UpdateTextureAnimation() {
         return;
     }
 
-    if (info.m_skybox && info.m_skyboxWeight > 0.99000001f) {
+    if (info.m_skybox && info.m_skyboxWeight > 0.99f) {
         this->m_fullUpdate = 0;
         return;
     }
 
     for (int32_t i = 0; i < 3; i++) {
-        if (info.m_blendSkybox[i] && info.m_blendSkyboxWeight[i] > 0.99000001f && !info.m_blendSkyboxFlags[i]) {
+        if (info.m_blendSkybox[i] && info.m_blendSkyboxWeight[i] > 0.99f && !info.m_blendSkyboxFlags[i]) {
             this->m_fullUpdate = 0;
             return;
         }
@@ -1576,7 +1547,7 @@ void DayNight::DNClouds::UpdateTextureAnimation() {
                 float sunZ = sunPos.z;
 
                 uint8_t shadeLevel = ((static_cast<uint8_t>(0xFF - alpha)) >> 1) + 0x40;
-                float shade = shadeLevel * 0.0039215689f;
+                float shade = shadeLevel * ONE_OVER_255;
                 float red = shadeColor.x * shade + baseColor.x;
                 float green = shadeColor.y * shade + baseColor.y;
                 float blue = shadeColor.z * shade + baseColor.z;
@@ -1677,7 +1648,7 @@ void DayNight::DNSky::SetColors() {
     CImVector ramp[6] = {};
     float highlight = DayNight::InterpTable(s_highlightCurve, 6, info.m_dayProgression) * info.m_bands.m_highlightSky;
 
-    if (DayNight::s_lightFlags & 1) {
+    if (DayNight::s_lightFlags & DayNight::LIGHT_FLAG_GLOW) {
         for (int32_t i = 0; i < 6; i++) {
             uint8_t fraction = CMath::fint_((1.0f - DayNight::s_glowBlend) * 255.0f);
             CImVector glow = s_glowColor;
@@ -1717,7 +1688,7 @@ void DayNight::DNSky::SetColors() {
                 DayNight::ColorLerpBytes(&color, &info.m_bands.m_skyColors[row], &ramp[row], (1.0f - face) * highlight);
             } else {
                 CImVector dark;
-                DayNight::ColorLerpBytes(&dark, &ramp[row], &info.m_bands.m_skyColors[0], highlight * 0.69999999f);
+                DayNight::ColorLerpBytes(&dark, &ramp[row], &info.m_bands.m_skyColors[0], highlight * 0.7f);
                 DayNight::ColorLerpBytes(&color, &ramp[row], &dark, -face * highlight);
             }
 
@@ -1765,15 +1736,15 @@ void DayNight::DrawSky(DNOverrideSky* sky, float weight) {
     CM2Model* parent = model->m_attachParent;
 
     if (parent) {
-        model->m_fFlags |= 0x80;
+        model->m_runtimeFlags |= M2_FLAGS::M2_ATTACHED_DRAW_ENABLED;
     } else {
-        model->m_fFlags |= 0x8;
+        model->m_runtimeFlags |= M2_FLAGS::M2_DRAW_ENABLED;
     }
 
     if (parent) {
-        model->m_fFlags |= 0x20000;
+        model->m_runtimeFlags |= M2_FLAGS::M2_ATTACHED_PARTICLES_ENABLED;
     } else {
-        model->m_fFlags |= 0x10000;
+        model->m_runtimeFlags |= M2_FLAGS::M2_PARTICLES_ENABLED;
     }
 
     sky->m_model->m_fadeAlpha = weight;
@@ -1786,15 +1757,15 @@ void DayNight::DrawSky(DNOverrideSky* sky, float weight) {
     parent = model->m_attachParent;
 
     if (parent) {
-        model->m_fFlags &= ~0x80u;
+        model->m_runtimeFlags &= ~M2_FLAGS::M2_ATTACHED_DRAW_ENABLED;
     } else {
-        model->m_fFlags &= ~0x8u;
+        model->m_runtimeFlags &= ~M2_FLAGS::M2_DRAW_ENABLED;
     }
 
     if (parent) {
-        model->m_fFlags &= ~0x20000u;
+        model->m_runtimeFlags &= ~M2_FLAGS::M2_ATTACHED_PARTICLES_ENABLED;
     } else {
-        model->m_fFlags &= ~0x10000u;
+        model->m_runtimeFlags &= ~M2_FLAGS::M2_PARTICLES_ENABLED;
     }
 }
 
@@ -1832,14 +1803,14 @@ void DayNight::RenderSky(CPortalView* view) {
 
     bool drawObjects = true;
 
-    if (info.m_skybox && info.m_skybox->m_model && info.m_skybox->m_model->IsDrawable(0, 0) && info.m_skyboxWeight > 0.99000001f) {
+    if (info.m_skybox && info.m_skybox->m_model && info.m_skybox->m_model->IsDrawable(0, 0) && info.m_skyboxWeight > 0.99f) {
         drawObjects = false;
     }
 
     for (int32_t i = 0; i < 3; i++) {
         DNOverrideSky* sky = info.m_blendSkybox[i];
 
-        if (sky && sky->m_model && sky->m_model->IsDrawable(0, 0) && info.m_blendSkyboxWeight[i] > 0.99000001f && !info.m_blendSkyboxFlags[i]) {
+        if (sky && sky->m_model && sky->m_model->IsDrawable(0, 0) && info.m_blendSkyboxWeight[i] > 0.99f && !info.m_blendSkyboxFlags[i]) {
             drawObjects = false;
         }
     }
@@ -1883,68 +1854,28 @@ void DayNight::RenderSky(CPortalView* view) {
 
 // VERIFY: 9ccd52e0 manual
 // OFFSET: 0x007F0D40
-DayNight::LightQueue::LightQueue(const uint32_t* params) : CMemBlock(sizeof(LightQE) * params[0], 0, typeid(LightQE).raw_name(), SLOG_OBJECT) {
-    uint32_t count = params[0];
-    uint32_t chunk = params[1];
-
-    this->m_chunk = chunk;
-    this->m_capacity = count;
-    this->m_count = 0;
-
-    if (count) {
-        this->m_count++;
-        return;
-    }
-
-    if (!chunk) {
-        return;
-    }
-
-    uint32_t grow = chunk;
-
-    if (grow <= 1 - count) {
-        grow = 1 - count;
-    }
-
-    if (this->Resize(sizeof(LightQE) * (grow + count), true)) {
-        this->m_capacity += grow;
-        this->m_count++;
-    }
+DayNight::LightQueue::LightQueue(const uint32_t* params) : CPriorityQ<LightQE>(params) {
 }
 
 // VERIFY: 2cb38e62 manual
 // OFFSET: 0x007F0DC0
 void DayNight::LightQueue::Push(LightQE entry) {
-    if (this->m_count + 1 <= this->m_capacity) {
-        this->m_count++;
-    } else if (this->m_chunk) {
-        uint32_t grow = this->m_chunk;
+    this->Grow();
 
-        if (grow <= this->m_count - this->m_capacity + 1) {
-            grow = this->m_count - this->m_capacity + 1;
-        }
-
-        if (this->Resize(sizeof(LightQE) * (grow + this->m_capacity), true)) {
-            this->m_capacity += grow;
-            this->m_count++;
-        }
-    }
-
-    uint32_t index = this->m_count - 1;
+    uint32_t index = this->Used() - 1;
 
     while (index > 1) {
         uint32_t parent = index >> 1;
-        LightQE* data = reinterpret_cast<LightQE*>(this->m_data);
 
-        if (!LightQE::HasHigherPriority(entry, data[parent])) {
+        if (!LightQE::HasHigherPriority(entry, (*this)[parent])) {
             break;
         }
 
-        data[index] = data[parent];
+        (*this)[index] = (*this)[parent];
         index = parent;
     }
 
-    reinterpret_cast<LightQE*>(this->m_data)[index] = entry;
+    (*this)[index] = entry;
 }
 
 // VERIFY: e8928dc7 auto
@@ -2004,39 +1935,37 @@ void DayNight::ResetFogAccumulators(bool updateClouds) {
 // VERIFY: 75e3ef0e manual
 // OFFSET: 0x007F1280
 DayNight::LightQE DayNight::LightQueue::Pop() {
-    LightQE* data = reinterpret_cast<LightQE*>(this->m_data);
-    LightQE top = data[1];
-    LightQE last = data[this->m_count - 1];
+    LightQE top = (*this)[1];
+    LightQE last = (*this)[this->Used() - 1];
 
-    if (this->m_count) {
-        this->Erase(this->m_count - 1, 1);
+    if (this->Used()) {
+        this->Erase(this->Used() - 1, 1);
     }
 
-    if (this->m_count < 2) {
+    if (this->Used() < 2) {
         return top;
     }
 
-    uint32_t limit = this->m_count - 1;
+    uint32_t limit = this->Used() - 1;
     uint32_t half = limit >> 1;
     uint32_t index = 1;
 
     while (index <= half) {
         uint32_t child = 2 * index;
-        data = reinterpret_cast<LightQE*>(this->m_data);
 
-        if (child < limit && LightQE::HasHigherPriority(data[child + 1], data[child])) {
+        if (child < limit && LightQE::HasHigherPriority((*this)[child + 1], (*this)[child])) {
             child++;
         }
 
-        if (LightQE::HasHigherPriority(last, data[child])) {
+        if (LightQE::HasHigherPriority(last, (*this)[child])) {
             break;
         }
 
-        data[index] = data[child];
+        (*this)[index] = (*this)[child];
         index = child;
     }
 
-    reinterpret_cast<LightQE*>(this->m_data)[index] = last;
+    (*this)[index] = last;
 
     return top;
 }
@@ -2066,7 +1995,7 @@ void DayNight::DoAreaLights(CurrentLight* light, int32_t underwater) {
         for (uint32_t i = 1; i < DayNight::g_areaLights.m_count; i++) {
             const LightRec** areaLight = &DayNight::g_areaLights.m_data[i];
 
-            if (s_useZoneLights && (*areaLight)->m_gameFalloffEnd < 3.0f) {
+            if (s_useZoneLights && (*areaLight)->m_gameFalloff.m_h < 3.0f) {
                 continue;
             }
 
@@ -2076,7 +2005,7 @@ void DayNight::DoAreaLights(CurrentLight* light, int32_t underwater) {
             float dz = DayNight::g_dnInfo.m_lightRefPos.z - position.z;
             float distanceSq = dx * dx + dz * dz + dy * dy;
 
-            if ((*areaLight)->m_gameFalloffEnd * (*areaLight)->m_gameFalloffEnd > distanceSq) {
+            if ((*areaLight)->m_gameFalloff.m_h * (*areaLight)->m_gameFalloff.m_h > distanceSq) {
                 LightQE entry;
                 entry.m_key = distanceSq;
                 entry.m_light = areaLight;
@@ -2085,7 +2014,7 @@ void DayNight::DoAreaLights(CurrentLight* light, int32_t underwater) {
         }
     }
 
-    while (queue.m_count > 1) {
+    while (!queue.Empty()) {
         LightQE entry = queue.Pop();
         DayNight::BlendAreaLight(light, *entry.m_light, underwater, 1.0f);
     }
@@ -2098,10 +2027,10 @@ void DayNight::DoAreaLights(CurrentLight* light, int32_t underwater) {
         uint32_t elapsed = now - override->m_lastTime;
         override->m_lastTime = now;
 
-        if (override->m_state == 1) {
+        if (override->m_state == AreaLightOverride::FADE_IN) {
             float fade = static_cast<float>(elapsed) / static_cast<float>(override->m_duration) + override->m_fade;
             override->m_fade = fade > 1.0f ? 1.0f : fade;
-        } else if (override->m_state == 2) {
+        } else if (override->m_state == AreaLightOverride::FADE_OUT) {
             float fade = override->m_fade - static_cast<float>(elapsed) / static_cast<float>(override->m_duration);
             override->m_fade = fade < 0.0f ? 0.0f : fade;
         }
@@ -2113,12 +2042,12 @@ void DayNight::DoAreaLights(CurrentLight* light, int32_t underwater) {
             float dy = DayNight::g_dnInfo.m_lightRefPos.y - overrideLight->m_gameCoords[1];
             float dz = DayNight::g_dnInfo.m_lightRefPos.z - overrideLight->m_gameCoords[2];
 
-            if (overrideLight->m_gameFalloffEnd * overrideLight->m_gameFalloffEnd > dx * dx + dy * dy + dz * dz) {
+            if (overrideLight->m_gameFalloff.m_h * overrideLight->m_gameFalloff.m_h > dx * dx + dy * dy + dz * dz) {
                 DayNight::BlendAreaLight(light, overrideLight, underwater, override->m_fade);
             }
         }
 
-        if (override->m_state == 2 && override->m_fade == 0.0f) {
+        if (override->m_state == AreaLightOverride::FADE_OUT && override->m_fade == 0.0f) {
             LightRec* rec = override->m_light;
             count--;
             rec->~LightRec();
@@ -2179,19 +2108,19 @@ void DayNight::UpdateFog() {
             int32_t flags = liquid->m_flags;
             underwater = 1;
 
-            if ((flags & 0x20) && !(fog.m_flags & 0x100)) {
+            if ((flags & LIQUID_TYPE_FLAG_WMO_FOG_CONTROL) && !(fog.m_flags & SMOFog::F_ALLOW_UNDERWATER_FOG)) {
                 underwater = 0;
             }
 
-            if (((flags & 0x100) && !(fog.m_flags & 0x10)) || !underwater) {
+            if (((flags & LIQUID_TYPE_FLAG_WMO_FOG_CONTROL_SLIME) && !(fog.m_flags & SMOFog::F_ALLOW_SLIME_FOG)) || !underwater) {
                 apply = false;
             }
         }
 
         if (apply) {
-            DayNight::ApplyFogSettings(underwater ? &fog.m_underwaterFog : &fog.m_fog);
+            DayNight::ApplyFogSettings(underwater ? &fog.m_fogs.m_fog[SMOFog::UWFOG] : &fog.m_fogs.m_fog[SMOFog::FOG]);
 
-            if (underwater && liquid && (liquid->m_flags & 0x40)) {
+            if (underwater && liquid && (liquid->m_flags & LIQUID_TYPE_FLAG_NO_INTERIOR_FOG_BLEND)) {
                 info.m_fog.m_end = info.m_fogGroup.m_end;
                 info.m_fog.m_color = info.m_fogGroup.m_color;
                 info.m_fog.m_start = info.m_fogGroup.m_start;
@@ -2219,7 +2148,7 @@ void DayNight::UpdateFog() {
         density = info.m_fog.m_density;
     }
 
-    float blend = distance * 0.039999999f;
+    float blend = distance * 0.04f;
 
     if (blend < 0.0f) {
         blend = 0.0f;
@@ -2256,12 +2185,12 @@ void DayNight::UpdateFog() {
         info.m_fogInterior.m_density = 2.0f * interiorDensity;
     }
 
-    if (DayNight::s_lightFlags & 2) {
+    if (DayNight::s_lightFlags & DayNight::LIGHT_FLAG_ECLIPSE) {
         ApplyFogEclipse(&info.m_fog);
         ApplyFogEclipse(&info.m_fogInterior);
     }
 
-    if (DayNight::s_lightFlags & 1) {
+    if (DayNight::s_lightFlags & DayNight::LIGHT_FLAG_GLOW) {
         if (info.m_timeSec <= s_glowEndTime) {
             float fade = 1.0f / static_cast<float>(CMath::exp2_((info.m_timeSec - s_glowStartTime) / s_glowDuration * 7.2134752f));
 
@@ -2275,7 +2204,7 @@ void DayNight::UpdateFog() {
             ApplyFogColorBlend(&info.m_fog);
             ApplyFogColorBlend(&info.m_fogInterior);
         } else {
-            DayNight::s_lightFlags &= ~1;
+            DayNight::s_lightFlags &= ~DayNight::LIGHT_FLAG_GLOW;
         }
     }
 }
@@ -2419,7 +2348,7 @@ void DayNight::DNClouds::GenSphere(float radius) {
     color.r = 0xFF;
 
     for (uint32_t row = 0; row < 12; row++) {
-        float theta = s_cloudThetaTable[row] * 3.1415927f;
+        float theta = s_cloudThetaTable[row] * PI;
         float sinTheta = sin(theta);
         float texRadius = 0.5f * (row * 0.090909094f);
         float z = radius * cos(theta) + zOffset;
@@ -2442,7 +2371,7 @@ void DayNight::DNClouds::GenSphere(float radius) {
             texCoords->y = cosPhi * texRadius + 0.5f;
             texCoords++;
 
-            if (top || CMath::fequal(theta, 6.2831855f) || ++i >= 16) {
+            if (top || CMath::fequal(theta, TWO_PI) || ++i >= 16) {
                 break;
             }
 
@@ -2451,7 +2380,7 @@ void DayNight::DNClouds::GenSphere(float radius) {
 
         if (row) {
             bool prevPole = CMath::fequal(prevTheta, 0.0f);
-            bool pole = CMath::fequal(theta, 6.2831855f);
+            bool pole = CMath::fequal(theta, TWO_PI);
 
             for (uint32_t i = 0; i < 17; i++) {
                 *indices++ = (prevPole ? 0 : i & 0xF) + prevRowStart;
@@ -2482,7 +2411,7 @@ void DayNight::DNSky::GenSphere(float sphRadius) {
     float prevTheta = 0.0f;
 
     for (int32_t row = 0; row < SKY_NUMBANDS; row++) {
-        float theta = s_skyThetaTable[row] * 3.1415927f;
+        float theta = s_skyThetaTable[row] * PI;
         float cosTheta = CMath::cos_(theta);
         float sinTheta = CMath::sin_(theta);
         float z = sphRadius * cosTheta + zOffset;
@@ -2490,20 +2419,20 @@ void DayNight::DNSky::GenSphere(float sphRadius) {
         bool top = CMath::fequal(theta, 0.0f);
 
         for (int32_t i = 0; ; ) {
-            float angle = i * 0.041666668f * 6.2831855f;
+            float angle = i * 0.041666668f * TWO_PI;
             verts->x = sinf(angle) * sinTheta * sphRadius;
             verts->y = sinTheta * cosf(angle) * sphRadius;
             verts->z = z;
             verts++;
 
-            if (top || CMath::fequal(theta, 3.1415927f) || ++i >= 24) {
+            if (top || CMath::fequal(theta, PI) || ++i >= 24) {
                 break;
             }
         }
 
         if (row > 0) {
             bool prevPole = CMath::fequal(prevTheta, 0.0f);
-            bool pole = CMath::fequal(theta, 3.1415927f);
+            bool pole = CMath::fequal(theta, PI);
 
             for (uint32_t i = 0; i < 25; i++) {
                 *indices++ = (prevPole ? 0 : i % 24) + prevRowStart;
@@ -2524,6 +2453,7 @@ void DayNight::DNSky::GenSphere(float sphRadius) {
 void DayNight::LoadMap(int32_t mapId) {
     DayNight::s_mapId = mapId;
     DayNight::LightLoad(DayNight::g_areaLights, mapId);
+    STORM_ASSERT(s_areaLightOverrides.Count() == 0);
 
     DNInfo& info = DayNight::g_dnInfo;
     info.m_dayProgression = 0.0f;
@@ -2565,7 +2495,7 @@ void DayNight::LoadMap(int32_t mapId) {
     }
 
     DayNight::g_clouds.m_density = static_cast<uint8_t>((1.0f - density) * 255.0f);
-    DayNight::g_clouds.SetSharpness(0.95999998f);
+    DayNight::g_clouds.SetSharpness(0.96f);
     DayNight::g_clouds.m_enabled = 1;
     DayNight::GlareBase::m_masterEnable = 1;
     DayNight::InitSunGlare();
@@ -2583,8 +2513,11 @@ void DayNight::LoadMap(int32_t mapId) {
     info.m_showSky = 1;
     info.m_flashBlend = 0;
     DayNight::s_lightFlags = 0;
-    s_cvSkyCloudLOD = CVar::Register("SkyCloudLOD", nullptr, 0, "0", CWorldParam::CloudLODCallback, 1, false, nullptr, false);
+    s_cvSkyCloudLOD = CVar::Register("SkyCloudLOD", nullptr, CVAR_FLAGS::CVAR_NONE, "0", CWorldParam::CloudLODCallback, 1, false, nullptr, false);
     ConsoleCommandRegister("SkySunGlare", SkySunGlare, CATEGORY_GRAPHICS, "0, 1");
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    DayNightDebugRegisterConsoleCommands();
+#endif
     DayNight::g_forceFullUpdate = 1;
 }
 
@@ -2624,8 +2557,8 @@ void DayNight::SetColors() {
     DNInfo& info = DayNight::g_dnInfo;
     float liquidDepth = 0.0f;
     int32_t liquidStatus = World::SceneCamLiquidStatus(&liquidDepth);
-    const LiquidTypeRec* liquid = liquidStatus ? g_liquidTypeDB.GetRecord(liquidStatus) : nullptr;
-    bool liquidLight = liquid && liquid->m_lightID != 0;
+    const LiquidTypeRec* rec = liquidStatus ? g_liquidTypeDB.GetRecord(liquidStatus) : nullptr;
+    bool liquidLight = rec && rec->m_lightID != 0;
 
     for (int32_t i = 0; i < 3; i++) {
         info.m_blendSkyboxWeight[i] = 0.0f;
@@ -2638,8 +2571,9 @@ void DayNight::SetColors() {
 
     if (DayNight::g_areaLights.m_count) {
         if (liquidStatus && liquidLight) {
-            if (liquid) {
-                const LightParamsRec* params = g_lightParamsDB.GetRecord(liquid->m_lightID);
+            if (rec) {
+                STORM_ASSERT(rec->m_lightID);
+                const LightParamsRec* params = g_lightParamsDB.GetRecord(rec->m_lightID);
                 float progression = info.m_dayProgression * 2880.0f;
                 DayNight::CalcColors(CMath::fint_(progression - 0.5f), &info.m_bands, params);
             }
@@ -2714,17 +2648,17 @@ void DayNight::SetColors() {
 
     DayNight::SetLightColors();
 
-    if (liquidStatus && liquid && liquid->m_maxDarkenDepth > 0.0f) {
-        float maxDepth = -liquid->m_maxDarkenDepth;
+    if (liquidStatus && rec && rec->m_maxDarkenDepth > 0.0f) {
+        float maxDepth = -rec->m_maxDarkenDepth;
         float depth = liquidDepth <= 0.0f ? liquidDepth : 0.0f;
 
         if (depth <= maxDepth) {
             depth = maxDepth;
         }
 
-        float fogScale = liquid->m_fogDarkenIntensity;
-        float ambientScale = liquid->m_ambDarkenIntensity;
-        float directScale = liquid->m_dirDarkenIntensity;
+        float fogScale = rec->m_fogDarkenIntensity;
+        float ambientScale = rec->m_ambDarkenIntensity;
+        float directScale = rec->m_dirDarkenIntensity;
         float darken = 1.0f - depth / maxDepth - 1.0f;
         info.m_fog.m_color = DayNight::DarkenColor(info.m_fog.m_color, fogScale * darken + 1.0f);
         info.m_light1.m_ambient = DayNight::DarkenColor(info.m_light1.m_ambient, darken * ambientScale + 1.0f);
@@ -2798,9 +2732,9 @@ void DayNight::SetColors() {
 
         DNOverrideSky* sky = DayNight::GetOverrideSky(skybox->m_name, skybox->m_flags);
         float weight = blend->m_weight;
-        uint32_t flags = skybox->m_flags & 2;
+        uint32_t flags = skybox->m_flags & LIGHT_SKYBOX_FLAG_COMBINE_PROCEDURAL_AND_SKYBOX;
 
-        if (weight > 0.99000001f && count && !flags) {
+        if (weight > 0.99f && count && !flags) {
             count = 0;
         }
 
@@ -2835,7 +2769,7 @@ void DayNight::UpdateLighting() {
     info.m_faceAngle = angle;
 
     if (angle < 0.0f) {
-        info.m_faceAngle = angle + 6.2831855f;
+        info.m_faceAngle = angle + TWO_PI;
     }
 
     float storm = info.m_weatherIntensity * 4.0f;
@@ -2998,8 +2932,8 @@ void DayNight::DNGlare::Update(float deltaSec) {
     }
 
     float t = (dot - this->m_minDot) / (1.0f - this->m_minDot);
-    this->m_scale = ((this->m_scaleMax - this->m_scaleMin) * t + this->m_scaleMin) * this->m_baseScale;
-    this->m_color.a = static_cast<uint8_t>((t * (this->m_alphaMax - this->m_alphaMin) + this->m_alphaMin) * this->m_fade * (this->m_color.a * 0.0039215689f) * 255.0f);
+    this->m_scale = ((this->m_scaleRange.m_h - this->m_scaleRange.m_l) * t + this->m_scaleRange.m_l) * this->m_baseScale;
+    this->m_color.a = static_cast<uint8_t>((t * (this->m_alphaRange.m_h - this->m_alphaRange.m_l) + this->m_alphaRange.m_l) * this->m_fade * (this->m_color.a * ONE_OVER_255) * 255.0f);
     this->m_screenGlow = pow(dot, s_glarePower) * this->m_fade;
 }
 
@@ -3036,7 +2970,7 @@ void DayNight::DNGlare::Render() {
     GxXformViewport(minX, maxX, minY, maxY, minZ, maxZ);
     GxXformSetViewport(minX, maxX, minY, maxY, s_skyMinZ, s_skyMaxZ);
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 3);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Add);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Fog, 0);
@@ -3082,11 +3016,17 @@ float DayNight::DNGlare::GetPointOcclusion() {
     end.z = nz * info->m_farClip + info->m_cameraPos.z;
     float distance = 1.0f;
 
-    if (World::Intersect(start, end, &hit, &distance, 0x200112, nullptr)) {
+    if (World::Intersect(start, end, &hit, &distance, WORLD_QUERY_M2_RENDER | WORLD_QUERY_WMO_COLLISION | WORLD_QUERY_OBJECT_RENDER, nullptr)) {
         return 0.0f;
     }
 
-    return !CGWorldFrame::s_currentWorldFrame->HitTestModelList(start, end);
+#ifdef WOWDECOMP_TOOL_FEATURES
+    // The standalone editor's scene models have already been tested by World::Intersect.
+    if (WorldEditGetView()) {
+        return 1.0f;
+    }
+#endif
+    return !CGWorldFrame::GetActive()->HitTestModelList(start, end);
 }
 
 // VERIFY: 5f4e0628 manual
@@ -3094,7 +3034,7 @@ float DayNight::DNGlare::GetPointOcclusion() {
 float DayNight::DNGlare::GetQueryOcclusion() {
     uint32_t pixels = 0;
     uint32_t available;
-    GxQueryGetParam(this->m_occlusionQuery, GxQueryParam_Unk1, &available);
+    GxQueryGetParam(this->m_occlusionQuery, GxQueryParam_ResultAvailable, &available);
 
     if (!available || !GxQueryGetData(this->m_occlusionQuery, &pixels)) {
         pixels = this->m_occlusionPixels;
@@ -3107,7 +3047,7 @@ float DayNight::DNGlare::GetQueryOcclusion() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_ColorWrite, 0);
+    GxRsSet(GxRs_ColorWrite, GxColorWrite_None);
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_Lighting, 0);
@@ -3255,8 +3195,8 @@ void DayNight::AddLightOverride(int32_t lightId, int32_t overrideId, uint32_t du
     rec->m_gameCoords[0] = light->m_gameCoords[0];
     rec->m_gameCoords[1] = light->m_gameCoords[1];
     rec->m_gameCoords[2] = light->m_gameCoords[2];
-    rec->m_gameFalloffStart = light->m_gameFalloffStart;
-    rec->m_gameFalloffEnd = light->m_gameFalloffEnd;
+    rec->m_gameFalloff.m_l = light->m_gameFalloff.m_l;
+    rec->m_gameFalloff.m_h = light->m_gameFalloff.m_h;
 
     AreaLightOverride* entry = s_areaLightOverrides.New();
 
@@ -3267,7 +3207,7 @@ void DayNight::AddLightOverride(int32_t lightId, int32_t overrideId, uint32_t du
     entry->m_light = rec;
     entry->m_fade = 0.0f;
     entry->m_id = lightId;
-    entry->m_state = 1;
+    entry->m_state = AreaLightOverride::FADE_IN;
     entry->m_lastTime = OsGetAsyncTimeMs();
     entry->m_duration = duration;
     DayNight::ResetFogAccumulators(true);
@@ -3282,7 +3222,7 @@ void DayNight::RemoveLightOverride(int32_t lightId, uint32_t duration) {
         }
 
         AreaLightOverride* entry = &s_areaLightOverrides.m_data[i];
-        entry->m_state = 2;
+        entry->m_state = AreaLightOverride::FADE_OUT;
         entry->m_lastTime = OsGetAsyncTimeMs();
         entry->m_duration = duration;
         DayNight::ResetFogAccumulators(true);
@@ -3292,14 +3232,16 @@ void DayNight::RemoveLightOverride(int32_t lightId, uint32_t duration) {
 
 // VERIFY: 1d606d65 auto
 // OFFSET: 0x007F31C0
-void DayNight::SetBlendSky(uint32_t index, const char* sky, int32_t flags, float blend) {
+void DayNight::SetBlendSky(uint32_t index, const char* sky, int32_t flags, float alpha) {
+    STORM_ASSERT(alpha >= 0.0f && alpha <= 1.0f);
+
     if (index > 3) {
         return;
     }
 
     if (sky) {
         DayNight::g_dnInfo.m_blendSkybox[index] = DayNight::GetOverrideSky(sky, flags);
-        DayNight::g_dnInfo.m_blendSkyboxWeight[index] = blend;
+        DayNight::g_dnInfo.m_blendSkyboxWeight[index] = alpha;
         DayNight::g_dnInfo.m_blendSkyboxFlags[index] = 0;
     } else {
         DayNight::g_dnInfo.m_blendSkybox[index] = nullptr;

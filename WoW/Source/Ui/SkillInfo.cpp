@@ -53,7 +53,7 @@ void CGSkillInfo::AddSkillUp(uint32_t index) {
     }
 
     SkillLineRec* skillLine = g_skillLineDB.GetRecord(CGSkillInfo::m_lines.m_data[index]->m_skillLineID);
-    const SkillRaceClassInfoRec* info = SpellTableLookupInfo(player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[1], CGSkillInfo::m_lines.m_data[index]->m_skillLineID);
+    const SkillRaceClassInfoRec* info = SpellTableLookupInfo(player->m_unit->m_raceID, player->m_unit->m_classID, CGSkillInfo::m_lines.m_data[index]->m_skillLineID);
 
     if (!skillLine || !info) {
         return;
@@ -89,7 +89,7 @@ void CGSkillInfo::RemoveSkillUp(uint32_t index) {
     }
 
     SkillLineRec* skillLine = g_skillLineDB.GetRecord(CGSkillInfo::m_lines.m_data[index]->m_skillLineID);
-    const SkillRaceClassInfoRec* info = SpellTableLookupInfo(player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[1], CGSkillInfo::m_lines.m_data[index]->m_skillLineID);
+    const SkillRaceClassInfoRec* info = SpellTableLookupInfo(player->m_unit->m_raceID, player->m_unit->m_classID, CGSkillInfo::m_lines.m_data[index]->m_skillLineID);
 
     if (!skillLine || !info) {
         return;
@@ -106,7 +106,7 @@ void CGSkillInfo::RemoveSkillUp(uint32_t index) {
 // VERIFY: 579e798b manual
 // OFFSET: 0x005CE880
 void CGSkillInfo::InitializeGame() {
-    uint32_t numTypes = g_skillLineCategoryDB.m_numRecords;
+    uint32_t numTypes = g_skillLineCategoryDB.GetNumRecords();
     uint32_t numLines = numTypes + 128;
 
     CGSkillInfo::m_lines.SetCount(numLines);
@@ -157,7 +157,7 @@ static int32_t SortSkillTypes(const void* a, const void* b) {
     const SkillTypeInfo* typeB = *static_cast<SkillTypeInfo* const*>(b);
     SkillLineCategoryRec* recA = g_skillLineCategoryDB.GetRecord(typeA->m_categoryID);
     SkillLineCategoryRec* recB = g_skillLineCategoryDB.GetRecord(typeB->m_categoryID);
-    return 2 * (recA->m_sortIndex >= recB->m_sortIndex) - 1;
+    return recA->m_sortIndex >= recB->m_sortIndex ? 1 : -1;
 }
 
 // VERIFY: 4448ea95 manual
@@ -171,7 +171,7 @@ static int32_t SortSkillLines(const void* a, const void* b) {
             return 0;
         }
 
-        return 2 * (lineA->m_expanded == 0) - 1;
+        return lineA->m_expanded ? -1 : 1;
     }
 
     uint32_t typeA = 0;
@@ -188,7 +188,7 @@ static int32_t SortSkillLines(const void* a, const void* b) {
     }
 
     if (typeA != typeB) {
-        return 2 * (static_cast<int32_t>(typeA) >= static_cast<int32_t>(typeB)) - 1;
+        return static_cast<int32_t>(typeA) >= static_cast<int32_t>(typeB) ? 1 : -1;
     }
 
     if (!lineA->m_skillLineID) {
@@ -199,8 +199,8 @@ static int32_t SortSkillLines(const void* a, const void* b) {
         return 1;
     }
 
-    if (lineA->unk_000C != lineB->unk_000C) {
-        return 2 * (lineA->unk_000C != 0) - 1;
+    if (lineA->m_unlearned != lineB->m_unlearned) {
+        return lineA->m_unlearned ? 1 : -1;
     }
 
     SkillLineRec* recA = g_skillLineDB.GetRecord(lineA->m_skillLineID);
@@ -242,7 +242,7 @@ void CGSkillInfo::UpdateSkillLines() {
             continue;
         }
 
-        line->m_expanded = !CGSkillInfo::m_types.m_data[type]->m_collapsed && (!CGSkillInfo::unk_C22AFC || !line->unk_000C);
+        line->m_expanded = !CGSkillInfo::m_types.m_data[type]->m_collapsed && (!CGSkillInfo::unk_C22AFC || !line->m_unlearned);
 
         if (!CGSkillInfo::m_lines.m_data[i]->m_expanded) {
             CGSkillInfo::m_numSkillLines--;
@@ -303,28 +303,28 @@ void PlayerSignalSkillStatChanges() {
 
     for (uint32_t i = 0; i < 128; i++) {
         CGPlayerLocalData* data = static_cast<CGPlayerLocalData*>(player->m_player);
-        uint16_t skillId = player->m_obj->m_guid == ClntObjMgrGetActivePlayer() ? data->m_playerSkillInfo[i].m_skillId : 0;
+        uint16_t skillId = player->IsActivePlayer() ? data->m_playerSkillInfo[i].m_skillId : 0;
 
         if (!skillId) {
             continue;
         }
 
         SkillLineRec* rec = g_skillLineDB.GetRecord(skillId);
-        const SkillRaceClassInfoRec* info = SpellTableLookupInfo(player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[1], skillId);
+        const SkillRaceClassInfoRec* info = SpellTableLookupInfo(player->m_unit->m_raceID, player->m_unit->m_classID, skillId);
 
-        if (!rec || !info || !g_skillLineCategoryDB.GetRecord(rec->m_categoryID) || (info->m_flags & 2)) {
+        if (!rec || !info || !g_skillLineCategoryDB.GetRecord(rec->m_categoryID) || (info->m_flags & SKILL_RACE_CLASS_FLAG_HIDDEN)) {
             continue;
         }
 
         uint16_t rank = data->m_playerSkillInfo[i].m_rank;
 
-        if (!(info->m_flags & 1) && !rank && (!(info->m_flags & 4) || static_cast<int32_t>(player->m_unit->m_unitFieldLevel) < info->m_minLevel)) {
+        if (!(info->m_flags & SKILL_RACE_CLASS_FLAG_SHOW_UNLEARNED) && !rank && (!(info->m_flags & SKILL_RACE_CLASS_FLAG_SHOW_AT_MIN_LEVEL) || static_cast<int32_t>(player->m_unit->m_unitFieldLevel) < info->m_minLevel)) {
             continue;
         }
 
         CGSkillInfo::m_lines.m_data[CGSkillInfo::m_numLines]->m_skillLineID = skillId;
         CGSkillInfo::m_lines.m_data[CGSkillInfo::m_numLines]->m_categoryID = rec->m_categoryID;
-        CGSkillInfo::m_lines.m_data[CGSkillInfo::m_numLines]->unk_000C = rank == 0;
+        CGSkillInfo::m_lines.m_data[CGSkillInfo::m_numLines]->m_unlearned = rank == 0;
         CGSkillInfo::m_lines.m_data[CGSkillInfo::m_numLines]->m_skillUps = 0;
         CGSkillInfo::m_numLines++;
 

@@ -16,6 +16,19 @@
 #include "WoW/Source/Object/Player.h"
 #include "WoW/Source/ObjectMgrClient/ObjectMgrClient.h"
 
+// Currency items whose count lives in a player field instead of the token bag
+// (the "Arena Points" and "Honor Points" items; inferred names).
+static const int32_t ARENA_POINTS_ITEM_ID = 43307;
+static const int32_t HONOR_POINTS_ITEM_ID = 43308;
+
+// extraCurrencyType returned to Lua; FrameXML TokenFrame reads 1 as arena
+// points and 2 as honor points (inferred names).
+enum EXTRA_CURRENCY_TYPE : int32_t {
+    EXTRA_CURRENCY_NONE = 0,
+    EXTRA_CURRENCY_ARENA_POINTS = 1,
+    EXTRA_CURRENCY_HONOR_POINTS = 2,
+};
+
 // VERIFY: 051f8586 auto
 // OFFSET: 0x005AFD10
 static int32_t Script_GetCurrencyListSize(lua_State* L) {
@@ -57,19 +70,19 @@ static int32_t Script_GetBackpackCurrencyInfo(lua_State* L) {
         lua_pushnumber(L, 0.0);
     } else {
         uint32_t count = 0;
-        int32_t extraCurrencyType = 0;
+        int32_t extraCurrencyType = EXTRA_CURRENCY_NONE;
 
-        if (currency->m_itemID == 43307) {
+        if (currency->m_itemID == ARENA_POINTS_ITEM_ID) {
             count = player->m_player->m_playerFieldArenaCurrency;
-            extraCurrencyType = 1;
-        } else if (currency->m_itemID == 43308) {
+            extraCurrencyType = EXTRA_CURRENCY_ARENA_POINTS;
+        } else if (currency->m_itemID == HONOR_POINTS_ITEM_ID) {
             count = player->m_player->m_playerFieldHonorCurrency;
-            extraCurrencyType = 2;
+            extraCurrencyType = EXTRA_CURRENCY_HONOR_POINTS;
         } else {
             CGBag_C* bag = player->GetBag();
 
             if (bag) {
-                for (uint32_t slot = 118; slot <= 149; slot++) {
+                for (uint32_t slot = CURRENCYTOKEN_FIRST; slot <= CURRENCYTOKEN_LAST; slot++) {
                     WOWGUID itemGuid;
                     itemGuid.m_guid = bag->GetItemGuid(slot);
                     CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(itemGuid, TYPE_ITEM, __FILE__, __LINE__));
@@ -86,9 +99,8 @@ static int32_t Script_GetBackpackCurrencyInfo(lua_State* L) {
         lua_pushnumber(L, extraCurrencyType);
     }
 
-    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
-    SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
+    CGItem_C::GetInventoryArtPath(texture, sizeof(texture), stats->m_displayId);
     lua_pushstring(L, texture);
     lua_pushinteger(L, currency->m_itemID);
     return 5;
@@ -133,19 +145,19 @@ int32_t Script_GetCurrencyListInfo(lua_State* L) {
 
     if (player) {
         uint32_t count = 0;
-        int32_t extraCurrencyType = 0;
+        int32_t extraCurrencyType = EXTRA_CURRENCY_NONE;
 
-        if (entry->m_itemID == 43307) {
+        if (entry->m_itemID == ARENA_POINTS_ITEM_ID) {
             count = player->m_player->m_playerFieldArenaCurrency;
-            extraCurrencyType = 1;
-        } else if (entry->m_itemID == 43308) {
+            extraCurrencyType = EXTRA_CURRENCY_ARENA_POINTS;
+        } else if (entry->m_itemID == HONOR_POINTS_ITEM_ID) {
             count = player->m_player->m_playerFieldHonorCurrency;
-            extraCurrencyType = 2;
+            extraCurrencyType = EXTRA_CURRENCY_HONOR_POINTS;
         } else {
             CGBag_C* bag = player->GetBag();
 
             if (bag) {
-                for (uint32_t slot = 118; slot <= 149; slot++) {
+                for (uint32_t slot = CURRENCYTOKEN_FIRST; slot <= CURRENCYTOKEN_LAST; slot++) {
                     WOWGUID itemGuid;
                     itemGuid.m_guid = bag->GetItemGuid(slot);
                     CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(itemGuid, TYPE_ITEM, __FILE__, __LINE__));
@@ -169,9 +181,8 @@ int32_t Script_GetCurrencyListInfo(lua_State* L) {
     ItemStats_C* stats = g_itemDBCache.GetRecord(entry->m_itemID, none, nullptr, nullptr, false);
 
     if (stats) {
-        const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
         char texture[260];
-        SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
+        CGItem_C::GetInventoryArtPath(texture, sizeof(texture), stats->m_displayId);
         lua_pushstring(L, texture);
     } else {
         lua_pushnil(L);

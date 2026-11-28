@@ -2,17 +2,22 @@
 #define WOW_SOURCE_UI_SPELLBOOKFRAME_H
 
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/RCString.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
+#include "WoW/Source/Ui/TotemInfo.h"
 
 struct lua_State;
 class CGUnit_C;
 class CGObject_C;
 class AuraData;
 
+// Spellbook slot capacity for the player and pet spell lists (FrameXML MAXIMUM_LEARNED_SPELLS).
+static const uint32_t MAXIMUM_LEARNED_SPELLS = 1024;
+
 struct SpellUsableInfo {
-    /* 0000 */ int32_t m_spellId;
+    /* 0000 */ int32_t spellID;
     /* 0004 */ uint8_t m_usable;
     /* 0005 */ uint8_t m_noMana;
     /* 0006 */ uint8_t unused_0006[2];
@@ -21,7 +26,7 @@ struct SpellUsableInfo {
 struct SpellBookSkillInfo {
     /* 0000 */ int32_t m_skillLine;
     /* 0004 */ uint32_t m_count;
-    /* 0008 */ uint32_t m_unk08;
+    /* 0008 */ uint32_t m_visibleCount;
 };
 
 struct SPELLRANKNODE : public TSLinkedNode<SPELLRANKNODE> {
@@ -33,35 +38,47 @@ struct SPELLRANKNODE : public TSLinkedNode<SPELLRANKNODE> {
 
 struct SPELLSBYNAME : public TSHashObject<SPELLSBYNAME, HASHKEY_UTF8I> {
     /* 0018 */ TSList<SPELLRANKNODE> m_spells;
+
+    ~SPELLSBYNAME();
 };
 
 class CGPlayer_C;
 class SpellRec;
+class SpellVisualRec;
+
+// Companion list index; names follow the s_companionTypes Lua tokens.
+enum COMPANION_TYPE : int32_t {
+    COMPANION_TYPE_CRITTER = 0,
+    COMPANION_TYPE_MOUNT = 1,
+    NUM_COMPANION_TYPES = 2,
+    // GetCompanionType result for a non-companion spell; SendCompanionUpdate signals without a type.
+    COMPANION_TYPE_NONE = NUM_COMPANION_TYPES,
+};
 
 class CGSpellBook {
     public:
     static void GetAppropriateSpellRank(uint32_t* spellId, CGUnit_C* caster, CGUnit_C* target);
     static const char* GetSpellTexture(int32_t slot, int32_t petSpell);
-    static int32_t IsSelectedSlot(int32_t slot, int32_t petSpell);
+    static BOOL IsSelectedSlot(int32_t slot, int32_t petSpell);
     static int32_t FindSpellByName(const char* name, const char* subtext, int32_t* petSpell);
     static int32_t m_autoRangedSpell;
     static void UpdateCooldowns();
-    static int32_t IsTrackingSpell(int32_t spellId);
+    static BOOL IsTrackingSpell(int32_t spellId);
     static TSFixedArray<int32_t> m_languageSpells;
     static TSGrowableArray<int32_t> m_unlearnedSpells;
     static int32_t m_duelSpell;
     static int32_t m_stuckSpell;
     static uint32_t m_numPetSpells;
     static int32_t m_summonFriendSpell;
-    static TSGrowableArray<int32_t> m_companions[2];
+    static TSGrowableArray<int32_t> m_companions[NUM_COMPANION_TYPES];
 
-    static void AddKnownSpell(int32_t spellId, int32_t notify, int32_t replaceSpell);
-    static void AddSpellToNameCache(int32_t spellId, int32_t isPet);
+    static void AddKnownSpell(int32_t spellId, BOOL notify, int32_t replaceSpell);
+    static void AddSpellToNameCache(int32_t spellId, BOOL isPet);
     static void CompanionCallback(int32_t id, const WOWGUID& guid, void* param, bool success);
     static int32_t GetSpellProgressionRank(const SpellRec* spell);
     static int32_t GetCompanionType(const SpellRec* spell);
     static int32_t FindCompanionSlotByID(int32_t spellId, int32_t type);
-    static TSGrowableArray<int32_t> m_totemSpells[4];
+    static TSGrowableArray<int32_t> m_totemSpells[MAX_TOTEMS];
     static uint32_t m_interruptSchoolMask;
     static uint32_t m_interruptSpecialSchoolMask;
     static uint32_t m_silenceSchoolMask;
@@ -71,7 +88,7 @@ class CGSpellBook {
     static void UpdateCompanions();
     static void UpdateSelection();
     static void UpdateUsablePower();
-    static void UpdateSpells(int32_t a1, int32_t a2, int32_t a3);
+    static void UpdateSpells(BOOL sortSpells, BOOL sortPetSpells, BOOL updateSchoolMasks);
     static void UpdateUsable();
     static void CastSpell(int32_t spellId, int32_t petSpell, WOWGUID target);
     static void InitializeGame();
@@ -79,22 +96,35 @@ class CGSpellBook {
     static void MakeKnownSpellModelsLocal();
     static int32_t GetSkinningSpell(const CGObject_C* object);
     static void ReplaceSpell(int32_t oldSpell, int32_t newSpell);
-    static void DelKnownSpell(int32_t spellId, int32_t notify);
+    static void DelKnownSpell(int32_t spellId, BOOL notify);
     static void SendCompanionUpdate(int32_t type);
     static int32_t GetSpellRankOrLevel(const SpellRec* spell);
     static void PickupSpell(int32_t slot, int32_t petSpell);
     static void PickupCompanion(int32_t type, uint32_t index);
-    static int32_t IsAuraCaster(WOWGUID guid, const WOWGUID* caster);
+    static BOOL IsAuraCaster(WOWGUID guid, const WOWGUID* caster);
     static int32_t FindRaidDispel(int32_t dispelType);
     static bool IsUnlearnedSpell(int32_t spellId);
     static void AddPetSpell(int32_t spellId);
     static void DelSpellFromNameCache(int32_t spellId, int32_t petSpell);
     static uint32_t GetShapeshiftForm(int32_t requireForm);
-    static int32_t CanShowAura(const SpellRec* spell, const WOWGUID* caster, bool helpful);
-    static int32_t CanApplyAura(const AuraData* aura);
+    static BOOL CanShowAura(const SpellRec* spell, const WOWGUID* caster, bool helpful);
+    static BOOL CanApplyAura(const AuraData* aura);
     static int32_t FindRaidBuff(int32_t spellId);
-    static int32_t IsShapeshiftSpell(int32_t spellId);
-    static int32_t CanStealAura(const CGUnit_C* unit, const AuraData* aura, const SpellRec* spell);
+    static BOOL IsShapeshiftSpell(int32_t spellId);
+    static int32_t GetKnownSlotFromHighestRankSlot(uint32_t slot);
+    static BOOL CanStealAura(const CGUnit_C* unit, const AuraData* aura, const SpellRec* spell);
+
+    private:
+    static TSGrowableArray<SpellUsableInfo> m_combatFeedbackSpells;
+    static int32_t m_knownSpells[MAXIMUM_LEARNED_SPELLS];
+    static uint32_t m_knownHighestRankSpells[MAXIMUM_LEARNED_SPELLS];
+    static int32_t m_numHighestRankSpells;
+
+    static void MakeKnownSpellVisualKitsLocal(int32_t SpellVisualRec::* kit);
+    static void MakeKnownSpellMissilesLocal();
+
+    friend int32_t GetSpellSlot(int32_t spellId, int32_t petSpell); // (inferred)
+    friend int32_t GetSpellIdBySlot(int32_t slot, int32_t petSpell); // (inferred)
 };
 
 int32_t IsValidSpell(const char* name, int32_t* petSpell);
@@ -103,13 +133,10 @@ int32_t GetSpellIdBySlot(int32_t slot, int32_t petSpell);
 bool HasSpell(int32_t spellId, int32_t petSpell);
 bool HasSpell(uint32_t spellId);
 void ClearPetSpellInfo();
-extern const char* s_companionTypes[2];
+extern const char* s_companionTypes[NUM_COMPANION_TYPES];
 extern TSGrowableArray<SpellUsableInfo> s_shapeshiftSpells;
 extern uint32_t s_numSkillInfos;
-extern uint32_t s_displayedSpells[1024];
-extern int32_t s_spellList[1024];
 extern uint32_t s_numSpells;
-extern uint32_t s_displayedSpellCount;
 extern TSGrowableArray<SpellBookSkillInfo*> s_skillInfos;
 void PrefetchSpellVisuals(int32_t spellId);
 
@@ -125,14 +152,13 @@ int __cdecl SortCompanions(const void* a, const void* b);
 
 extern TSGrowableArray<int32_t> s_trackingSpells;
 
-extern int32_t s_spellList[1024];
 extern uint32_t s_numSpells;
-extern uint32_t s_petSpellList[1024];
+extern uint32_t s_petSpellList[MAXIMUM_LEARNED_SPELLS];
 extern TSBitField<TSFixedArray<uint32_t> > s_knownSpellBits;
 
 int32_t FindSpellSlotByName(const char* name, const char* subtext, int32_t* petSpell);
 int32_t GetSpellIdByName(const char* name, int32_t* petSpell);
-bool GetSlotFromLua(lua_State* L, uint32_t* slot, int32_t* petSpell, int32_t* type, int32_t allowName);
+bool GetSlotFromLua(lua_State* L, uint32_t* slot, int32_t* petSpell, int32_t* nextArg, BOOL allowName);
 bool HasPetSpell(int32_t spellId);
 extern TSGrowableArray<int32_t> s_openLockSpells;
 

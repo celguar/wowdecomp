@@ -119,6 +119,20 @@ enum KEY : uint32_t {
     KEY_LAST = 0x313,
 };
 
+// m_metaKeyState: bit (1 << key) is set while that meta KEY is held (IEvtDispatchKeyDown).
+// Inferred names.
+enum META_KEY_STATE : uint32_t {
+    META_KEY_LSHIFT = 1u << KEY_LSHIFT,
+    META_KEY_RSHIFT = 1u << KEY_RSHIFT,
+    META_KEY_LCONTROL = 1u << KEY_LCONTROL,
+    META_KEY_RCONTROL = 1u << KEY_RCONTROL,
+    META_KEY_LALT = 1u << KEY_LALT,
+    META_KEY_RALT = 1u << KEY_RALT,
+    META_KEY_SHIFT = META_KEY_LSHIFT | META_KEY_RSHIFT,
+    META_KEY_CONTROL = META_KEY_LCONTROL | META_KEY_RCONTROL,
+    META_KEY_ALT = META_KEY_LALT | META_KEY_RALT,
+};
+
 enum MOUSEBUTTON : uint32_t {
     MOUSE_BUTTON_NONE = 0,
     MOUSE_BUTTON_LEFT = 1,
@@ -169,13 +183,13 @@ enum SCHEDSTATE : uint32_t {
 };
 
 struct MouseEventData {
-    /* 0000 */ uint32_t m_mode;
-    /* 0004 */ uint32_t m_button;
+    /* 0000 */ MOUSEMODE m_mode;
+    /* 0004 */ MOUSEBUTTON m_button;
     /* 0008 */ uint32_t m_buttonState;
     /* 000C */ uint32_t m_metaKeyState;
     /* 0010 */ uint32_t m_flags;
     /* 0014 */ C2Vector m_mousePosition;
-    /* 001C */ uint32_t m_wheelAmount;
+    /* 001C */ int32_t m_wheelAmount; // Signed wheel delta copied from EVENT_DATA_MOUSE.
     /* 0020 */ uint32_t m_eventTime;
 };
 

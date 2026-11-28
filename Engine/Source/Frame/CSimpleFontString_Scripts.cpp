@@ -10,6 +10,7 @@
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/lua-5.1/src/lauxlib.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
+#include "Engine/Source/Tempest/CMath.h"
 
 // VERIFY: cb237dcc auto
 // OFFSET: 0x0048E150
@@ -95,7 +96,7 @@ static int32_t Script_SetVertexColor(lua_State* L) {
     }
 
     string->SetVertexColor(color);
-    string->m_fontableFlags &= ~0x4u;
+    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_COLOR_UPDATE;
 
     return 0;
 }
@@ -107,7 +108,7 @@ static int32_t Script_GetAlpha(lua_State* L) {
 
     CImVector color;
     string->GetVertexColor(color);
-    lua_pushnumber(L, color.a * 0.0039215689f);
+    lua_pushnumber(L, color.a * ONE_OVER_255);
 
     return 1;
 }
@@ -125,10 +126,7 @@ static int32_t Script_SetAlpha(lua_State* L) {
 
     uint8_t alpha = static_cast<uint8_t>(lua_tonumber(L, 2) * 255.0);
 
-    CImVector color;
-    string->GetVertexColor(color);
-    color.a = alpha;
-    string->SetVertexColor(color);
+    string->SetVertexAlpha(alpha);
 
     return 0;
 }
@@ -215,11 +213,7 @@ static int32_t Script_GetFontObject(lua_State* L) {
         return 1;
     }
 
-    if (!font->m_luaRegistered) {
-        font->RegisterScriptObject(nullptr);
-    }
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, font->m_luaObjectRef);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, font->GetLuaObjectRef());
 
     return 1;
 }
@@ -310,7 +304,7 @@ static int32_t Script_SetFont(lua_State* L) {
     }
 
     if (string->SetFont(fontName, fontHeight, fontFlags, false)) {
-        string->m_fontableFlags &= ~0x1u;
+        string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_FONT_UPDATE;
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -391,7 +385,7 @@ static int32_t Script_SetTextColor(lua_State* L) {
     CImVector color;
     FrameScript_GetColor(L, 2, color);
     string->SetVertexColor(color);
-    string->m_fontableFlags &= ~0x4u;
+    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_COLOR_UPDATE;
 
     return 0;
 }
@@ -418,7 +412,7 @@ static int32_t Script_SetShadowColor(lua_State* L) {
     CImVector color;
     FrameScript_GetColor(L, 2, color);
     string->SetShadowColor(color);
-    string->m_fontableFlags &= ~0x8u;
+    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_SHADOW_UPDATE;
 
     return 0;
 }
@@ -453,7 +447,7 @@ static int32_t Script_SetShadowOffset(lua_State* L) {
     offset.x = NDCToDDCWidth(x / (CoordinateGetAspectCompensation() * 1024.0f));
     offset.y = NDCToDDCWidth(y / (CoordinateGetAspectCompensation() * 1024.0f));
     string->SetShadowOffset(offset);
-    string->m_fontableFlags &= ~0x8u;
+    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_SHADOW_UPDATE;
 
     return 0;
 }
@@ -476,7 +470,7 @@ static int32_t Script_SetSpacing(lua_State* L) {
     if (lua_isnumber(L, 2)) {
         float spacing = static_cast<float>(lua_tonumber(L, 2));
         string->SetSpacing(NDCToDDCWidth(spacing / (CoordinateGetAspectCompensation() * 1024.0f)));
-        string->m_fontableFlags &= ~0x10u;
+        string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_SPACING_UPDATE;
         return 0;
     }
 
@@ -532,7 +526,7 @@ static int32_t Script_GetStringHeight(lua_State* L) {
 // OFFSET: 0x0048DF70
 static int32_t Script_GetJustifyH(lua_State* L) {
     CSimpleFontString* string = static_cast<CSimpleFontString*>(FrameScript_GetObjectThis(L, CSimpleFontString::GetObjectType()));
-    lua_pushstring(L, JustifyToString(string->m_styleFlags & 0x7));
+    lua_pushstring(L, JustifyToString(string->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK));
 
     return 1;
 }
@@ -549,8 +543,8 @@ static int32_t Script_SetJustifyH(lua_State* L) {
         return 0;
     }
 
-    string->m_settableStyleFlags &= ~0x7u;
-    uint32_t styleFlags = (string->m_styleFlags & ~0x7u) | (justify & 0x7);
+    string->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK;
+    uint32_t styleFlags = (string->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK) | (justify & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK);
 
     if (styleFlags != string->m_styleFlags) {
         string->m_styleFlags = styleFlags;
@@ -560,7 +554,7 @@ static int32_t Script_SetJustifyH(lua_State* L) {
         }
     }
 
-    string->m_fontableFlags &= ~0x2u;
+    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_STYLE_UPDATE;
 
     return 0;
 }
@@ -569,7 +563,7 @@ static int32_t Script_SetJustifyH(lua_State* L) {
 // OFFSET: 0x0048DFC0
 static int32_t Script_GetJustifyV(lua_State* L) {
     CSimpleFontString* string = static_cast<CSimpleFontString*>(FrameScript_GetObjectThis(L, CSimpleFontString::GetObjectType()));
-    lua_pushstring(L, JustifyToString(string->m_styleFlags & 0x38));
+    lua_pushstring(L, JustifyToString(string->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_V_MASK));
 
     return 1;
 }
@@ -586,8 +580,8 @@ static int32_t Script_SetJustifyV(lua_State* L) {
         return 0;
     }
 
-    string->m_settableStyleFlags &= ~0x38u;
-    uint32_t styleFlags = (string->m_styleFlags & ~0x38u) | (justify & 0x38);
+    string->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_V_MASK;
+    uint32_t styleFlags = (string->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_V_MASK) | (justify & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_V_MASK);
 
     if (styleFlags != string->m_styleFlags) {
         string->m_styleFlags = styleFlags;
@@ -597,7 +591,7 @@ static int32_t Script_SetJustifyV(lua_State* L) {
         }
     }
 
-    string->m_fontableFlags &= ~0x2u;
+    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_STYLE_UPDATE;
 
     return 0;
 }
@@ -607,7 +601,7 @@ static int32_t Script_SetJustifyV(lua_State* L) {
 static int32_t Script_CanNonSpaceWrap(lua_State* L) {
     CSimpleFontString* string = static_cast<CSimpleFontString*>(FrameScript_GetObjectThis(L, CSimpleFontString::GetObjectType()));
 
-    if (string->m_styleFlags & 0x1000) {
+    if (string->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NON_SPACE_WRAP) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -622,8 +616,8 @@ static int32_t Script_SetNonSpaceWrap(lua_State* L) {
     CSimpleFontString* string = static_cast<CSimpleFontString*>(FrameScript_GetObjectThis(L, CSimpleFontString::GetObjectType()));
     int32_t wrap = StringToBOOL(L, 2, 1);
 
-    string->m_settableStyleFlags &= ~0x1000u;
-    uint32_t styleFlags = wrap ? string->m_styleFlags | 0x1000 : string->m_styleFlags & ~0x1000u;
+    string->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NON_SPACE_WRAP;
+    uint32_t styleFlags = wrap ? string->m_styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NON_SPACE_WRAP : string->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NON_SPACE_WRAP;
 
     if (styleFlags != string->m_styleFlags) {
         string->m_styleFlags = styleFlags;
@@ -641,7 +635,7 @@ static int32_t Script_SetNonSpaceWrap(lua_State* L) {
 static int32_t Script_CanWordWrap(lua_State* L) {
     CSimpleFontString* string = static_cast<CSimpleFontString*>(FrameScript_GetObjectThis(L, CSimpleFontString::GetObjectType()));
 
-    if (string->m_styleFlags & 0x40) {
+    if (string->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NO_WORD_WRAP) {
         lua_pushnil(L);
     } else {
         lua_pushnumber(L, 1.0);
@@ -656,8 +650,8 @@ static int32_t Script_SetWordWrap(lua_State* L) {
     CSimpleFontString* string = static_cast<CSimpleFontString*>(FrameScript_GetObjectThis(L, CSimpleFontString::GetObjectType()));
     int32_t wrap = StringToBOOL(L, 2, 1);
 
-    string->m_settableStyleFlags &= ~0x40u;
-    uint32_t styleFlags = wrap ? string->m_styleFlags & ~0x40u : string->m_styleFlags | 0x40;
+    string->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NO_WORD_WRAP;
+    uint32_t styleFlags = wrap ? string->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NO_WORD_WRAP : string->m_styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NO_WORD_WRAP;
 
     if (styleFlags != string->m_styleFlags) {
         string->m_styleFlags = styleFlags;
@@ -675,7 +669,7 @@ static int32_t Script_SetWordWrap(lua_State* L) {
 static int32_t Script_GetIndentedWordWrap(lua_State* L) {
     CSimpleFontString* string = static_cast<CSimpleFontString*>(FrameScript_GetObjectThis(L, CSimpleFontString::GetObjectType()));
 
-    if (string->m_styleFlags & 0x20000) {
+    if (string->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_INDENTED) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -690,8 +684,8 @@ static int32_t Script_SetIndentedWordWrap(lua_State* L) {
     CSimpleFontString* string = static_cast<CSimpleFontString*>(FrameScript_GetObjectThis(L, CSimpleFontString::GetObjectType()));
     int32_t indented = StringToBOOL(L, 2, 1);
 
-    string->m_settableStyleFlags &= ~0x20000u;
-    uint32_t styleFlags = indented ? string->m_styleFlags | 0x20000 : string->m_styleFlags & ~0x20000u;
+    string->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_INDENTED;
+    uint32_t styleFlags = indented ? string->m_styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_INDENTED : string->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_INDENTED;
 
     if (styleFlags != string->m_styleFlags) {
         string->m_styleFlags = styleFlags;

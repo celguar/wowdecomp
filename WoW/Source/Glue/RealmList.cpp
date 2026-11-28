@@ -22,7 +22,7 @@ float CRealmList::m_avgLoad;
 float CRealmList::m_stdDevLoad;
 
 // STATIC: 0x00B6B09C
-RealmSortCriterion CRealmList::m_sortCriteria[4];
+RealmSortCriterion CRealmList::m_sortCriteria[NUM_REALM_SORT_CRITERIA];
 
 // STATIC: 0x00B6B0C4
 TSFixedArray<RealmCategory*> CRealmList::m_categories;
@@ -30,15 +30,15 @@ TSFixedArray<RealmCategory*> CRealmList::m_categories;
 // VERIFY: 430ef903 auto
 // OFFSET: 0x004DE5B0
 float GetRealmPopulation(REALM_INFO* realm) {
-    if (static_cast<int8_t>(realm->m_flags) < 0) {
+    if (realm->m_flags & REALM_FLAG_FULL) {
         return 2.0f;
     }
 
-    if (realm->m_flags & 0x20) {
+    if (realm->m_flags & REALM_FLAG_RECOMMENDED) {
         return -3.0f;
     }
 
-    if (realm->m_flags & 0x40) {
+    if (realm->m_flags & REALM_FLAG_NEW_PLAYERS) {
         return -2.0f;
     }
 
@@ -65,9 +65,9 @@ int32_t QSortCategory(const void* a, const void* b) {
 
     int32_t result = 0;
 
-    for (uint32_t i = 0; i < 4; i++) {
+    for (uint32_t i = 0; i < NUM_REALM_SORT_CRITERIA; i++) {
         switch (CRealmList::m_sortCriteria[i].m_criterion) {
-            case 0: {
+            case REALM_SORT_CHARACTERS: {
                 if (!realm1->m_numCharacters && !realm2->m_numCharacters) {
                     continue;
                 }
@@ -80,7 +80,7 @@ int32_t QSortCategory(const void* a, const void* b) {
                 break;
             }
 
-            case 1: {
+            case REALM_SORT_LOAD: {
                 float population1 = GetRealmPopulation(realm1);
                 float population2 = GetRealmPopulation(realm2);
 
@@ -95,13 +95,13 @@ int32_t QSortCategory(const void* a, const void* b) {
                 break;
             }
 
-            case 2: {
+            case REALM_SORT_NAME: {
                 result = SStrSortUTF8I(realm1->m_realmName, realm2->m_realmName, STORM_MAX_STR);
                 break;
             }
 
-            case 3: {
-                if (!g_cfg_ConfigsDB.m_numRecords) {
+            case REALM_SORT_MODE: {
+                if (!g_cfg_ConfigsDB.GetNumRecords()) {
                     continue;
                 }
 
@@ -110,8 +110,8 @@ int32_t QSortCategory(const void* a, const void* b) {
                 int32_t pvp2 = 0;
                 int32_t roleplaying2 = 0;
 
-                for (int32_t j = 0; j < g_cfg_ConfigsDB.m_numRecords; j++) {
-                    Cfg_ConfigsRec* config = j < 0 || j >= g_cfg_ConfigsDB.m_numRecords ? nullptr : &g_cfg_ConfigsDB.m_records[j];
+                for (int32_t j = 0; j < g_cfg_ConfigsDB.GetNumRecords(); j++) {
+                    Cfg_ConfigsRec* config = j < 0 || j >= g_cfg_ConfigsDB.GetNumRecords() ? nullptr : &g_cfg_ConfigsDB.m_records[j];
 
                     if (config->m_realmType == realm1->m_type) {
                         pvp1 = config->m_playerKillingAllowed != 0;
@@ -129,11 +129,11 @@ int32_t QSortCategory(const void* a, const void* b) {
                         continue;
                     }
 
-                    result = 2 * (roleplaying1 != 0) - 1;
+                    result = roleplaying1 ? 1 : -1;
                 } else if (roleplaying1 == roleplaying2) {
-                    result = 2 * (pvp1 != 0) - 1;
+                    result = pvp1 ? 1 : -1;
                 } else {
-                    result = 2 * (roleplaying1 != 0) - 1;
+                    result = roleplaying1 ? 1 : -1;
                 }
 
                 break;
@@ -159,13 +159,13 @@ int32_t QSortCategory(const void* a, const void* b) {
 void CRealmList::SortRealms(int32_t criterion) {
     uint32_t i;
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < NUM_REALM_SORT_CRITERIA; i++) {
         if (CRealmList::m_sortCriteria[i].m_criterion == criterion) {
             break;
         }
     }
 
-    if (i < 4) {
+    if (i < NUM_REALM_SORT_CRITERIA) {
         int32_t reverse = CRealmList::m_sortCriteria[i].m_reverse;
 
         if (!i) {
@@ -232,11 +232,11 @@ void CRealmList::SetPreferredInfo(int32_t index, int32_t pvp, int32_t roleplayin
 
         uint8_t flags = realm->m_flags;
 
-        if (flags & 0x3) {
+        if (flags & (REALM_FLAG_INVALID | REALM_FLAG_OFFLINE)) {
             continue;
         }
 
-        if (flags & 0x20) {
+        if (flags & REALM_FLAG_RECOMMENDED) {
             FrameScript_SignalEvent(GLUE_EVENT_SUGGEST_REALM, "%d%d", index, i + 1);
             return;
         }
@@ -244,8 +244,8 @@ void CRealmList::SetPreferredInfo(int32_t index, int32_t pvp, int32_t roleplayin
         int32_t realmRoleplaying = 0;
         int32_t realmPvp = 0;
 
-        for (int32_t j = 0; j < g_cfg_ConfigsDB.m_numRecords; j++) {
-            Cfg_ConfigsRec* config = j < 0 || j >= g_cfg_ConfigsDB.m_numRecords ? nullptr : &g_cfg_ConfigsDB.m_records[j];
+        for (int32_t j = 0; j < g_cfg_ConfigsDB.GetNumRecords(); j++) {
+            Cfg_ConfigsRec* config = j < 0 || j >= g_cfg_ConfigsDB.GetNumRecords() ? nullptr : &g_cfg_ConfigsDB.m_records[j];
 
             if (config->m_realmType == realm->m_type) {
                 realmPvp = config->m_playerKillingAllowed != 0;
@@ -274,16 +274,16 @@ void CRealmList::SetPreferredInfo(int32_t index, int32_t pvp, int32_t roleplayin
 // VERIFY: 67ff9938 manual
 // OFFSET: 0x004DF580
 void CRealmList::Initialize() {
-    uint32_t count = g_cfg_CategoriesDB.m_numRecords;
+    uint32_t count = g_cfg_CategoriesDB.GetNumRecords();
     CRealmList::m_categories.SetCount(count);
 
     for (int32_t i = 0; i < static_cast<int32_t>(count); i++) {
         CRealmList::m_categories[i] = new (SMemAlloc(sizeof(RealmCategory), __FILE__, __LINE__, 0)) RealmCategory;
-        CRealmList::m_categories[i]->m_category = i >= 0 && i < g_cfg_CategoriesDB.m_numRecords ? &g_cfg_CategoriesDB.m_records[i] : nullptr;
+        CRealmList::m_categories[i]->m_category = i >= 0 && i < g_cfg_CategoriesDB.GetNumRecords() ? &g_cfg_CategoriesDB.m_records[i] : nullptr;
         CRealmList::m_categories[i]->m_numRealms = 0;
     }
 
-    for (uint32_t i = 0; i < 4; i++) {
+    for (uint32_t i = 0; i < NUM_REALM_SORT_CRITERIA; i++) {
         CRealmList::m_sortCriteria[i].m_criterion = i;
         CRealmList::m_sortCriteria[i].m_reverse = 0;
     }

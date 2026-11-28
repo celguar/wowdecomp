@@ -18,6 +18,7 @@
 #include "WoW/Source/Ui/WorldFrame.h"
 #include "WoW/Source/WorldClient/World.h"
 #include "WoW/Source/WowSvcs/WowSvcsClient/ClientServices.h"
+#include "Engine/Source/Tempest/CMath.h"
 
 // VERIFY: 803d6cc2 auto
 // OFFSET: 0x00401B00
@@ -50,7 +51,7 @@ int32_t CCommand_TimingInfo(const char* command, const char* arguments) {
 // VERIFY: 866f4a05 auto
 // OFFSET: 0x00406EC0
 int32_t CCommand_TogglePlayer(const char* command, const char* arguments) {
-    if (CGWorldFrame::s_currentWorldFrame) {
+    if (CGWorldFrame::GetActive()) {
         ConsoleWrite(Player_C_TogglePlayerRender() ? "player visible" : "player hidden", DEFAULT_COLOR);
     }
 
@@ -111,7 +112,7 @@ static int32_t TeleportCheat(const char* arguments, int32_t charm) {
     }
 
     SStrTokenize(&arguments, token, sizeof(token), whitespace, nullptr);
-    float facing = token[0] ? SStrToFloat(token) * 0.017453292f : player->GetFacing();
+    float facing = token[0] ? SStrToFloat(token) * DEG_TO_RAD : player->GetFacing();
 
     CDataStore msg;
     msg.Put(static_cast<uint32_t>(charm ? CMSG_MOVE_CHARM_PORT_CHEAT : MSG_MOVE_TELEPORT_CHEAT));
@@ -179,12 +180,12 @@ int32_t CCommand_WorldTeleport(const char* command, const char* arguments) {
         }
 
         SStrTokenize(&arguments, token, sizeof(token), whitespace, nullptr);
-        facing = token[0] ? SStrToFloat(token) * 0.017453292f : player->GetFacing();
+        facing = token[0] ? SStrToFloat(token) * DEG_TO_RAD : player->GetFacing();
     } else {
         WorldSafeLocsRec* loc = nullptr;
         int32_t i;
 
-        for (i = 0; i < g_worldSafeLocsDB.m_numRecords; i++) {
+        for (i = 0; i < g_worldSafeLocsDB.GetNumRecords(); i++) {
             loc = g_worldSafeLocsDB.GetRecordByIndex(i);
 
             if (SStrStrI(loc->m_areaName, arguments)) {
@@ -192,7 +193,7 @@ int32_t CCommand_WorldTeleport(const char* command, const char* arguments) {
             }
         }
 
-        if (i >= g_worldSafeLocsDB.m_numRecords) {
+        if (i >= g_worldSafeLocsDB.GetNumRecords()) {
             ConsolePrintf("Could not find location: %s", arguments);
             return 1;
         }
@@ -268,7 +269,7 @@ int32_t CCommand_SetRawPos(const char* command, const char* arguments) {
     }
 
     SStrTokenize(&arguments, token, sizeof(token), whitespace, nullptr);
-    float facing = token[0] ? SStrToFloat(token) * 0.017453292f : player->GetRawFacing();
+    float facing = token[0] ? SStrToFloat(token) * DEG_TO_RAD : player->GetRawFacing();
 
     CDataStore msg;
     msg.Put(static_cast<uint32_t>(CMSG_MOVE_SET_RAW_POSITION));
@@ -287,7 +288,7 @@ int32_t CCommand_ToggleHelm(const char* command, const char* arguments) {
     if (player) {
         CDataStore msg;
         msg.Put(static_cast<uint32_t>(CMSG_SHOWING_HELM));
-        msg.Put(static_cast<uint8_t>((player->m_player->m_playerFlags >> 10) & 1));
+        msg.Put(static_cast<uint8_t>((player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_HIDE_HELM) != 0));
         msg.Finalize();
         ClientServices::SendPacket(&msg);
     }
@@ -303,7 +304,7 @@ int32_t CCommand_ToggleCloak(const char* command, const char* arguments) {
     if (player) {
         CDataStore msg;
         msg.Put(static_cast<uint32_t>(CMSG_SHOWING_CLOAK));
-        msg.Put(static_cast<uint8_t>((player->m_player->m_playerFlags >> 11) & 1));
+        msg.Put(static_cast<uint8_t>((player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_HIDE_CLOAK) != 0));
         msg.Finalize();
         ClientServices::SendPacket(&msg);
     }

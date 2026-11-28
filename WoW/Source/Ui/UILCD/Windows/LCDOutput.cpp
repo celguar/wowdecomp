@@ -55,7 +55,7 @@ void CLCDOutput::SetGlobalPage(CLCDPage* page) {
 
 // VERIFY: 944c185d auto
 // OFFSET: 0x00959D60
-int32_t CLCDOutput::IsOpened() {
+BOOL CLCDOutput::IsOpened() {
     return this->m_hDevice != LGLCD_INVALID_DEVICE;
 }
 
@@ -67,11 +67,7 @@ HRESULT CLCDOutput::HandleErrorFromAPI(DWORD result) {
             return S_OK;
 
         case ERROR_DEVICE_NOT_CONNECTED:
-            if (this->m_hDevice != LGLCD_INVALID_DEVICE) {
-                this->OnClosingDevice(this->m_hDevice);
-                lgLcdClose(this->m_hDevice);
-                this->m_hDevice = LGLCD_INVALID_DEVICE;
-            }
+            this->Close();
 
             break;
 
@@ -122,18 +118,14 @@ void CLCDOutput::ResetDeviceType() {
 
 // VERIFY: bf2ba328 auto
 // OFFSET: 0x00959E50
-int32_t CLCDOutput::HasDeviceType() {
+BOOL CLCDOutput::HasDeviceType() {
     return this->m_OpenByTypeContext.deviceType != 0;
 }
 
 // VERIFY: 8757bd4b auto
 // OFFSET: 0x00959E60
 int32_t CLCDOutput::OpenByType(lgLcdOpenByTypeContext& context) {
-    if (this->m_hDevice != LGLCD_INVALID_DEVICE) {
-        this->OnClosingDevice(this->m_hDevice);
-        lgLcdClose(this->m_hDevice);
-        this->m_hDevice = LGLCD_INVALID_DEVICE;
-    }
+    this->Close();
 
     if (lgLcdOpenByType(&context)) {
         return 0;

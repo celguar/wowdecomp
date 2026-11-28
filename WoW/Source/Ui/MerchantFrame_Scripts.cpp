@@ -52,7 +52,7 @@ static int32_t Script_GetNumBuybackItems(lua_State* L) {
 static int32_t Script_CanMerchantRepair(lua_State* L) {
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGMerchantInfo::m_merchant, TYPE_UNIT, __FILE__, __LINE__));
 
-    if (unit && (unit->m_unit->m_unitNpcFlags & 0x1000)) {
+    if (unit && (unit->m_unit->m_unitNpcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_REPAIR)) {
         lua_pushnumber(L, 1.0);
         return 1;
     }
@@ -112,22 +112,12 @@ static int32_t Script_GetMerchantItemCostInfo(lua_State* L) {
     if (item && item->m_itemID && (cost = g_itemExtendedCostDB.GetRecord(item->m_extendedCostID))) {
         lua_pushnumber(L, cost->m_honorPoints);
         lua_pushnumber(L, cost->m_arenaPoints);
-        uint32_t count = cost->m_itemID[0] != 0;
+        uint32_t count = 0;
 
-        if (cost->m_itemID[1]) {
-            count++;
-        }
-
-        if (cost->m_itemID[2]) {
-            count++;
-        }
-
-        if (cost->m_itemID[3]) {
-            count++;
-        }
-
-        if (cost->m_itemID[4]) {
-            count++;
+        for (uint32_t i = 0; i < MAX_ITEM_EXTENDED_COST_ITEMS; i++) {
+            if (cost->m_itemID[i]) {
+                count++;
+            }
         }
 
         numItems = count;
@@ -216,7 +206,7 @@ static int32_t Script_GetMerchantItemCostItem(lua_State* L) {
     int32_t found = 0;
     uint32_t i;
 
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < MAX_ITEM_EXTENDED_COST_ITEMS; i++) {
         if (!cost->m_itemID[i]) {
             continue;
         }
@@ -228,7 +218,7 @@ static int32_t Script_GetMerchantItemCostItem(lua_State* L) {
         found++;
     }
 
-    if (i >= 5) {
+    if (i >= MAX_ITEM_EXTENDED_COST_ITEMS) {
         lua_pushnil(L);
         lua_pushnumber(L, 0.0);
         return 2;
@@ -243,9 +233,8 @@ static int32_t Script_GetMerchantItemCostItem(lua_State* L) {
         return 2;
     }
 
-    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
-    SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
+    CGItem_C::GetInventoryArtPath(texture, sizeof(texture), stats->m_displayId);
     lua_pushstring(L, texture);
     lua_pushnumber(L, cost->m_itemCount[i]);
     lua_pushstring(L, CGTooltip::GetItemHyperlinkString(cost->m_itemID[i], stats->m_quality, 0, 0, 0));
@@ -261,7 +250,7 @@ static int32_t Script_ShowRepairCursor(lua_State* L) {
 
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGMerchantInfo::m_merchant, TYPE_UNIT, __FILE__, __LINE__));
 
-    if (unit && (unit->m_unit->m_unitNpcFlags & 0x1000)) {
+    if (unit && (unit->m_unit->m_unitNpcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_REPAIR)) {
         CGGameUI::ClearCursor(1, 1);
         CursorSetResetMode(REPAIR_CURSOR);
         CursorSetMode(REPAIR_CURSOR);
@@ -299,9 +288,8 @@ static int32_t Script_GetMerchantItemInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
-    SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(item->m_displayID));
+    CGItem_C::GetInventoryArtPath(texture, sizeof(texture), item->m_displayID);
     lua_pushstring(L, texture);
     lua_pushnumber(L, item->m_price);
     lua_pushnumber(L, item->m_buyCount);
@@ -351,10 +339,9 @@ static int32_t Script_GetBuybackItemInfo(lua_State* L) {
         item->GetFullItemName(buffer, sizeof(buffer));
         lua_pushstring(L, buffer);
 
-        const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
-        SStrPrintf(buffer, sizeof(buffer), "%s%s%s", path, *path ? "\\" : "", item->GetInventoryArt());
+        item->GetInventoryArtPath(buffer, sizeof(buffer));
         lua_pushstring(L, buffer);
-        lua_pushnumber(L, player->GetBuybackPrice(slot - 74));
+        lua_pushnumber(L, player->GetBuybackPrice(slot - BUYBACK_FIRST));
         lua_pushnumber(L, item->m_item->m_itemFieldStackCount);
         lua_pushnumber(L, 0.0);
 
@@ -558,8 +545,8 @@ static int32_t Script_ShowMerchantSellCursor(lua_State* L) {
     if (player->m_player->m_playerFieldArenaCurrency < static_cast<uint32_t>(cost->m_arenaPoints) || player->m_player->m_playerFieldHonorCurrency < static_cast<uint32_t>(cost->m_honorPoints)) {
         unable = 1;
     } else {
-        for (uint32_t i = 0; i < 5; i++) {
-            if (cost->m_itemID[i] && cost->m_itemCount[i] > 0 && player->m_bag.GetItemTypeCount(cost->m_itemID[i], 0) < cost->m_itemCount[i]) {
+        for (uint32_t i = 0; i < MAX_ITEM_EXTENDED_COST_ITEMS; i++) {
+            if (cost->m_itemID[i] && cost->m_itemCount[i] > 0 && player->m_bag.GetItemTypeCount(cost->m_itemID[i], BAG_SEARCH_NONE) < cost->m_itemCount[i]) {
                 unable = 1;
                 break;
             }
@@ -590,7 +577,7 @@ static int32_t Script_ShowBuybackSellCursor(lua_State* L) {
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
     if (player && slot && player->m_bag.GetItemGuid(slot)) {
-        uint32_t price = player->GetBuybackPrice(slot - 74);
+        uint32_t price = player->GetBuybackPrice(slot - BUYBACK_FIRST);
 
         if (player->GetCoinage() >= price) {
             CursorSetMode(BUY_CURSOR);
@@ -609,7 +596,7 @@ static int32_t Script_GetRepairAllCost(lua_State* L) {
     CGUnit_C* merchant = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGMerchantInfo::m_merchant, TYPE_UNIT, __FILE__, __LINE__));
     CGPlayer_C* player;
 
-    if (!merchant || !(merchant->m_unit->m_unitNpcFlags & 0x1000) || !(player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__)))) {
+    if (!merchant || !(merchant->m_unit->m_unitNpcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_REPAIR) || !(player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__)))) {
         lua_pushnumber(L, 0.0);
         return 1;
     }
@@ -618,33 +605,33 @@ static int32_t Script_GetRepairAllCost(lua_State* L) {
     uint32_t cost = 0;
     int32_t needsRepair = 0;
 
-    for (uint32_t i = 0; i <= 18; i++) {
+    for (uint32_t i = EQUIPPED_FIRST; i <= EQUIPPED_LAST; i++) {
         CGItem_C* item = bag->GetItemPointer(i);
 
-        if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
+        if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
             cost += CGMerchantInfo::GetRepairCost(item);
-            uint32_t durability = (item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) ? 0 : item->m_item->m_itemFieldDurability;
+            uint32_t durability = (item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) ? 0 : item->m_item->m_itemFieldDurability;
 
-            if (!(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && durability < item->m_item->m_itemFieldMaxdurability) {
+            if (!(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && durability < item->m_item->m_itemFieldMaxdurability) {
                 needsRepair = 1;
             }
         }
     }
 
-    for (uint32_t i = 23; i <= 38; i++) {
+    for (uint32_t i = BACKPACK_FIRST; i <= BACKPACK_LAST; i++) {
         CGItem_C* item = bag->GetItemPointer(i);
 
-        if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
+        if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
             cost += CGMerchantInfo::GetRepairCost(item);
-            uint32_t durability = (item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) ? 0 : item->m_item->m_itemFieldDurability;
+            uint32_t durability = (item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) ? 0 : item->m_item->m_itemFieldDurability;
 
-            if (!(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && durability < item->m_item->m_itemFieldMaxdurability) {
+            if (!(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && durability < item->m_item->m_itemFieldMaxdurability) {
                 needsRepair = 1;
             }
         }
     }
 
-    for (uint32_t i = 19; i <= 22; i++) {
+    for (uint32_t i = INVSLOT_BAG0; i <= INVSLOT_BAG3; i++) {
         CGItem_C* container = bag->GetItemPointer(i);
 
         if (!container || !container->GetBag()) {
@@ -656,11 +643,11 @@ static int32_t Script_GetRepairAllCost(lua_State* L) {
         for (uint32_t j = 0; j < static_cast<uint32_t>(containerBag->m_numSlots); j++) {
             CGItem_C* item = containerBag->GetItemPointer(j);
 
-            if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
+            if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
                 cost += CGMerchantInfo::GetRepairCost(item);
-                uint32_t durability = (item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) ? 0 : item->m_item->m_itemFieldDurability;
+                uint32_t durability = (item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) ? 0 : item->m_item->m_itemFieldDurability;
 
-                if (!(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && durability < item->m_item->m_itemFieldMaxdurability) {
+                if (!(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && durability < item->m_item->m_itemFieldMaxdurability) {
                     needsRepair = 1;
                 }
             }
@@ -683,7 +670,7 @@ static int32_t Script_GetRepairAllCost(lua_State* L) {
 static int32_t Script_RepairAllItems(lua_State* L) {
     CGUnit_C* merchant = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGMerchantInfo::m_merchant, TYPE_UNIT, __FILE__, __LINE__));
 
-    if (!merchant || !(merchant->m_unit->m_unitNpcFlags & 0x1000)) {
+    if (!merchant || !(merchant->m_unit->m_unitNpcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_REPAIR)) {
         return 0;
     }
 
@@ -697,23 +684,23 @@ static int32_t Script_RepairAllItems(lua_State* L) {
     int32_t guildBank = StringToBOOL(L, 1, 0);
     CGBag_C* bag = &player->m_bag;
 
-    for (uint32_t i = 0; i <= 18; i++) {
+    for (uint32_t i = EQUIPPED_FIRST; i <= EQUIPPED_LAST; i++) {
         CGItem_C* item = bag->GetItemPointer(i);
 
-        if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
+        if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
             cost += CGMerchantInfo::GetRepairCost(item);
         }
     }
 
-    for (uint32_t i = 23; i <= 38; i++) {
+    for (uint32_t i = BACKPACK_FIRST; i <= BACKPACK_LAST; i++) {
         CGItem_C* item = bag->GetItemPointer(i);
 
-        if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
+        if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
             cost += CGMerchantInfo::GetRepairCost(item);
         }
     }
 
-    for (uint32_t i = 19; i <= 22; i++) {
+    for (uint32_t i = INVSLOT_BAG0; i <= INVSLOT_BAG3; i++) {
         CGItem_C* container = player->m_bag.GetItemPointer(i);
 
         if (!container || !container->GetBag()) {
@@ -725,7 +712,7 @@ static int32_t Script_RepairAllItems(lua_State* L) {
         for (uint32_t j = 0; j < static_cast<uint32_t>(containerBag->m_numSlots); j++) {
             CGItem_C* item = containerBag->GetItemPointer(j);
 
-            if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
+            if (item && (item->m_obj->m_type & TYPE_ITEM) && !(item->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) && item->m_item->m_itemFieldMaxdurability) {
                 cost += CGMerchantInfo::GetRepairCost(item);
             }
         }

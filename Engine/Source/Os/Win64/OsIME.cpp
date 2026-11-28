@@ -148,7 +148,7 @@ int32_t OsIMEGetClauseInfo(uint32_t& clauseStart, uint32_t& clauseEnd, uint32_t&
 }
 
 // OFFSET: 0x0086CF90
-void OsIMEEnable(int32_t enable) {
+void OsIMEEnable(BOOL enable) {
     HWND window = static_cast<HWND>(OsGuiGetWindow(OSGUI_WINDOW_TYPE_GX));
 
     if (enable) {
@@ -234,7 +234,7 @@ int32_t OsIMEGetCandidates(uint32_t listMask, uint32_t& pageStart, uint32_t& pag
         return 0;
     }
 
-    int32_t changed = 0;
+    BOOL changed = 0;
     CANDIDATELIST* list = static_cast<CANDIDATELIST*>(SMemAlloc(listSize, __FILE__, __LINE__, 0));
     ImmGetCandidateListA(context, index, list, listSize);
 

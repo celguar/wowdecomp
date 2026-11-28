@@ -28,6 +28,10 @@
 #include "Engine/Source/Gx/CGxMatrixStack.h"
 #include "Engine/Source/ShaderEffect/ShadowCache.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
+#include "WoW/Source/DebugFeatures.h"
+#ifdef WOWDECOMP_TOOL_FEATURES
+#include "Engine/Source/Gxu/Gxu.h"
+#endif
 
 // VERIFY: 78b69e1a manual
 // OFFSET: 0x007D5610
@@ -43,7 +47,7 @@ void CWorldScene::RenderCollisionDebug() {
     matrix.Translate(C3Vector(-CWorldScene::s_activeWorldView.x, -CWorldScene::s_activeWorldView.y, -CWorldScene::s_activeWorldView.z));
     g_theGxDevicePtr->XformPushAndSet(GxXform_World, matrix);
 
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_DepthWrite, 0);
@@ -68,7 +72,11 @@ void CWorldScene::RenderCollisionDebug() {
 
 // VERIFY: cd492c82 manual
 // OFFSET: 0x0079A870
-void CWorldScene::Render(const C3Vector& cameraPos, float time) {
+void CWorldScene::Render(const C3Vector& cameraPos, float time
+#ifdef WOWDECOMP_TOOL_FEATURES
+    , CGCamera* toolCamera
+#endif
+) {
     if (!CWorldScene::s_viewerMapObjDef) {
         CWorldScene::ComputeExteriorSortDistances();
     }
@@ -82,10 +90,14 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     CWorldScene::nDoodadsRendered = 0;
     CWorldScene::s_unused_CD8624 = 0;
     CWorldScene::frustumStack[CWorldScene::frustumIndex].CalcPlanesFromCorners(CWorldScene::s_frustumCorners);
-    CWorldScene::s_occlusionFarDepth = World::s_farClip - 33.333332f;
-    CWorldScene::s_hasPendingExteriorGroups = CWorldScene::sortTable.m_pendingExteriorGroupList.Head() != nullptr;
+    CWorldScene::s_occlusionFarDepth = World::farClip - 33.333332f;
+    CWorldScene::s_hasPendingExteriorGroups = CWorldScene::sortTable.moveableMapObjDefGroupList.Head() != nullptr;
 
+#ifdef WOWDECOMP_TOOL_FEATURES
+    CGCamera* camera = toolCamera ? toolCamera : CGWorldFrame::GetActiveCamera();
+#else
     CGCamera* camera = CGWorldFrame::GetActiveCamera();
+#endif
     CWorldScene::s_fogFovPadding = CWorld::farFog / cosf(camera->FOV() * 0.5f) - CWorld::farFog;
 
     World::UpdateObjectFadeouts();
@@ -105,16 +117,16 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
         CWorldScene::s_cullPassStamp++;
 
         if (CWorldScene::s_viewerMovedMapObjDef) {
-            CWorldScene::s_viewerMovedMapObjDef->RenderWithCallback(&CWorldScene::s_viewerMovedMapObjGroups);
-            CWorldScene::s_unk_ADF570.m_rect.minX = FLT_MAX;
-            CWorldScene::s_unk_ADF570.m_rect.minY = FLT_MAX;
-            CWorldScene::s_unk_ADF570.m_verts = nullptr;
-            CWorldScene::s_unk_ADF570.m_rect.maxX = -FLT_MAX;
-            CWorldScene::s_unk_ADF570.m_vertCount = 0;
-            CWorldScene::s_unk_ADF570.m_rect.maxY = -FLT_MAX;
+            CWorldScene::s_viewerMovedMapObjDef->RenderWithCallback(CWorldScene::s_viewerMovedMapObjGroups);
+            CWorldScene::s_worldPortalView.m_rect.minX = FLT_MAX;
+            CWorldScene::s_worldPortalView.m_rect.minY = FLT_MAX;
+            CWorldScene::s_worldPortalView.m_verts = nullptr;
+            CWorldScene::s_worldPortalView.m_rect.maxX = -FLT_MAX;
+            CWorldScene::s_worldPortalView.m_numVertices = 0;
+            CWorldScene::s_worldPortalView.m_rect.maxY = -FLT_MAX;
             CWorldScene::frustumPortalView.m_verts = nullptr;
-            CWorldScene::frustumPortalView.m_vertCount = 0;
-            CWorldScene::s_unk_ADF570.m_maxViewDepth = -1.0f;
+            CWorldScene::frustumPortalView.m_numVertices = 0;
+            CWorldScene::s_worldPortalView.m_maxViewDepth = -1.0f;
             CWorldScene::frustumPortalView.m_rect.minX = FLT_MAX;
             CWorldScene::frustumPortalView.m_rect.minY = FLT_MAX;
             CWorldScene::frustumPortalView.m_rect.maxX = -FLT_MAX;
@@ -124,7 +136,7 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
             CWorldScene::s_portalViews.SetCount(0);
         }
 
-        CWorldScene::s_viewerMapObjDef->RenderWithCallback(&CWorldScene::s_viewerMapObjGroups);
+        CWorldScene::s_viewerMapObjDef->RenderWithCallback(CWorldScene::s_viewerMapObjGroups);
 
         if (CWorldScene::frustumPortalView.m_maxViewDepth < 0.0f) {
             CWorldScene::sortTable.Clear();
@@ -138,19 +150,35 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     } else {
         CWorldScene::s_cullPassStamp++;
         CRect fullRect = { 0.0f, 0.0f, 1.0f, 1.0f };
-        CWorldScene::s_unk_ADF570.m_rect = fullRect;
-        CWorldScene::s_unk_ADF570.m_maxViewDepth = 0.0f;
-        CWorldScene::s_unk_ADF570.m_vertCount = 0;
+        CWorldScene::s_worldPortalView.m_rect = fullRect;
+        CWorldScene::s_worldPortalView.m_maxViewDepth = 0.0f;
+        CWorldScene::s_worldPortalView.m_numVertices = 0;
         CWorldScene::frustumPortalView.m_rect = fullRect;
         CWorldScene::frustumPortalView.m_maxViewDepth = 0.0f;
         CWorldScene::s_occlusionNearDepth = -10000.0f;
-        CWorldScene::frustumPortalView.m_vertCount = 0;
+        CWorldScene::frustumPortalView.m_numVertices = 0;
         CWorldScene::CullSortTable(&CWorldScene::frustumPortalView.m_rect);
     }
 
     CWorldScene::CullMapObjDefGroup();
     CWorldScene::UpdateSortedModels();
-    CWorldScene::sortTable.m_pendingExteriorGroupList.UnlinkAll();
+
+#if defined(WOWDECOMP_ASSERTIONS)
+    for (uint32_t i = 0; i < 64; i++) {
+        CSortEntry& sortEntry = CWorldScene::sortTable.m_table[i];
+        STORM_ASSERT(sortEntry.chunkList.Head() == NULL);
+        STORM_ASSERT(sortEntry.liquidList.Head() == NULL);
+        STORM_ASSERT(sortEntry.mapObjDefGroupList.Head() == NULL);
+        STORM_ASSERT(sortEntry.doodadDefList.Head() == NULL);
+        STORM_ASSERT(sortEntry.entityList.Head() == NULL);
+        STORM_ASSERT(sortEntry.chunkOcclusionList.Head() == NULL);
+        STORM_ASSERT(sortEntry.occluderList.Head() == NULL);
+        STORM_ASSERT(sortEntry.antiOccluderList.Head() == NULL);
+        STORM_ASSERT(sortEntry.portalList.Head() == NULL);
+    }
+#endif
+
+    CWorldScene::sortTable.moveableMapObjDefGroupList.UnlinkAll();
 
     DayNight::DNInfo* info = DayNight::GetInfo();
     CImVector clearColor;
@@ -160,7 +188,7 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
         clearColor.g = 0x00;
         clearColor.r = 0x00;
         clearColor.a = 0xFF;
-    } else if (CWorldScene::s_unk_ADF570.m_maxViewDepth < 0.0f) {
+    } else if (CWorldScene::s_worldPortalView.m_maxViewDepth < 0.0f) {
         clearColor = info->m_fogInterior.m_color;
     } else if (s_liquidTypeId || (!info->m_showSky && DayNight::GetFogOverride())) {
         clearColor = info->m_fog.m_color;
@@ -184,13 +212,19 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     CM2Scene* scene = World::s_m2Scene;
 
     if (scene) {
-        scene->m_flags |= 0x1;
+        scene->m_flags |= CM2Scene::SCENE_FLAGS::WORLD_ANIMATION_ACTIVE;
         scene->AdvanceTime(static_cast<uint32_t>(CMath::fint_(time * 1000.0f)));
         scene->Animate(cameraPos);
-        scene->m_flags &= ~0x1;
+        scene->m_flags &= ~CM2Scene::SCENE_FLAGS::WORLD_ANIMATION_ACTIVE;
     }
 
+#ifdef WOWDECOMP_TOOL_FEATURES
+    if (!toolCamera) {
+        CGUnit_C::UpdateMissileTrajectoryTargeting();
+    }
+#else
     CGUnit_C::UpdateMissileTrajectoryTargeting();
+#endif
     CShadowQuery::Update();
     CShaderEffect::UpdateProjMatrix();
     CWorldScene::ApplyFogState();
@@ -198,7 +232,7 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     CWorldScene::RenderMapObjDefGroups();
     CWorldScene::RenderHorizon();
 
-    if (CWorldScene::s_unk_ADF570.m_maxViewDepth >= 0.0f) {
+    if (CWorldScene::s_worldPortalView.m_maxViewDepth >= 0.0f) {
         if (CWorldScene::s_exteriorPortalViews.Count()) {
             CWorldScene::CreateInversePortalList();
             CWorldScene::RenderPortalList(&CWorldScene::s_exteriorPortalViews, 1);
@@ -214,7 +248,26 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
         }
 
         if (!s_liquidTypeId) {
-            DayNight::RenderSky(&CWorldScene::s_unk_ADF570);
+#ifdef WOWDECOMP_TOOL_FEATURES
+            const bool useSkyProjection = toolCamera && camera->m_clipRange.m_l > World::s_nearClip;
+            C44Matrix worldProjection;
+            if (useSkyProjection) {
+                // The sky meshes are camera-relative and only a few yards across.
+                worldProjection = g_theGxDevicePtr->m_projection;
+                C44Matrix skyProjection;
+                GxuXformCreateProjection_Exact(camera->FOV() * 0.6f, camera->m_aspect, World::s_nearClip,
+                                               camera->m_clipRange.m_h, skyProjection);
+                GxXformSetProjection(skyProjection);
+                CShaderEffect::UpdateProjMatrix();
+            }
+#endif
+            DayNight::RenderSky(&CWorldScene::s_worldPortalView);
+#ifdef WOWDECOMP_TOOL_FEATURES
+            if (useSkyProjection) {
+                GxXformSetProjection(worldProjection);
+                CShaderEffect::UpdateProjMatrix();
+            }
+#endif
         }
     }
 
@@ -222,7 +275,7 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     Liquid::UpdateProceduralTextures();
     CWorldScene::PrepareLiquidInstances();
 
-    if ((CWorld::enables & 0x1000000) && CWorldScene::s_liquidRenderer) {
+    if ((CWorld::enables & Enables::Enable_Water) && CWorldScene::s_liquidRenderer) {
         CWorldScene::s_liquidRenderer->Flush(CWorldScene::s_activeWorldView, 0);
     }
 
@@ -243,10 +296,14 @@ void CWorldScene::Render(const C3Vector& cameraPos, float time) {
     g_theGxDevicePtr->RsPop();
     CursorReleaseItemMips();
 
-    if (CWorld::enables & 0x200000) {
+    if (CWorld::enables & Enables::Enable_CollisionDebug) {
+#ifdef WOWDECOMP_DEBUG_FEATURES
+        // Debug feature: drawn at the end of the frame by WorldDebugRenderLate (WorldRender_Debug.cpp).
+#else
         CWorldScene::RenderCollisionDebug();
         CMap::debugVertexArray.SetCount(0);
         CMap::debugIndexArray.m_count = 0;
+#endif
     }
 }
 

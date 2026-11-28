@@ -40,7 +40,7 @@ void SI2::DestroyVSoundLookup() {
 
 // VERIFY: 80cb0ed8 auto
 // OFFSET: 0x004C9CF0
-static int32_t IsInTimeWindow(SI2AdvancedSound* sound) {
+static BOOL IsInTimeWindow(SI2AdvancedSound* sound) {
     int32_t offset = sound->m_randomOffset;
     int32_t now = s_dayTime;
 
@@ -53,15 +53,15 @@ static int32_t IsInTimeWindow(SI2AdvancedSound* sound) {
 
 // VERIFY: 42218333 auto
 // OFFSET: 0x004C9D50
-static void StopAdvancedSoundObject(SI2AdvancedSound* sound, int32_t immediate) {
+static void StopAdvancedSoundObject(SI2AdvancedSound* sound, BOOL immediate) {
     if (!sound) {
         return;
     }
 
     sound->m_stopped = 1;
 
-    if (sound->m_object) {
-        SI2::StopSound(sound->m_object, immediate, -1.0f, 0);
+    if (sound->m_pSoundHandle) {
+        SI2::StopSound(sound->m_pSoundHandle, immediate, -1.0f, 0);
     }
 }
 
@@ -69,7 +69,7 @@ static void StopAdvancedSoundObject(SI2AdvancedSound* sound, int32_t immediate) 
 // OFFSET: 0x004C9D90
 static int32_t RandomBetween(int32_t min, int32_t max) {
     if (max > min) {
-        return min + static_cast<int32_t>((static_cast<uint64_t>(static_cast<uint32_t>(max - min)) * CRandom::uint32_(g_rndSeed)) >> 32);
+        return min + static_cast<int32_t>(CRandom::dice_(max - min, g_rndSeed));
     }
 
     return max;
@@ -77,12 +77,12 @@ static int32_t RandomBetween(int32_t min, int32_t max) {
 
 // VERIFY: 3233d57a auto
 // OFFSET: 0x004C9DC0
-int32_t SI2AdvancedSound::Play() {
+SI2_RESULT SI2AdvancedSound::Play() {
     SE2SoundKitProperties properties;
 
     if (this->m_usage) {
-        if (static_cast<uint32_t>(this->m_usage - 1) > 1) {
-            return 0;
+        if (this->m_usage < SI2_SOUND_USAGE_INTERVAL || this->m_usage > SI2_SOUND_USAGE_ONESHOT) {
+            return SI2_OK;
         }
 
         properties.ResetToDefaults();
@@ -90,9 +90,9 @@ int32_t SI2AdvancedSound::Play() {
         properties.m_fadeOutTime = 0.01f;
         properties.m_group = this->m_volumeSliderCategory;
         properties.m_coneInsideAngle = this->m_insideAngle;
-        properties.m_loopMode = 2;
+        properties.m_loopMode = SE2_LOOP_MODE_NONLOOPING;
         properties.m_coneOutsideAngle = this->m_outsideAngle;
-        properties.m_maxAudibleBehavior = 1;
+        properties.m_maxAudibleBehavior = SE2_MAX_AUDIBLE_STEAL_LOWEST;
         properties.m_streaming = false;
         properties.m_coneOutsideVolume = this->m_outsideVolume;
         properties.m_software = 1;
@@ -100,12 +100,12 @@ int32_t SI2AdvancedSound::Play() {
 
         const C3Vector* position = (0.0f == this->m_position.x && 0.0f == this->m_position.y && 0.0f == this->m_position.z) ? nullptr : &this->m_position;
 
-        return SI2::PlaySoundKit(this->m_soundKitId, position, this->m_object, &properties, this->m_id, &this->m_soundId, 1, 1);
+        return SI2::PlaySoundKit(this->m_soundKitId, position, this->m_pSoundHandle, &properties, this->m_id, &this->m_soundId, 1, 1);
     }
 
     properties.ResetToDefaults();
-    properties.m_loopMode = 1;
-    properties.m_maxAudibleBehavior = 0;
+    properties.m_loopMode = SE2_LOOP_MODE_LOOPING;
+    properties.m_maxAudibleBehavior = SE2_MAX_AUDIBLE_MUTE;
     properties.m_streaming = true;
     properties.m_software = 1;
 
@@ -118,12 +118,12 @@ int32_t SI2AdvancedSound::Play() {
     properties.m_coneOutsideVolume = this->m_outsideVolume;
     properties.m_coneOrientation = (0.0f == this->m_orientation.x && 0.0f == this->m_orientation.y && 0.0f == this->m_orientation.z) ? nullptr : &this->m_orientation;
 
-    return SI2::PlaySoundKit(this->m_soundKitId, &this->m_position, this->m_object, &properties, this->m_id, &this->m_soundId, 1, 1);
+    return SI2::PlaySoundKit(this->m_soundKitId, &this->m_position, this->m_pSoundHandle, &properties, this->m_id, &this->m_soundId, 1, 1);
 }
 
 // VERIFY: 762dbd2f manual
 // OFFSET: 0x004C9FE0
-static float GetDuckVolume(int32_t group, SI2AdvancedSound* exclude) {
+static float GetDuckVolume(SI2_DUCK_CATEGORY group, SI2AdvancedSound* exclude) {
     float volume = 1.0f;
 
     for (SuppressorSound* node = s_suppressorSounds.Head(); node; node = s_suppressorSounds.Next(node)) {
@@ -168,21 +168,21 @@ SI2AdvancedSound::~SI2AdvancedSound() {
         node = next;
     }
 
-    if (this->m_object) {
-        this->m_object->m_advancedId = 0;
+    if (this->m_pSoundHandle) {
+        this->m_pSoundHandle->m_advancedId = 0;
     }
 
-    SE2SoundKitObject* object = this->m_object;
+    SE2SoundKitObject* object = this->m_pSoundHandle;
 
     if (object && !this->m_externalObject) {
         delete object;
-        this->m_object = nullptr;
+        this->m_pSoundHandle = nullptr;
     }
 }
 
 // VERIFY: 1ee25e28 auto
 // OFFSET: 0x004CA130
-int32_t SI2::IsAdvancedSoundNear(int32_t soundKitId, const C3Vector* position) {
+BOOL SI2::IsAdvancedSoundNear(int32_t soundKitId, const C3Vector* position) {
     if (!s_vsoundLookup) {
         return 1;
     }
@@ -211,7 +211,7 @@ int32_t SI2::IsAdvancedSoundNear(int32_t soundKitId, const C3Vector* position) {
 // VERIFY: 5e6aafa6 manual
 // OFFSET: 0x004CA1E0
 void SI2AdvancedSound::AddSuppressor() {
-    if ((this->m_duck[0] >= 0.0f && this->m_duck[0] < 1.0f) || (this->m_duck[1] >= 0.0f && this->m_duck[1] < 1.0f) || (this->m_duck[2] >= 0.0f && this->m_duck[2] < 1.0f)) {
+    if ((this->m_duck[SI2_DUCK_SFX] >= 0.0f && this->m_duck[SI2_DUCK_SFX] < 1.0f) || (this->m_duck[SI2_DUCK_MUSIC] >= 0.0f && this->m_duck[SI2_DUCK_MUSIC] < 1.0f) || (this->m_duck[SI2_DUCK_AMBIENCE] >= 0.0f && this->m_duck[SI2_DUCK_AMBIENCE] < 1.0f)) {
         for (SuppressorSound* node = s_suppressorSounds.Head(); node; node = s_suppressorSounds.Next(node)) {
             if (node->m_sound == this) {
                 return;
@@ -244,7 +244,7 @@ void SI2::UpdateDucking(int32_t elapsed) {
     for (SuppressorSound* node = s_suppressorSounds.Head(); node;) {
         SuppressorSound* next = s_suppressorSounds.Next(node);
 
-        for (int32_t i = 0; i < 3; i++) {
+        for (int32_t i = 0; i < SI2_DUCK_COUNT; i++) {
             SI2AdvancedSound* sound = node->m_sound;
             float* volume = &node->m_volume[i];
 
@@ -297,7 +297,7 @@ void SI2::UpdateDucking(int32_t elapsed) {
             }
         }
 
-        if (!node->m_sound && 1.0f == node->m_volume[0] && 1.0f == node->m_volume[1] && 1.0f == node->m_volume[2]) {
+        if (!node->m_sound && 1.0f == node->m_volume[SI2_DUCK_SFX] && 1.0f == node->m_volume[SI2_DUCK_MUSIC] && 1.0f == node->m_volume[SI2_DUCK_AMBIENCE]) {
             delete node;
         }
 
@@ -335,7 +335,7 @@ int32_t SI2::UpdateAdvancedSounds(const void* data, void* param) {
             continue;
         }
 
-        SESound* object = sound->m_object ? &sound->m_object->m_sound : nullptr;
+        SESound* object = sound->m_pSoundHandle ? &sound->m_pSoundHandle->m_sound : nullptr;
         created = 0;
 
         if (object && object->IsPlaying()) {
@@ -349,22 +349,22 @@ int32_t SI2::UpdateAdvancedSounds(const void* data, void* param) {
                 int32_t immediate = sound->m_volume <= 0.0f;
                 sound->m_stopped = 1;
 
-                if (sound->m_object) {
-                    SI2::StopSound(sound->m_object, immediate, -1.0f, 0);
+                if (sound->m_pSoundHandle) {
+                    SI2::StopSound(sound->m_pSoundHandle, immediate, -1.0f, 0);
                 }
 
                 continue;
             }
 
-            SI2SoundUserData* userData = static_cast<SI2SoundUserData*>(sound->m_object->m_sound.GetUserData());
+            SI2SoundUserData* userData = static_cast<SI2SoundUserData*>(sound->m_pSoundHandle->m_sound.GetUserData());
 
-            if (!sound->m_usage && userData && userData->m_def->m_numFiles > 1 && sound->m_intervalMin > 0.0f && sound->m_intervalMax > 0.0f) {
+            if (!sound->m_usage && userData && userData->m_def->m_numFiles > 1 && sound->m_interval.m_l > 0.0f && sound->m_interval.m_h > 0.0f) {
                 sound->m_nextInterval -= elapsed;
 
                 if (sound->m_nextInterval < 0) {
                     StopAdvancedSoundObject(sound, 0);
                     sound->Play();
-                    sound->m_nextInterval = RandomBetween(sound->m_intervalMin, sound->m_intervalMax);
+                    sound->m_nextInterval = RandomBetween(sound->m_interval.m_l, sound->m_interval.m_h);
                 }
             }
 
@@ -393,6 +393,7 @@ int32_t SI2::UpdateAdvancedSounds(const void* data, void* param) {
                         level = 0.0f;
                     }
 
+                    STORM_ASSERT(level >= 0.0f && level <= 1.0f); // 12213: "f3DPan >= 0.0f && f3DPan <= 1.0f"
                     pan = level;
 
                     if (!(node->m_sound->m_innerRadiusOfInfluence * node->m_sound->m_innerRadiusOfInfluence < distanceSq)) {
@@ -409,7 +410,7 @@ int32_t SI2::UpdateAdvancedSounds(const void* data, void* param) {
                 }
             }
 
-            if (sound->m_usage != 2 && (sound->m_timeA || sound->m_timeB || sound->m_timeC || sound->m_timeD)) {
+            if (sound->m_usage != SI2_SOUND_USAGE_ONESHOT && (sound->m_timeA || sound->m_timeB || sound->m_timeC || sound->m_timeD)) {
                 int32_t offset = sound->m_randomOffset;
                 int32_t time = s_dayTime;
 
@@ -418,6 +419,7 @@ int32_t SI2::UpdateAdvancedSounds(const void* data, void* param) {
                 }
 
                 if (time < offset + sound->m_timeB) {
+                    STORM_ASSERT((sound->m_timeB - sound->m_timeA) > 0); // 12213: "( pVSound->m_nTimeB - pVSound->m_nTimeA ) > 0"
                     sound->m_volume = static_cast<float>(time - sound->m_timeA) / (sound->m_timeB - sound->m_timeA);
 
                     if (sound->m_volume > 1.0f) {
@@ -430,6 +432,7 @@ int32_t SI2::UpdateAdvancedSounds(const void* data, void* param) {
                 } else if (time < offset + sound->m_timeC) {
                     sound->m_volume = 1.0f;
                 } else {
+                    STORM_ASSERT((sound->m_timeD - sound->m_timeC) >= 0); // 12213: "( pVSound->m_nTimeD - pVSound->m_nTimeC ) >= 0"
                     sound->m_volume = 1.0f - static_cast<float>(time - sound->m_timeC) / (sound->m_timeD - sound->m_timeC);
 
                     if (sound->m_volume > 1.0f) {
@@ -447,9 +450,9 @@ int32_t SI2::UpdateAdvancedSounds(const void* data, void* param) {
         }
 
         SI2AdvancedSound* advanced = node->m_sound;
-        int32_t usage = advanced->m_usage;
+        SI2_SOUND_USAGE usage = advanced->m_usage;
 
-        if (!advanced->m_object || usage == 2 || (!usage && advanced->m_stopped)) {
+        if (!advanced->m_pSoundHandle || usage == SI2_SOUND_USAGE_ONESHOT || (!usage && advanced->m_stopped)) {
             VSOUND_LOOKUP* next = s_vsoundLookup->m_fulllist.Next(node);
             s_vsoundLookup->DeleteNode(node);
             node = next;
@@ -459,12 +462,12 @@ int32_t SI2::UpdateAdvancedSounds(const void* data, void* param) {
         if (IsInTimeWindow(advanced)) {
             if (!usage) {
                 node->m_sound->Play();
-            } else if (usage == 1) {
+            } else if (usage == SI2_SOUND_USAGE_INTERVAL) {
                 node->m_sound->m_nextInterval -= elapsed;
 
                 if (node->m_sound->m_nextInterval < 0) {
                     node->m_sound->Play();
-                    sound->m_nextInterval = RandomBetween(sound->m_intervalMin, sound->m_intervalMax);
+                    sound->m_nextInterval = RandomBetween(sound->m_interval.m_l, sound->m_interval.m_h);
                 }
             }
         }
@@ -546,18 +549,18 @@ float SI2::GetSoundVolume(SESoundUserData* userData) {
         sound = nullptr;
     }
 
-    int32_t group = data->m_group;
+    SI2_SOUND_GROUP group = data->m_group;
 
-    if (!group || group >= 7) {
-        return GetDuckVolume(0, sound) * volume;
+    if (!group || group >= SI2_SOUND_GROUP_VOCAL_ERROR) {
+        return GetDuckVolume(SI2_DUCK_SFX, sound) * volume;
     }
 
-    if (group == 1) {
-        return GetDuckVolume(1, sound) * volume;
+    if (group == SI2_SOUND_GROUP_MUSIC) {
+        return GetDuckVolume(SI2_DUCK_MUSIC, sound) * volume;
     }
 
-    if (group == 2) {
-        return GetDuckVolume(2, sound) * volume;
+    if (group == SI2_SOUND_GROUP_AMBIENCE) {
+        return GetDuckVolume(SI2_DUCK_AMBIENCE, sound) * volume;
     }
 
     return volume;
@@ -612,12 +615,12 @@ void SI2AdvancedSound::Stop(int32_t remove, float fadeOutTime) {
 
     this->m_stopped = 1;
 
-    if (this->m_object) {
+    if (this->m_pSoundHandle) {
         if (fadeOutTime >= 0.0f) {
-            this->m_object->m_sound.SetFadeOutTime(fadeOutTime);
+            this->m_pSoundHandle->m_sound.SetFadeOutTime(fadeOutTime);
         }
 
-        this->m_object->m_sound.FadeOutNow();
+        this->m_pSoundHandle->m_sound.FadeOutNow();
     }
 }
 
@@ -637,13 +640,13 @@ void SI2::StopAdvancedSound(uint32_t id, int32_t remove, float fadeOutTime) {
 
 // VERIFY: 87c34bf4 manual
 // OFFSET: 0x004CB580
-int32_t SI2::AddAdvancedSound(SoundEntriesAdvancedRec* rec, int32_t soundKitId, const C3Vector* position, const C3Vector* orientation, SE2SoundKitObject* object, int32_t quickFade, int32_t a7, int32_t checkDistance, int32_t forceLoop) {
+SI2_RESULT SI2::AddAdvancedSound(SoundEntriesAdvancedRec* rec, int32_t soundKitId, const C3Vector* position, const C3Vector* orientation, SE2SoundKitObject* object, int32_t quickFade, int32_t unknown7, int32_t checkDistance, BOOL forceLoop) {
     if (!rec) {
-        return 24;
+        return SI2_ERR_NO_ADVANCED_RECORD;
     }
 
     if (!s_vsoundLookup) {
-        return 17;
+        return SI2_ERR_SOUND_DISABLED;
     }
 
     C3Vector zero;
@@ -656,26 +659,27 @@ int32_t SI2::AddAdvancedSound(SoundEntriesAdvancedRec* rec, int32_t soundKitId, 
     }
 
     if (position && !quickFade && checkDistance && SI2::IsAdvancedSoundNear(rec->m_id, position)) {
-        return 15;
+        return SI2_ERR_ALREADY_PLAYING;
     }
 
     SI2AdvancedSound* sound = new (SMemAlloc(sizeof(SI2AdvancedSound), __FILE__, __LINE__, 0)) SI2AdvancedSound();
 
     if (!sound) {
-        return 22;
+        return SI2_ERR_OUT_OF_MEMORY;
     }
 
     if (object) {
-        sound->m_object = object;
+        sound->m_pSoundHandle = object;
         sound->m_externalObject = 1;
     } else {
         sound->m_externalObject = 0;
-        sound->m_object = new (SMemAlloc(sizeof(SE2SoundKitObject), __FILE__, __LINE__, 0)) SE2SoundKitObject();
+        sound->m_pSoundHandle = new (SMemAlloc(sizeof(SE2SoundKitObject), __FILE__, __LINE__, 0)) SE2SoundKitObject();
+        STORM_ASSERT(sound->m_pSoundHandle); // 12213: "pNewVSound->m_pSoundHandle"
 
-        if (!sound->m_object) {
+        if (!sound->m_pSoundHandle) {
             sound->~SI2AdvancedSound();
             SMemFree(sound, "delete", -1, 0);
-            return 22;
+            return SI2_ERR_OUT_OF_MEMORY;
         }
     }
 
@@ -704,14 +708,14 @@ int32_t SI2::AddAdvancedSound(SoundEntriesAdvancedRec* rec, int32_t soundKitId, 
     sound->m_randomOffsetRange = rec->m_randomOffsetRange;
     sound->m_volume = 1.0f;
     sound->m_randomOffset = RandomBetween(0, sound->m_randomOffsetRange);
-    sound->m_usage = forceLoop ? 0 : rec->m_usage;
-    sound->m_intervalMin = rec->m_timeIntervalMin;
-    sound->m_intervalMax = rec->m_timeIntervalMax;
-    sound->m_nextInterval = RandomBetween(sound->m_intervalMin, sound->m_intervalMax);
+    sound->m_usage = forceLoop ? SI2_SOUND_USAGE_LOOPING : rec->m_usage;
+    sound->m_interval.m_l = rec->m_timeIntervalMin;
+    sound->m_interval.m_h = rec->m_timeIntervalMax;
+    sound->m_nextInterval = RandomBetween(sound->m_interval.m_l, sound->m_interval.m_h);
     sound->m_volumeSliderCategory = rec->m_volumeSliderCategory;
-    sound->m_duck[0] = (rec->m_duckToSfx < 0.0f || rec->m_duckToSfx > 1.0f) ? 1.0f : rec->m_duckToSfx;
-    sound->m_duck[1] = (rec->m_duckToMusic < 0.0f || rec->m_duckToMusic > 1.0f) ? 1.0f : rec->m_duckToMusic;
-    sound->m_duck[2] = (rec->m_duckToAmbience < 0.0f || rec->m_duckToAmbience > 1.0f) ? 1.0f : rec->m_duckToAmbience;
+    sound->m_duck[SI2_DUCK_SFX] = (rec->m_duckToSfx < 0.0f || rec->m_duckToSfx > 1.0f) ? 1.0f : rec->m_duckToSfx;
+    sound->m_duck[SI2_DUCK_MUSIC] = (rec->m_duckToMusic < 0.0f || rec->m_duckToMusic > 1.0f) ? 1.0f : rec->m_duckToMusic;
+    sound->m_duck[SI2_DUCK_AMBIENCE] = (rec->m_duckToAmbience < 0.0f || rec->m_duckToAmbience > 1.0f) ? 1.0f : rec->m_duckToAmbience;
     sound->m_innerRadiusOfInfluence = rec->m_innerRadiusOfInfluence;
     sound->m_outerRadiusOfInfluence = rec->m_outerRadiusOfInfluence;
 
@@ -740,10 +744,10 @@ int32_t SI2::AddAdvancedSound(SoundEntriesAdvancedRec* rec, int32_t soundKitId, 
     }
 
     sound->m_orientation = *orientation;
-    sound->unused_0008 = a7;
+    sound->unused_0008 = unknown7;
 
     sound->m_id = s_nextAdvancedId;
-    sound->m_object->m_advancedId = s_nextAdvancedId;
+    sound->m_pSoundHandle->m_advancedId = s_nextAdvancedId;
     s_nextAdvancedId++;
 
     uint32_t id = sound->m_id;
@@ -751,22 +755,22 @@ int32_t SI2::AddAdvancedSound(SoundEntriesAdvancedRec* rec, int32_t soundKitId, 
     node->m_hashval = id;
     node->m_sound = sound;
 
-    if (sound->m_usage == 2) {
+    if (sound->m_usage == SI2_SOUND_USAGE_ONESHOT) {
         sound->Play();
 
-        if (SI2::IsPlaying(sound->m_object)) {
+        if (SI2::IsPlaying(sound->m_pSoundHandle)) {
             sound->AddSuppressor();
         }
     }
 
-    return 0;
+    return SI2_OK;
 }
 
 // INLINED
 SuppressorSound::SuppressorSound() {
-    this->m_volume[0] = 1.0f;
-    this->m_volume[1] = 1.0f;
-    this->m_volume[2] = 1.0f;
+    this->m_volume[SI2_DUCK_SFX] = 1.0f;
+    this->m_volume[SI2_DUCK_MUSIC] = 1.0f;
+    this->m_volume[SI2_DUCK_AMBIENCE] = 1.0f;
     this->m_sound = nullptr;
     this->m_distance = 0.0f;
     this->m_fadeTime = 1000;

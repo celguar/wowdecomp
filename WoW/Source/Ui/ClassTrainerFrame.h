@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
 
@@ -20,9 +21,13 @@ enum TRAINER_SERVICE : int32_t {
     TRAINER_SERVICE_AVAILABLE = 0,
     TRAINER_SERVICE_UNAVAILABLE = 1,
     TRAINER_SERVICE_USED = 2,
+    // These packet/filter slots are supported; their distinct meanings are unresolved.
+    TRAINER_SERVICE_UNKNOWN_3 = 3,
+    TRAINER_SERVICE_UNKNOWN_4 = 4,
+    TRAINER_SERVICE_UNKNOWN_5 = 5,
     NUM_TRAINER_SERVICE_TYPES = 6,
 
-    // Unused 0.5.3 names; current meanings of slots 3..5 are unverified.
+    // Historical names are not applied to the unresolved current slots.
     // TRAINER_SERVICE_NOT_SHOWN = 3,
     // TRAINER_SERVICE_NEVER = 4,
     // TRAINER_SERVICE_NO_PET = 5,
@@ -44,15 +49,15 @@ struct TrainerServiceInfo {
     /* 0024 */ int32_t m_abilityReq[3];
     /* 0030 */ uint8_t m_state;
     /* 0031 */ uint8_t unused_0031[3];
-    /* 0034 */ int32_t m_visible;
+    /* 0034 */ BOOL m_visible;
 };
 
 struct TrainerSkillLineInfo {
     /* 0000 */ int32_t m_skillLine;
     /* 0004 */ uint32_t m_stateCounts[NUM_TRAINER_SERVICE_TYPES];
-    /* 001C */ int32_t m_visible;
+    /* 001C */ BOOL m_visible;
     /* 0020 */ int32_t m_collapsed;
-    /* 0024 */ int32_t unk_0024;
+    /* 0024 */ BOOL m_allServicesCostPoints; // Every service costs talent or profession points; sorted last (name inferred).
 };
 
 class CGClassTrainer {
@@ -80,7 +85,7 @@ class CGClassTrainer {
     static int32_t GetSelectionIndex();
     static const char* GetServiceType(uint32_t index);
     static int32_t GetSkillLineIndexFromService(uint32_t index);
-    static int32_t IsCollapsedHeader(uint32_t index);
+    static BOOL IsCollapsedHeader(uint32_t index);
     static void BuyService();
     static const char* GetServiceName(uint32_t index);
     static const char* GetServiceSubtext(uint32_t index);

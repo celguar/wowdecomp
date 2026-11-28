@@ -12,6 +12,8 @@ Battlenet::Allocator::~Allocator() {
 // VERIFY: 90ab8d30 auto
 // OFFSET: 0x009C0D10
 bool Battlenet::Initialize(Allocator& allocator) {
+    STORM_ASSERT(!g_allocator || g_allocator == &allocator);
+
     Battlenet::g_allocator = &allocator;
     return true;
 }
@@ -46,7 +48,7 @@ Battlenet::Event::Header::Header() {
     this->m_source.m_exists = false;
     this->m_source.m_adapter = 0;
     this->m_source.m_event = static_cast<uint32_t>(-1);
-    this->m_target.m_type = 0;
+    this->m_destination.m_type = Target::TYPE_EVENT_ID;
 }
 
 // VERIFY: 4794d187 manual

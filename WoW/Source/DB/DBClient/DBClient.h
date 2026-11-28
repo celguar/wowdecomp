@@ -247,6 +247,7 @@
 
 enum STRINGLOOKUP : uint32_t {
     SLOOKUP_INVENTORYICONPATH = 3,
+    NUM_STRINGLOOKUPS = 4, // 12213 assertion bound
 
     // Unused 0.5.3 definitions; current assignments are unverified.
     // SLOOKUP_UNUSED = 0,
@@ -386,7 +387,7 @@ extern WowClientDB<MailTemplateRec> g_mailTemplateDB;
 extern WowClientDB<MapRec> g_mapDB;
 extern WowClientDB<MapDifficultyRec> g_mapDifficultyDB;
 
-MapDifficultyRec* GetMapDifficultyEntryByMapIdAndDifficulty(int32_t mapId, uint32_t difficulty, int32_t* a3);
+MapDifficultyRec* GetMapDifficultyEntryByMapIdAndDifficulty(int32_t mapId, uint32_t difficulty, int32_t* index);
 int32_t GetMaxPlayersForMap(const MapRec* map, int32_t difficulty);
 int32_t GetMapResetTime(int32_t mapId, uint32_t difficulty);
 extern WowClientDB<MaterialRec> g_materialDB;
@@ -506,7 +507,7 @@ extern WowClientDB_RLE<LightFloatBandRec> g_lightFloatBandDB;
 extern WowClientDB<LightParamsRec> g_lightParamsDB;
 extern WowClientDB<LightRec> g_lightDB;
 
-int32_t ClientDBGetNumWeaponSubClasses();
+uint32_t ClientDBGetNumWeaponSubclasses();
 int32_t ClientDBGetUnarmedWeapon();
 void ClientDBInitialize();
 void ClientDBShutdown();
@@ -514,9 +515,8 @@ void GameTablesInitialize();
 void InitLights(bool transform);
 void InitResistances();
 void InitTerrainTypeFlags();
-void InitWeaponSubclasses();
 void SDBItemSubclassInitialize();
-const ItemSubClassRec* SDBItemSubclassGetSubClassRec(uint32_t classID, uint32_t subClassID);
+const ItemSubClassRec* SDBItemSubclassGetSubClassRec(ITEM_CLASS classID, uint32_t subClassID);
 int32_t GetPhysicalDamageClassID();
 uint32_t GetPhysicalDamageClassMask();
 

@@ -19,8 +19,41 @@ struct BattlenetUIFriend {
     /* 028C */ BSN::String<40> m_sortSurname;
 };
 
+// Battle.net friend invite results with a dedicated UI error (inferred names after that error).
+enum BN_FRIEND_INVITE_RESULT : uint16_t {
+    BN_FRIEND_INVITE_ALREADY = 604,
+    BN_FRIEND_INVITE_SELF = 617,
+    BN_FRIEND_INVITE_BLOCKED = 623,
+};
+
+// Battle.net error codes the client itself raises. Their text comes from the Battle.net module
+// (BattlenetAPI_GetErrorString), so the meaning is not named in the client.
+enum BN_ERROR : uint16_t {
+    // Raised by BNSendWhisper when the target has no toon name; DisplayError keeps it out of the
+    // UI error frame.
+    BN_ERROR_UNKNOWN_318 = 318,
+};
+
+// BattlenetUI::SystemMessageCB message IDs, named after the BN_SYSTEM_MESSAGE type strings.
+enum BN_SYSTEM_MESSAGE_ID : uint32_t {
+    BN_SYSTEM_MESSAGE_SHUTDOWN_MINUTES = 3800,
+    BN_SYSTEM_MESSAGE_SHUTDOWN_SECONDS = 3801,
+    BN_SYSTEM_MESSAGE_SHUTDOWN_NOW = 3802,
+};
+
 class BattlenetUI {
     public:
+    // Battle.net conversation channel slots (inferred name).
+    static const int32_t MAX_CHAT_CHANNELS = 6;
+
+    // BattlenetEvent_ChannelJoined channel type. CONVERSATION is named from the
+    // YOU_JOINED_CONVERSATION notice; the other values are unknown.
+    enum CHAT_CHANNEL_TYPE : int32_t {
+        CHAT_CHANNEL_TYPE_UNKNOWN_0 = 0,
+        CHAT_CHANNEL_TYPE_UNKNOWN_1 = 1,
+        CHAT_CHANNEL_TYPE_CONVERSATION = 2,
+    };
+
     struct EventCallback {
         /* 0000 */ const char* m_event;
         /* 0004 */ GeneralFunction::SimpleCallbackFunc m_func;
@@ -60,6 +93,7 @@ class BattlenetUI {
     static char s_displayName[72];
 
     static bool AddToFriendList(uint32_t presenceId);
+    static bool BNFeaturesEnabled();
     static int32_t BNGetFriendInfoHelper(lua_State* L, uint32_t index);
     static int32_t BNGetToonInfoHelper(lua_State* L, uint32_t presenceId);
     static void BlockAddedCB(void* param, int32_t argc, const GeneralFunction::Arg* args);

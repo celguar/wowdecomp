@@ -2,18 +2,108 @@
 #define WOW_SOURCE_UI_GUILDINFO_H
 
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Net/Types.h"
+#include "WoW/Source/Ui/GuildBankFrame.h"
 #include "WoW/Source/Object/WGUID.h"
 
 class CDataStore;
 struct lua_State;
 
+// SMSG_GUILD_COMMAND_RESULT command word. Named values follow the success
+// messages (ERR_GUILD_CREATE_S, ERR_GUILD_INVITE_S, ERR_GUILD_QUIT_S,
+// ERR_GUILD_FOUNDER_S); the others only trigger roster refreshes.
+enum GUILD_COMMAND_TYPE : uint32_t {
+    GUILD_COMMAND_CREATE     = 0,
+    GUILD_COMMAND_INVITE     = 1,
+    GUILD_COMMAND_QUIT       = 3,
+    GUILD_COMMAND_UNKNOWN_5  = 5,
+    GUILD_COMMAND_FOUNDER    = 14,
+    GUILD_COMMAND_UNKNOWN_19 = 19,
+    GUILD_COMMAND_UNKNOWN_20 = 20,
+};
+
+// SMSG_GUILD_COMMAND_RESULT result word, separate from guild command/event IDs.
+// Names describe verified client actions; unknown results keep the silent default.
+enum GUILD_COMMAND_RESULT : uint32_t {
+    GUILD_RESULT_SUCCESS                                    = 0,
+    GUILD_RESULT_INTERNAL                                   = 1,
+    GUILD_RESULT_ALREADY_IN_GUILD                           = 2,
+    GUILD_RESULT_PLAYER_ALREADY_IN_GUILD                    = 3,
+    GUILD_RESULT_ALREADY_INVITED                            = 4,
+    GUILD_RESULT_PLAYER_ALREADY_INVITED                     = 5,
+    GUILD_RESULT_NAME_INVALID                               = 6,
+    GUILD_RESULT_NAME_EXISTS                                = 7,
+    // Quit command 3 reports leader-cannot-leave; others report permissions.
+    GUILD_RESULT_LEADER_CANNOT_LEAVE_OR_NO_PERMISSION       = 8,
+    GUILD_RESULT_NOT_IN_GUILD                               = 9,
+    GUILD_RESULT_PLAYER_NOT_IN_GUILD                        = 10,
+    GUILD_RESULT_PLAYER_NOT_FOUND                           = 11,
+    GUILD_RESULT_NOT_ALLIED                                 = 12,
+    GUILD_RESULT_RANK_TOO_HIGH                              = 13,
+    GUILD_RESULT_RANK_TOO_LOW                               = 14,
+    GUILD_RESULT_RANKS_LOCKED                               = 17,
+    GUILD_RESULT_RANK_IN_USE                                = 18,
+    GUILD_RESULT_IGNORING_YOU                               = 19,
+    // No message; refreshes the roster only for command 5. Server cause unverified.
+    GUILD_RESULT_REFRESH_ROSTER                             = 20,
+    GUILD_RESULT_WITHDRAW_LIMIT                             = 25,
+    GUILD_RESULT_NOT_ENOUGH_MONEY                           = 26,
+    GUILD_RESULT_BANK_FULL                                  = 28,
+    GUILD_RESULT_ITEM_NOT_FOUND                             = 29,
+};
+
+// GuildRankInfo::m_rights. Bits tested by one Lua function are named after it (CanGuildPromote,
+// CanEditMOTD, ...); chat bits follow the GuildControl option order (Guildchat/Officerchat
+// Listen/Speak). Bit 17 is only toggled through the rank control flags.
+enum GUILD_RANK_RIGHTS : uint32_t {
+    GUILD_RIGHT_GUILDCHAT_LISTEN = 0x1,
+    GUILD_RIGHT_GUILDCHAT_SPEAK = 0x2,
+    GUILD_RIGHT_OFFICERCHAT_LISTEN = 0x4,
+    GUILD_RIGHT_OFFICERCHAT_SPEAK = 0x8,
+    GUILD_RIGHT_INVITE = 0x10,
+    GUILD_RIGHT_REMOVE = 0x20,
+    GUILD_RIGHT_PROMOTE = 0x80,
+    GUILD_RIGHT_DEMOTE = 0x100,
+    GUILD_RIGHT_EDIT_MOTD = 0x1000,
+    GUILD_RIGHT_EDIT_PUBLIC_NOTE = 0x2000,
+    GUILD_RIGHT_VIEW_OFFICER_NOTE = 0x4000,
+    GUILD_RIGHT_EDIT_OFFICER_NOTE = 0x8000,
+    GUILD_RIGHT_EDIT_GUILD_INFO = 0x10000,
+    GUILD_RIGHT_UNKNOWN_17 = 0x20000,
+    GUILD_RIGHT_BANK_REPAIR = 0x40000,
+    GUILD_RIGHT_WITHDRAW_BANK_MONEY = 0x80000,
+    GUILD_RIGHT_EDIT_GUILD_EVENT = 0x100000,
+};
+
+// GuildRankInfo::m_bankTabRights, named after the GetGuildBankTabInfo/GetGuildBankTabPermissions
+// returns (isViewable, canDeposit) and CanEditGuildTabInfo.
+enum GUILDBANK_TAB_RIGHTS : uint32_t {
+    GUILDBANK_TAB_RIGHT_VIEW = 0x1,
+    GUILDBANK_TAB_RIGHT_DEPOSIT = 0x2,
+    GUILDBANK_TAB_RIGHT_UPDATE_TEXT = 0x4,
+};
+
+// Rank permission toggles exposed by GuildControlGetRankFlags/GuildControlSetRankFlag (inferred name).
+constexpr uint32_t NUM_GUILD_RANK_FLAGS = 17;
+
+// Size of CGGuildInfo::m_rankInfo; GuildControlAddRank stops sending CMSG_GUILD_ADD_RANK at this count.
+constexpr uint32_t MAX_GUILD_RANKS = 10;
+
+// GuildMemberInfo::m_status bits from the roster. Any nonzero status marks the member online;
+// GetGuildRosterInfo reports DND and AFK with the CHAT_FLAG_DND and CHAT_FLAG_AFK strings.
+enum GUILD_MEMBER_STATUS : uint8_t {
+    GUILD_MEMBER_STATUS_ONLINE = 0x1, // inferred
+    GUILD_MEMBER_STATUS_AFK = 0x2,
+    GUILD_MEMBER_STATUS_DND = 0x4,
+};
+
 struct GuildRankInfo {
-    /* 0000 */ uint32_t m_rights;
+    /* 0000 */ uint32_t m_rights; // GUILD_RANK_RIGHTS
     /* 0004 */ int32_t m_bankMoneyPerDay;
-    /* 0008 */ uint32_t m_bankTabRights[6];
-    /* 0020 */ int32_t m_bankTabStacksPerDay[6];
+    /* 0008 */ uint32_t m_bankTabRights[MAX_GUILDBANK_TABS]; // GUILDBANK_TAB_RIGHTS
+    /* 0020 */ int32_t m_bankTabStacksPerDay[MAX_GUILDBANK_TABS];
 };
 
 struct GuildMemberInfo {
@@ -33,13 +123,36 @@ struct GuildMemberInfo {
     /* 0154 */ float m_lastOnline;
 };
 
+// Guild roster sort columns; names follow the SortGuildRoster type strings.
+enum GUILD_ROSTER_SORT_COLUMN : int32_t {
+    GUILD_ROSTER_SORT_RANK = 0, // "rank"
+    GUILD_ROSTER_SORT_LEVEL = 1, // "level"
+    GUILD_ROSTER_SORT_NAME = 2, // "name"
+    GUILD_ROSTER_SORT_ZONE = 3, // "zone"
+    GUILD_ROSTER_SORT_CLASS = 4, // "class"
+    GUILD_ROSTER_SORT_GROUP = 5, // "group"
+    GUILD_ROSTER_SORT_ONLINE = 6, // "online"
+    GUILD_ROSTER_SORT_NOTE = 7, // "note"
+    NUM_GUILD_ROSTER_SORT_COLUMNS = 8,
+};
+
 struct GuildRosterSortCriteria {
-    /* 0000 */ int32_t m_column;
+    /* 0000 */ int32_t m_column; // GUILD_ROSTER_SORT_COLUMN
     /* 0004 */ int32_t m_descending;
 };
 
 struct GuildEventLogEntry {
-    /* 0000 */ uint32_t m_type;
+    // Names follow the strings GetGuildEventInfo returns; other values report "none".
+    enum EVENT_TYPE : uint32_t {
+        EVENT_INVITE = 1,
+        EVENT_JOIN = 2,
+        EVENT_PROMOTE = 3,
+        EVENT_DEMOTE = 4,
+        EVENT_REMOVE = 5,
+        EVENT_QUIT = 6,
+    };
+
+    /* 0000 */ uint32_t m_type; // EVENT_TYPE
     /* 0004 */ uint32_t unused_0004;
     /* 0008 */ WOWGUID m_player1;
     /* 0010 */ WOWGUID m_player2;
@@ -49,7 +162,7 @@ struct GuildEventLogEntry {
 
 struct GuildRankFlag {
     /* 0000 */ uint32_t m_mask;
-    /* 0004 */ int32_t m_enabled;
+    /* 0004 */ BOOL m_enabled;
 };
 
 class CGGuildInfo {
@@ -62,16 +175,16 @@ class CGGuildInfo {
     static void InvalidatePlayer(const WOWGUID& guid);
     static char m_infoText[2004];
     static char m_motd[516];
-    static GuildRosterSortCriteria m_sortCriteria[8];
+    static GuildRosterSortCriteria m_sortCriteria[NUM_GUILD_ROSTER_SORT_COLUMNS];
     static uint32_t m_numMembers;
     static uint32_t m_numOnlineMembers;
-    static int32_t m_showOffline;
+    static BOOL m_showOffline;
     static WOWGUID m_selectedMember;
     static int32_t m_nextAllowedQuery;
     static int32_t m_pendingEventLogNames;
     static uint8_t m_saveToFile;
     static TSGrowableArray<GuildMemberInfo*> m_roster;
-    static GuildRankInfo m_rankInfo[10];
+    static GuildRankInfo m_rankInfo[MAX_GUILD_RANKS];
     static int32_t m_numEventLogEntries;
     static uint32_t m_numRanks;
     static GuildEventLogEntry m_eventLog[100];
@@ -80,7 +193,7 @@ class CGGuildInfo {
     static void InitializeGame();
     static void ShutdownGame();
     static void QueryPermissions();
-    static void SetShowOffline(int32_t show);
+    static void SetShowOffline(BOOL show);
     static int32_t GetSelectedMemberIndex();
     static bool CanEditGuildEvent();
 };
@@ -92,7 +205,7 @@ int32_t Packet_MSG_GUILD_PERMISSIONS(void* param, NETMESSAGE msgId, uint32_t tim
 int32_t Packet_MSG_GUILD_EVENT_LOG_QUERY(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
 int32_t QSortRoster(const void* a, const void* b);
 void GuildInfoCacheCallback(int32_t id, const WOWGUID& guid, void* param, bool success);
-void UpdateGuildRoster(int32_t a1);
+void UpdateGuildRoster(BOOL canRequestUpdate);
 
 int32_t Script_GuildRoster(lua_State* L);
 void GuildInfoRegisterScriptFunctions();

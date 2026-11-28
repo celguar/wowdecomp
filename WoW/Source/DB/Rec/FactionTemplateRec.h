@@ -6,6 +6,25 @@
 
 class SFileImpl;
 
+// Inferred name: explicit enemy and friend factions of a FactionTemplate.dbc record.
+constexpr int32_t NUM_FACTION_TEMPLATE_RELATIONS = 4;
+
+// FactionTemplate.dbc flags tested by the client; names follow EnumeratedString FactionTemplate::Flags.
+enum FACTION_TEMPLATE_FLAGS : int32_t {
+    FACTION_TEMPLATE_FLAG_NONE                       = 0x00000000,
+    // Hostile to the active player while they are flagged for contested PvP.
+    FACTION_TEMPLATE_FLAG_ATTACK_PVP_ACTIVE_PLAYERS = 0x00001000,
+};
+
+// Bits of m_factionGroup, m_friendGroup and m_enemyGroup: 1 << FactionGroup.dbc m_maskID,
+// named after the FactionGroup.dbc rows.
+enum FACTION_GROUP_MASK : int32_t {
+    FACTION_GROUP_MASK_PLAYER   = 0x1,
+    FACTION_GROUP_MASK_ALLIANCE = 0x2,
+    FACTION_GROUP_MASK_HORDE    = 0x4,
+    FACTION_GROUP_MASK_MONSTER  = 0x8,
+};
+
 class FactionTemplateRec {
     public:
     static const int32_t s_numColumns = 14;
@@ -14,12 +33,12 @@ class FactionTemplateRec {
 
     /* 0000 */ int32_t m_id;
     /* 0004 */ int32_t m_faction;
-    /* 0008 */ int32_t m_flags;
-    /* 000C */ int32_t m_factionGroup;
+    /* 0008 */ int32_t m_flags; // FACTION_TEMPLATE_FLAGS
+    /* 000C */ int32_t m_factionGroup; // FACTION_GROUP_MASK
     /* 0010 */ int32_t m_friendGroup;
     /* 0014 */ int32_t m_enemyGroup;
-    /* 0018 */ int32_t m_enemies [4];
-    /* 0028 */ int32_t m_friend [4];
+    /* 0018 */ int32_t m_enemies [NUM_FACTION_TEMPLATE_RELATIONS];
+    /* 0028 */ int32_t m_friend [NUM_FACTION_TEMPLATE_RELATIONS];
 
     FactionTemplateRec();
     ~FactionTemplateRec();

@@ -31,7 +31,7 @@
 #include "GameVersion.h"
 
 // STATIC: 0x00D31AA0
-COMSATDATA s_comsatData[32];
+COMSATDATA s_comsatData[MAX_VOICE_SESSIONS];
 
 // STATIC: 0x00D37CA0
 int32_t s_voiceActivation;
@@ -318,7 +318,7 @@ void AddComSatEvent(uint32_t type, float value, uint64_t guid) {
 
     if (event) {
         event->m_floatValue = value;
-        event->m_type = type;
+        event->m_type = static_cast<ComSatEvent::COMMAND>(type);
         event->m_guid = guid;
     }
 }
@@ -329,7 +329,7 @@ void AddComSatEvent(uint32_t type, uint32_t value, uint64_t guid) {
     ComSatEvent* event = s_comSatEvents.New();
 
     if (event) {
-        event->m_type = type;
+        event->m_type = static_cast<ComSatEvent::COMMAND>(type);
         event->m_guid = guid;
         event->m_uintValue = value;
     }
@@ -348,21 +348,21 @@ static void ResetVoiceVolumeState() {
 
     if (s_cvarSoundSFXVolume) {
         s_sfxVolumeBase = s_cvarSoundSFXVolume->m_floatValue;
-        SI2::SetChannelGroupVolume(0, s_sfxVolumeBase);
+        SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_SFX, s_sfxVolumeBase);
     } else {
         s_sfxVolumeBase = 0.0f;
     }
 
     if (s_cvarSoundMusicVolume) {
         s_musicVolumeBase = s_cvarSoundMusicVolume->m_floatValue;
-        SI2::SetChannelGroupVolume(1, s_musicVolumeBase);
+        SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_MUSIC, s_musicVolumeBase);
     } else {
         s_musicVolumeBase = 0.0f;
     }
 
     if (s_cvarSoundAmbienceVolume) {
         s_ambienceVolumeBase = s_cvarSoundAmbienceVolume->m_floatValue;
-        SI2::SetChannelGroupVolume(2, s_ambienceVolumeBase);
+        SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_AMBIENCE, s_ambienceVolumeBase);
     } else {
         s_ambienceVolumeBase = 0.0f;
     }
@@ -387,19 +387,19 @@ static void ProcessComSatCallbacks() {
         ComSatCallback& callback = s_comsatCallbacks[i];
 
         switch (callback.m_type) {
-            case 0:
+            case ComSatCallback::TYPE::LOCAL_TALKER_START:
                 Comsat::VoiceStart();
                 break;
 
-            case 1:
+            case ComSatCallback::TYPE::LOCAL_TALKER_STOP:
                 Comsat::VoiceStop();
                 break;
 
-            case 2:
+            case ComSatCallback::TYPE::TALKER_START:
                 Comsat::VoicePlateStart(callback.m_sessionId, callback.m_guid);
                 break;
 
-            case 3:
+            case ComSatCallback::TYPE::TALKER_STOP:
                 Comsat::VoicePlateStop(callback.m_sessionId, callback.m_guid);
                 break;
 
@@ -422,6 +422,7 @@ void ComSatClient_Shutdown() {
 
     ProcessComSatCallbacks();
     EventUnregister(EVENT_ID_IDLE, VoiceChat_TickWrapper);
+    STORM_ASSERT(!ComSatThread::s_threadRunning); // 12213: "!s_threadRunning"
     ComSat::Interface::Destroy(ComSatThread::s_comsat, s_comsatAllocator);
     ComSatThread::s_comsat = nullptr;
     s_mutedPlayers.InternalClear(0);
@@ -465,7 +466,7 @@ void UpdatePushToTalkKey() {
 // VERIFY: 968200fd manual
 // OFFSET: 0x007DB600
 int32_t ComSatClient_IsTalkerSquelched(WOWGUID guid, uint32_t session) {
-    if (!guid || session > 31) {
+    if (!guid || session >= MAX_VOICE_SESSIONS) {
         return 0;
     }
 
@@ -474,7 +475,7 @@ int32_t ComSatClient_IsTalkerSquelched(WOWGUID guid, uint32_t session) {
 
     for (int32_t i = 0; i < static_cast<int32_t>(data.m_numMembers); i++) {
         if (data.m_members[i].m_guid == guid) {
-            int32_t result = data.m_members[i].m_flags & 0x8;
+            int32_t result = data.m_members[i].m_flags & COMSATMEMBER::F_TALKER_SQUELCHED;
             s_comsatDeviceLock.Leave();
             return result;
         }
@@ -494,7 +495,7 @@ int32_t ComSatClient_IsTalkerSquelchedInChannel(WOWGUID guid, int32_t type, cons
 // VERIFY: 75ebd9f3 manual
 // OFFSET: 0x007DB6E0
 int32_t ComSatClient_IsMemberVoiceActive(WOWGUID guid, uint32_t session) {
-    if (!guid || session > 31) {
+    if (!guid || session >= MAX_VOICE_SESSIONS) {
         return 0;
     }
 
@@ -503,7 +504,7 @@ int32_t ComSatClient_IsMemberVoiceActive(WOWGUID guid, uint32_t session) {
 
     for (int32_t i = 0; i < static_cast<int32_t>(data.m_numMembers); i++) {
         if (data.m_members[i].m_guid == guid) {
-            int32_t result = data.m_members[i].m_flags & 0x40;
+            int32_t result = data.m_members[i].m_flags & COMSATMEMBER::F_TALKER_ACTIVE;
             s_comsatDeviceLock.Leave();
             return result;
         }
@@ -523,7 +524,7 @@ int32_t ComSatClient_IsMemberInVoiceSession(WOWGUID guid, int32_t type, const ch
 // VERIFY: 8c8597f1 manual
 // OFFSET: 0x007DB7A0
 int32_t ComSatClient_GetMemberVoiceStatus(WOWGUID guid, uint32_t session) {
-    if (!guid || session > 31) {
+    if (!guid || session >= MAX_VOICE_SESSIONS) {
         return 0;
     }
 
@@ -532,7 +533,7 @@ int32_t ComSatClient_GetMemberVoiceStatus(WOWGUID guid, uint32_t session) {
 
     for (int32_t i = 0; i < static_cast<int32_t>(data.m_numMembers); i++) {
         if (data.m_members[i].m_guid == guid) {
-            int32_t result = data.m_members[i].m_flags & 0x4;
+            int32_t result = data.m_members[i].m_flags & COMSATMEMBER::F_TALKER_ENABLED;
             s_comsatDeviceLock.Leave();
             return result;
         }
@@ -590,7 +591,7 @@ int32_t ComSatClient_GetCurrentSessionType() {
         return s_comsatData[s_currentSession].m_type;
     }
 
-    return 4;
+    return COMSATDATA::SESSION_TYPE::NONE;
 }
 
 // VERIFY: 706dd5de manual
@@ -619,7 +620,7 @@ int32_t ComSatClient_FindSessionByTypeAndName(int32_t type, const char* name) {
             return cached;
         }
 
-        if (!SStrCmpUTF8I(s_comsatData[cached].m_name, name, 0x7FFFFFFF)) {
+        if (!SStrCmpUTF8I(s_comsatData[cached].m_name, name, STORM_MAX_STR)) {
             return s_lastFoundSession;
         }
     }
@@ -628,10 +629,10 @@ int32_t ComSatClient_FindSessionByTypeAndName(int32_t type, const char* name) {
         return -1;
     }
 
-    for (int32_t i = 0; i < 32; i++) {
+    for (int32_t i = 0; i < MAX_VOICE_SESSIONS; i++) {
         COMSATDATA* data = &s_comsatData[i];
 
-        if (data->m_sessionID && data->m_type == type && (type || !SStrCmpUTF8I(data->m_name, name, 0x7FFFFFFF))) {
+        if (data->m_sessionID && data->m_type == type && (type || !SStrCmpUTF8I(data->m_name, name, STORM_MAX_STR))) {
             s_lastFoundSession = i;
             return i;
         }
@@ -677,7 +678,7 @@ void ComSatClient_SendEvent(int32_t event, WOWGUID guid) {
 // VERIFY: e9df536e auto
 // OFFSET: 0x007DEEC0
 bool ComSatClient_IsPlayerMuted(WOWGUID guid) {
-    return s_mutedPlayers.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid)) != nullptr;
+    return s_mutedPlayers.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid)) != nullptr;
 }
 
 // VERIFY: b6621cc2 manual
@@ -687,18 +688,18 @@ static void ComSatClient_SetCurrentSessionI(int32_t index) {
     const char* name;
 
     if (index == -1) {
-        AddComSatEvent(5, 0u, 0ull);
+        AddComSatEvent(ComSatEvent::COMMAND::SELECT_SESSION, 0u, 0ull);
         s_currentSession = -1;
-        type = 4;
+        type = COMSATDATA::SESSION_TYPE::NONE;
         name = "";
         WOWGUID player = ClntObjMgrGetActivePlayer();
 
-        if (s_talkingPlayers.Ptr(static_cast<uint32_t>(player.m_guid), CHashKeyGUID(player.m_guid))) {
+        if (s_talkingPlayers.Ptr(player.GetLow(), CHashKeyGUID(player.m_guid))) {
             Script_SendUnitSignal(player, SCRIPT_EVENT_VOICE_STOP);
             ComSatClient_SendEvent(SCRIPT_EVENT_VOICE_PLATE_STOP, player);
         }
     } else {
-        AddComSatEvent(5, 0u, s_comsatData[index].m_sessionID);
+        AddComSatEvent(ComSatEvent::COMMAND::SELECT_SESSION, 0u, s_comsatData[index].m_sessionID);
         s_currentSession = index;
         type = s_comsatData[index].m_type;
         name = s_comsatData[index].m_name;
@@ -748,15 +749,15 @@ const char* s_sessionTypeNames[3] = { "Battleground", "Party", "Raid" };
 // OFFSET: 0x007DB860
 int32_t ComSatClient_DetermineSessionTypeFromName(const char* name) {
     if (!name || !*name) {
-        return 4;
+        return COMSATDATA::SESSION_TYPE::NONE;
     }
 
     if (!SStrCmpI(name, s_sessionTypeNames[1], STORM_MAX_STR)) {
-        return 2;
+        return COMSATDATA::SESSION_TYPE::PARTY;
     }
 
     if (!SStrCmpI(name, s_sessionTypeNames[2], STORM_MAX_STR)) {
-        return 3;
+        return COMSATDATA::SESSION_TYPE::RAID;
     }
 
     return !SStrCmpI(name, s_sessionTypeNames[0], STORM_MAX_STR);
@@ -774,7 +775,7 @@ static void ComSatClient_LeaveSessionNotifyAll(int32_t index) {
 
         Script_SendUnitSignal(guid, SCRIPT_EVENT_VOICE_STOP);
         ComSatClient_SendEvent(SCRIPT_EVENT_VOICE_PLATE_STOP, guid);
-        TALKINGPLAYER* talker = s_talkingPlayers.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+        TALKINGPLAYER* talker = s_talkingPlayers.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
         if (talker) {
             s_talkingPlayers.Delete(talker);
@@ -796,25 +797,25 @@ void ComSatClient_LeaveAllSessions(WOWGUID guid) {
         int32_t index = 0;
 
         while (!static_cast<uint32_t>(s_comsatData[index].m_sessionID)) {
-            if (++index >= 32) {
+            if (++index >= MAX_VOICE_SESSIONS) {
                 break;
             }
         }
 
-        if (index < 32) {
+        if (index < MAX_VOICE_SESSIONS) {
             comsat->SessionRemove(s_comsatData[index].m_sessionID, guid.m_guid);
             comsat->SessionDestroy(s_comsatData[index].m_sessionID);
             ComSatClient_LeaveSessionNotifyAll(index);
             s_comsatData[index].m_sessionID = 0;
             s_comsatData[index].m_name[0] = 0;
-            s_comsatData[index].m_type = 4;
+            s_comsatData[index].m_type = COMSATDATA::SESSION_TYPE::NONE;
             s_comsatData[index].m_numMembers = 0;
 
             if (s_currentSession == index) {
                 s_currentSession = -1;
                 WOWGUID player = ClntObjMgrGetActivePlayer();
 
-                if (s_talkingPlayers.Ptr(static_cast<uint32_t>(player.m_guid), CHashKeyGUID(player.m_guid))) {
+                if (s_talkingPlayers.Ptr(player.GetLow(), CHashKeyGUID(player.m_guid))) {
                     Script_SendUnitSignal(player, SCRIPT_EVENT_VOICE_STOP);
                     ComSatClient_SendEvent(SCRIPT_EVENT_VOICE_PLATE_STOP, player);
                 }
@@ -845,7 +846,7 @@ static bool FillComsatData(uint64_t session, int32_t type, const char* name) {
     int32_t index = -1;
     int32_t i;
 
-    for (i = 0; i < 32; i++) {
+    for (i = 0; i < MAX_VOICE_SESSIONS; i++) {
         if (s_comsatData[i].m_sessionID == session) {
             break;
         }
@@ -855,7 +856,7 @@ static bool FillComsatData(uint64_t session, int32_t type, const char* name) {
         }
     }
 
-    if (i < 32) {
+    if (i < MAX_VOICE_SESSIONS) {
         index = i;
         s_comsatData[index].m_sessionID = 0;
     }
@@ -865,7 +866,7 @@ static bool FillComsatData(uint64_t session, int32_t type, const char* name) {
     }
 
     s_comsatData[index].m_sessionID = session;
-    s_comsatData[index].m_type = type;
+    s_comsatData[index].m_type = static_cast<COMSATDATA::SESSION_TYPE>(type);
     s_comsatData[index].m_numMembers = 0;
 
     if (type) {
@@ -885,7 +886,7 @@ static bool FillComsatData(uint64_t session, int32_t type, const char* name) {
 // VERIFY: 75f2517c auto
 // OFFSET: 0x007DD6F0
 static bool ComSatClient_IsPlayerTalking(WOWGUID guid) {
-    return s_talkingPlayers.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid)) != nullptr;
+    return s_talkingPlayers.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid)) != nullptr;
 }
 
 // VERIFY: 6f6aa26e auto
@@ -911,7 +912,7 @@ void ComSatClient_PopulateSessionDataWithoutJoin(uint64_t session, int32_t type,
             return;
         }
 
-        if (type == 2 || type == 3 || type == 1) {
+        if (type == COMSATDATA::SESSION_TYPE::PARTY || type == COMSATDATA::SESSION_TYPE::RAID || type == COMSATDATA::SESSION_TYPE::BATTLEGROUND) {
             Script_SendUniqueSignal(SCRIPT_EVENT_VOICE_STATUS_UPDATE);
         }
 
@@ -922,8 +923,8 @@ void ComSatClient_PopulateSessionDataWithoutJoin(uint64_t session, int32_t type,
             ComSatClient_SendEvent(SCRIPT_EVENT_VOICE_PLATE_START, player);
         }
 
-        if ((type == 2 || type == 3 || type == 1) && (CGPartyInfo::m_members[0] || CGRaidInfo::m_numMembers)) {
-            CGChat::JoiningParty(type == 3 || type == 1, type == 1);
+        if ((type == COMSATDATA::SESSION_TYPE::PARTY || type == COMSATDATA::SESSION_TYPE::RAID || type == COMSATDATA::SESSION_TYPE::BATTLEGROUND) && (CGPartyInfo::m_members[0] || CGRaidInfo::m_numMembers)) {
+            CGChat::JoiningParty(type == COMSATDATA::SESSION_TYPE::RAID || type == COMSATDATA::SESSION_TYPE::BATTLEGROUND, type == COMSATDATA::SESSION_TYPE::BATTLEGROUND);
         }
     }
 
@@ -957,8 +958,8 @@ void VoiceSessionRosterUpdate(uint64_t session, uint16_t networkId, int32_t type
             ComSatClient_SendEvent(SCRIPT_EVENT_VOICE_PLATE_START, player);
         }
 
-        if ((type == 2 || type == 3 || type == 1) && (CGPartyInfo::m_members[0] || CGRaidInfo::m_numMembers)) {
-            CGChat::JoiningParty(type == 3 || type == 1, type == 1);
+        if ((type == COMSATDATA::SESSION_TYPE::PARTY || type == COMSATDATA::SESSION_TYPE::RAID || type == COMSATDATA::SESSION_TYPE::BATTLEGROUND) && (CGPartyInfo::m_members[0] || CGRaidInfo::m_numMembers)) {
+            CGChat::JoiningParty(type == COMSATDATA::SESSION_TYPE::RAID || type == COMSATDATA::SESSION_TYPE::BATTLEGROUND, type == COMSATDATA::SESSION_TYPE::BATTLEGROUND);
         }
     }
 
@@ -966,14 +967,14 @@ void VoiceSessionRosterUpdate(uint64_t session, uint16_t networkId, int32_t type
     comsat->SessionSetTalkerNetworkIdLocal(session, self, selfNetworkId);
     int32_t index;
 
-    for (index = 0; index < 32; index++) {
+    for (index = 0; index < MAX_VOICE_SESSIONS; index++) {
         if (s_comsatData[index].m_sessionID == session) {
             break;
         }
     }
 
-    if (index < 32 && s_comsatData[index].m_type != type) {
-        s_comsatData[index].m_type = type;
+    if (index < MAX_VOICE_SESSIONS && s_comsatData[index].m_type != type) {
+        s_comsatData[index].m_type = static_cast<COMSATDATA::SESSION_TYPE>(type);
 
         if (type) {
             s_comsatData[index].m_name[0] = 0;
@@ -1051,28 +1052,28 @@ void VoiceSessionRosterUpdate(uint64_t session, uint16_t networkId, int32_t type
         }
 
         if (j < FriendList::s_friendList->GetNumIgnores()) {
-            comsat->MuteTalker(0, members[i].m_guid.m_guid, static_cast<ComSat::MuteSetting>(0));
+            comsat->MuteTalker(0, members[i].m_guid.m_guid, ComSat::MUTE_SETTING_MUTE);
             continue;
         }
 
         for (uint32_t k = 0; k < FriendList::s_friendList->GetNumMutes(); k++) {
             if (members[i].m_guid.m_guid == FriendList::s_friendList->GetIgnore(k)) {
-                comsat->MuteTalker(0, members[i].m_guid.m_guid, static_cast<ComSat::MuteSetting>(0));
+                comsat->MuteTalker(0, members[i].m_guid.m_guid, ComSat::MUTE_SETTING_MUTE);
             }
         }
     }
 
     if (s_voiceChatWasEnabled) {
         switch (type) {
-            case 2:
+            case COMSATDATA::SESSION_TYPE::PARTY:
                 CGChat::JoiningParty(false, 0);
                 s_voiceChatWasEnabled = 0;
                 break;
-            case 3:
+            case COMSATDATA::SESSION_TYPE::RAID:
                 CGChat::JoiningParty(true, 0);
                 s_voiceChatWasEnabled = 0;
                 break;
-            case 1:
+            case COMSATDATA::SESSION_TYPE::BATTLEGROUND:
                 CGChat::JoiningParty(true, 1);
                 s_voiceChatWasEnabled = 0;
                 break;
@@ -1083,7 +1084,7 @@ void VoiceSessionRosterUpdate(uint64_t session, uint16_t networkId, int32_t type
 
     CGChat::VoiceSessionUpdate(type ? "" : name, type);
 
-    if (type == 2 || type == 3 || type == 1) {
+    if (type == COMSATDATA::SESSION_TYPE::PARTY || type == COMSATDATA::SESSION_TYPE::RAID || type == COMSATDATA::SESSION_TYPE::BATTLEGROUND) {
         Script_SendUniqueSignal(SCRIPT_EVENT_VOICE_STATUS_UPDATE);
     } else {
         Script_SendUniqueSignal(SCRIPT_EVENT_VOICE_CHANNEL_STATUS_UPDATE);
@@ -1107,13 +1108,13 @@ void VoiceSessionLeave(uint64_t talker, uint64_t session, int32_t type) {
     comsat->SessionDestroy(session);
     int32_t index;
 
-    for (index = 0; index < 32; index++) {
-        if (s_comsatData[index].m_sessionID == session || (type == s_comsatData[index].m_type && (type == 2 || type == 3))) {
+    for (index = 0; index < MAX_VOICE_SESSIONS; index++) {
+        if (s_comsatData[index].m_sessionID == session || (type == s_comsatData[index].m_type && (type == COMSATDATA::SESSION_TYPE::PARTY || type == COMSATDATA::SESSION_TYPE::RAID))) {
             break;
         }
     }
 
-    if (index < 32) {
+    if (index < MAX_VOICE_SESSIONS) {
         if (s_currentSession == index) {
             ComSatClient_LeaveSessionNotifyAll(index);
 
@@ -1124,7 +1125,7 @@ void VoiceSessionLeave(uint64_t talker, uint64_t session, int32_t type) {
             s_currentSession = -1;
             WOWGUID player = ClntObjMgrGetActivePlayer();
 
-            if (s_talkingPlayers.Ptr(static_cast<uint32_t>(player.m_guid), CHashKeyGUID(player.m_guid))) {
+            if (s_talkingPlayers.Ptr(player.GetLow(), CHashKeyGUID(player.m_guid))) {
                 Script_SendUnitSignal(player, SCRIPT_EVENT_VOICE_STOP);
                 ComSatClient_SendEvent(SCRIPT_EVENT_VOICE_PLATE_STOP, player);
             }
@@ -1132,7 +1133,7 @@ void VoiceSessionLeave(uint64_t talker, uint64_t session, int32_t type) {
 
         s_comsatData[index].m_sessionID = 0;
         s_comsatData[index].m_name[0] = 0;
-        s_comsatData[index].m_type = 4;
+        s_comsatData[index].m_type = COMSATDATA::SESSION_TYPE::NONE;
         s_comsatData[index].m_numMembers = 0;
     }
 
@@ -1146,7 +1147,7 @@ void VoiceSessionLeave(uint64_t talker, uint64_t session, int32_t type) {
 // VERIFY: c227625a auto
 // OFFSET: 0x007DD6A0
 static void RemoveTalkingPlayer(WOWGUID guid) {
-    TALKINGPLAYER* talker = s_talkingPlayers.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    TALKINGPLAYER* talker = s_talkingPlayers.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (talker) {
         s_talkingPlayers.Delete(talker);
@@ -1177,20 +1178,20 @@ void Comsat::VoicePlateStop(uint64_t sessionId, uint64_t guid) {
 
     int32_t index;
 
-    for (index = 0; index < 32; index++) {
+    for (index = 0; index < MAX_VOICE_SESSIONS; index++) {
         if (s_comsatData[index].m_sessionID == sessionId) {
             break;
         }
     }
 
-    if (index >= 32) {
+    if (index >= MAX_VOICE_SESSIONS) {
         return;
     }
 
     Script_SendUnitSignal(name->m_guid, SCRIPT_EVENT_VOICE_STOP);
     ComSatClient_SendEvent(SCRIPT_EVENT_VOICE_PLATE_STOP, name->m_guid);
     WOWGUID player = name->m_guid;
-    TALKINGPLAYER* talker = s_talkingPlayers.Ptr(static_cast<uint32_t>(player.m_guid), CHashKeyGUID(player.m_guid));
+    TALKINGPLAYER* talker = s_talkingPlayers.Ptr(player.GetLow(), CHashKeyGUID(player.m_guid));
 
     if (talker) {
         s_talkingPlayers.Delete(talker);
@@ -1204,8 +1205,8 @@ void Comsat::VoicePlateStop(uint64_t sessionId, uint64_t guid) {
 // VERIFY: 89c87ddd manual
 // OFFSET: 0x007DF410
 static void AddTalkingPlayer(WOWGUID guid) {
-    if (!s_talkingPlayers.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid))) {
-        s_talkingPlayers.New(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid), 0, 0);
+    if (!s_talkingPlayers.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid))) {
+        s_talkingPlayers.New(guid.GetLow(), CHashKeyGUID(guid.m_guid), 0, 0);
     }
 }
 
@@ -1231,13 +1232,13 @@ void Comsat::VoicePlateStart(uint64_t sessionId, uint64_t guid) {
 
     int32_t index;
 
-    for (index = 0; index < 32; index++) {
+    for (index = 0; index < MAX_VOICE_SESSIONS; index++) {
         if (s_comsatData[index].m_sessionID == sessionId) {
             break;
         }
     }
 
-    if (index >= 32) {
+    if (index >= MAX_VOICE_SESSIONS) {
         return;
     }
 
@@ -1276,9 +1277,9 @@ static void InitSoundGroupFadeRates() {
     s_voiceFadeDelayRate = 0.0f == delay ? 0.0f : 1.0f / delay;
     float time = s_cvarStartTalkingTime ? s_cvarStartTalkingTime->m_floatValue : 0.2f;
     s_voiceFadeRate = 0.0f != time ? 1.0f / time : 0.0f;
-    s_sfxVolumeBase = SI2::GetChannelGroupVolume(0);
-    s_musicVolumeBase = SI2::GetChannelGroupVolume(1);
-    s_ambienceVolumeBase = SI2::GetChannelGroupVolume(2);
+    s_sfxVolumeBase = SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_SFX);
+    s_musicVolumeBase = SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_MUSIC);
+    s_ambienceVolumeBase = SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_AMBIENCE);
 
     if (s_cvarSoundSFXVolume && s_cvarChatSoundVolume) {
         s_sfxVolumeDelta = s_cvarChatSoundVolume->m_floatValue * s_cvarSoundSFXVolume->m_floatValue - s_sfxVolumeBase;
@@ -1306,9 +1307,9 @@ static void UpdateSoundGroupFadeRates() {
     s_voiceFadeDelayRate = 0.0f == delay ? 0.0f : 1.0f / delay;
     float time = s_cvarStopTalkingTime ? s_cvarStopTalkingTime->m_floatValue : 3.0f;
     s_voiceFadeRate = 0.0f != time ? 1.0f / time : 0.0f;
-    s_sfxVolumeBase = SI2::GetChannelGroupVolume(0);
-    s_musicVolumeBase = SI2::GetChannelGroupVolume(1);
-    s_ambienceVolumeBase = SI2::GetChannelGroupVolume(2);
+    s_sfxVolumeBase = SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_SFX);
+    s_musicVolumeBase = SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_MUSIC);
+    s_ambienceVolumeBase = SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_AMBIENCE);
 
     if (s_cvarSoundSFXVolume) {
         s_sfxVolumeDelta = s_cvarSoundSFXVolume->m_floatValue - s_sfxVolumeBase;
@@ -1374,44 +1375,44 @@ static void DispatchComSatEvents() {
             ComSatEvent& event = s_comSatEvents[i];
 
             switch (event.m_type) {
-                case 1:
+                case ComSatEvent::COMMAND::SET_SESSION_VOLUME:
                     ComSatThread::s_comsat->LocalTalkerSetSessionVolume(0, event.m_guid, event.m_floatValue);
                     break;
 
-                case 2:
+                case ComSatEvent::COMMAND::ENABLE_LOCAL_TALKER:
                     s_pushToTalkDown = 0;
                     ComSatThread::s_comsat->LocalTalkerEnable(0, event.m_uintValue != 0);
                     break;
 
-                case 3:
+                case ComSatEvent::COMMAND::SET_TALKER_THRESHOLD:
                     ComSatThread::s_comsat->LocalTalkerThreshold(0, event.m_floatValue);
                     break;
 
-                case 4:
+                case ComSatEvent::COMMAND::MUTE_TALKER:
                     ComSatThread::s_comsat->MuteTalker(0, event.m_guid, static_cast<ComSat::MuteSetting>(event.m_uintValue));
                     break;
 
-                case 5:
+                case ComSatEvent::COMMAND::SELECT_SESSION:
                     ComSatThread::s_comsat->LocalTalkerSelectSession(0, event.m_guid);
                     break;
 
-                case 6:
+                case ComSatEvent::COMMAND::SET_SESSION_PRIORITY:
                     ComSatThread::s_comsat->LocalTalkerSetSessionPriority(0, event.m_guid, static_cast<uint8_t>(event.m_uintValue));
                     break;
 
-                case 7:
+                case ComSatEvent::COMMAND::MUTE_SESSION:
                     ComSatThread::s_comsat->MuteSession(0, event.m_guid, static_cast<ComSat::MuteSetting>(event.m_uintValue));
                     break;
 
-                case 8:
+                case ComSatEvent::COMMAND::SET_SEQUENCE_DELAY:
                     ComSatThread::s_comsat->DebugSetSequenceDelay(event.m_uintValue);
                     break;
 
-                case 9:
+                case ComSatEvent::COMMAND::SET_SOUND_OUTPUT_DELAY:
                     ComSatThread::s_comsat->DebugSetSoundOutputDelay(0, event.m_uintValue);
                     break;
 
-                case 10:
+                case ComSatEvent::COMMAND::UPDATE_PUSH_TO_TALK_KEY:
                     UpdatePushToTalkKey();
                     break;
             }
@@ -1424,7 +1425,7 @@ static void DispatchComSatEvents() {
 // VERIFY: d579125f auto
 // OFFSET: 0x007DD720
 bool ComSatClient_IsMutedPlayer(WOWGUID guid) {
-    return s_mutedPlayers.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid)) != nullptr;
+    return s_mutedPlayers.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid)) != nullptr;
 }
 
 // VERIFY: d5d21c9a auto
@@ -1436,7 +1437,7 @@ static bool IsVoiceActive() {
 
     WOWGUID player = s_localPlayer;
 
-    if (!s_talkingPlayers.Ptr(static_cast<uint32_t>(player.m_guid), CHashKeyGUID(player.m_guid)) && !SI2::VoiceChat_IsRecordingLoopbackSound() && !SI2::VoiceChat_IsPlayingLoopbackSound()) {
+    if (!s_talkingPlayers.Ptr(player.GetLow(), CHashKeyGUID(player.m_guid)) && !SI2::VoiceChat_IsRecordingLoopbackSound() && !SI2::VoiceChat_IsPlayingLoopbackSound()) {
         return false;
     }
 
@@ -1454,24 +1455,24 @@ static void ApplySoundGroupFade(uint32_t time) {
                 if (s_cvarSoundSFXVolume && s_cvarChatSoundVolume) {
                     float volume = s_cvarChatSoundVolume->m_floatValue * s_cvarSoundSFXVolume->m_floatValue;
 
-                    if (volume != SI2::GetChannelGroupVolume(0)) {
-                        SI2::SetChannelGroupVolume(0, s_cvarChatSoundVolume->m_floatValue * s_cvarSoundSFXVolume->m_floatValue);
+                    if (volume != SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_SFX)) {
+                        SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_SFX, s_cvarChatSoundVolume->m_floatValue * s_cvarSoundSFXVolume->m_floatValue);
                     }
                 }
 
                 if (s_cvarSoundMusicVolume && s_cvarChatMusicVolume) {
                     float volume = s_cvarChatMusicVolume->m_floatValue * s_cvarSoundMusicVolume->m_floatValue;
 
-                    if (volume != SI2::GetChannelGroupVolume(1)) {
-                        SI2::SetChannelGroupVolume(1, s_cvarChatMusicVolume->m_floatValue * s_cvarSoundMusicVolume->m_floatValue);
+                    if (volume != SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_MUSIC)) {
+                        SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_MUSIC, s_cvarChatMusicVolume->m_floatValue * s_cvarSoundMusicVolume->m_floatValue);
                     }
                 }
 
                 if (s_cvarSoundAmbienceVolume && s_cvarChatAmbienceVolume) {
                     float volume = s_cvarChatAmbienceVolume->m_floatValue * s_cvarSoundAmbienceVolume->m_floatValue;
 
-                    if (volume != SI2::GetChannelGroupVolume(2)) {
-                        SI2::SetChannelGroupVolume(2, s_cvarChatAmbienceVolume->m_floatValue * s_cvarSoundAmbienceVolume->m_floatValue);
+                    if (volume != SI2::GetChannelGroupVolume(SI2_SOUND_GROUP_AMBIENCE)) {
+                        SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_AMBIENCE, s_cvarChatAmbienceVolume->m_floatValue * s_cvarSoundAmbienceVolume->m_floatValue);
                     }
                 }
             }
@@ -1484,9 +1485,9 @@ static void ApplySoundGroupFade(uint32_t time) {
                 s_voiceFadeStartTime = 0.0f;
             }
 
-            SI2::SetChannelGroupVolume(0, fade * s_sfxVolumeDelta + s_sfxVolumeBase);
-            SI2::SetChannelGroupVolume(1, s_musicVolumeDelta * fade + s_musicVolumeBase);
-            SI2::SetChannelGroupVolume(2, s_ambienceVolumeDelta * fade + s_ambienceVolumeBase);
+            SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_SFX, fade * s_sfxVolumeDelta + s_sfxVolumeBase);
+            SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_MUSIC, s_musicVolumeDelta * fade + s_musicVolumeBase);
+            SI2::SetChannelGroupVolume(SI2_SOUND_GROUP_AMBIENCE, s_ambienceVolumeDelta * fade + s_ambienceVolumeBase);
         }
     } else if (s_voiceFadeDelayRate * (now - s_voiceFadeStartTime) >= 1.0) {
         s_voiceFadeDelayRate = 0.0f;
@@ -1512,24 +1513,24 @@ static void ApplySoundGroupFade(uint32_t time) {
 // VERIFY: 4a995b3c manual
 // OFFSET: 0x007DF4B0
 static void MarkPlayerMuted(WOWGUID guid, int32_t muted) {
-    MUTEDPLAYER* entry = s_mutedPlayers.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    MUTEDPLAYER* entry = s_mutedPlayers.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (entry) {
         if (!muted) {
             s_mutedPlayers.Delete(entry);
         }
     } else if (muted) {
-        s_mutedPlayers.New(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid), 0, 0);
+        s_mutedPlayers.New(guid.GetLow(), CHashKeyGUID(guid.m_guid), 0, 0);
     }
 }
 
 // VERIFY: af9c2575 auto
 // OFFSET: 0x007DF6F0
 void VoiceSessionSetTalkerMuted(WOWGUID guid, int32_t muted) {
-    AddComSatEvent(4, static_cast<uint32_t>(muted), guid.m_guid);
+    AddComSatEvent(ComSatEvent::COMMAND::MUTE_TALKER, static_cast<uint32_t>(muted), guid.m_guid);
 
     if (muted == 2) {
-        MarkPlayerMuted(guid, s_mutedPlayers.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid)) == nullptr);
+        MarkPlayerMuted(guid, s_mutedPlayers.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid)) == nullptr);
     } else {
         MarkPlayerMuted(guid, muted == 0);
     }
@@ -1582,7 +1583,7 @@ void AddComSatCallback(uint32_t type, uint64_t sessionId, uint64_t guid) {
     ComSatCallback* callback = s_comsatCallbacks.New();
 
     if (callback) {
-        callback->m_type = type;
+        callback->m_type = static_cast<ComSatCallback::TYPE>(type);
         callback->m_sessionId = sessionId;
         callback->m_guid = guid;
     }
@@ -1594,7 +1595,7 @@ void ComSatClientCallback::NotifyLocalTalkerStart(uint8_t localTalker) {
     if (localTalker == 0 && s_currentSession >= 0) {
         DebugLog("COMSAT_START: NotifyLocalTalkerStart\r\n");
         s_localTalkerActive = 1;
-        AddComSatCallback(0, 0, 0);
+        AddComSatCallback(ComSatCallback::TYPE::LOCAL_TALKER_START, 0, 0);
     }
 }
 
@@ -1605,7 +1606,7 @@ void ComSatClientCallback::NotifyLocalTalkerStop(uint8_t localTalker) {
 
     if (localTalker == 0) {
         s_localTalkerActive = 0;
-        AddComSatCallback(1, 0, 0);
+        AddComSatCallback(ComSatCallback::TYPE::LOCAL_TALKER_STOP, 0, 0);
     }
 }
 
@@ -1615,7 +1616,7 @@ void ComSatClientCallback::NotifyTalkerStart(uint8_t localTalker, uint64_t sessi
     DebugLog("COMSAT_START: NotifyTalkerStart\r\n");
 
     if (localTalker == 0) {
-        AddComSatCallback(2, session, talker);
+        AddComSatCallback(ComSatCallback::TYPE::TALKER_START, session, talker);
     }
 }
 
@@ -1625,7 +1626,7 @@ void ComSatClientCallback::NotifyTalkerStop(uint8_t localTalker, uint64_t sessio
     DebugLog("COMSAT_STOP: NotifyTalkerStop\r\n");
 
     if (localTalker == 0) {
-        AddComSatCallback(3, session, talker);
+        AddComSatCallback(ComSatCallback::TYPE::TALKER_STOP, session, talker);
     }
 }
 
@@ -1703,7 +1704,7 @@ void ComSatClient_Init() {
     s_cvarPushToTalkButton = CVar::Lookup("PushToTalkButton");
     s_cvarComSatSleepTime = nullptr;
 
-    if (!(OsGetProcessorFeatures() & 4)) {
+    if (!(OsGetProcessorFeatures() & OS_PROCESSOR_FEATURE_SSE)) {
         s_comsatDisabledByClient = 1;
         SE2::Log_Write(" -###########################################################################################");
         SE2::Log_Write(" -# ERROR! SSE support is required for voice chat!");

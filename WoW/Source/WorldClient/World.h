@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Tempest/CBoundingBox.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CAaBox.h"
@@ -47,12 +48,73 @@ class CTexture;
 class Particulate;
 class Weather;
 
+// Query flags taken by World::Intersect, World::GetFacets, World::GetTris and
+// World::GetIntersectingDoodadModels. Names are inferred from the 3.3.5 readers;
+// neither the 0.5.3 nor the 4.1.0 symbols name them.
+enum WORLD_QUERY_FLAGS : uint32_t {
+    WORLD_QUERY_NONE                    = 0x00000000u,
+    // M2 doodads without a collision GUID. Each bit selects the CM2Model hit-test mode.
+    WORLD_QUERY_M2_COLLISION            = 0x00000001u, // Collision mesh.
+    WORLD_QUERY_M2_RENDER               = 0x00000002u, // Render batches.
+    WORLD_QUERY_M2_UNKNOWN_0x4          = 0x00000004u, // Same reader behavior as M2_RENDER except in QueryIntersectingModels; set by CGWorldFrame::HitTest.
+    WORLD_QUERY_M2_NON_OPAQUE           = 0x00000008u, // Render batches with a non-opaque blend mode only.
+    // WMO groups, mapped to SMOPoly ignore flags by CMapObj::CreateWmoIgnoreFlags.
+    WORLD_QUERY_WMO_COLLISION           = 0x00000010u,
+    WORLD_QUERY_WMO_RENDER              = 0x00000020u,
+    WORLD_QUERY_WMO_CAMERA              = 0x00000040u, // Skips SMOPoly::F_NOCAMCOLLIDE faces.
+    WORLD_QUERY_WMO_NON_OPAQUE          = 0x00000080u, // Render faces with a blended material only.
+    WORLD_QUERY_TERRAIN                 = 0x00000100u,
+    // Adds the per-area flight ceiling (MFBO) facets to box facet queries; set for flying movers.
+    WORLD_QUERY_FLIGHT_BOUNDS           = 0x00000200u,
+    // Set by CMovement_C for movers this client does not control; no reader found in 3.3.5.
+    WORLD_QUERY_UNKNOWN_0x2000          = 0x00002000u,
+    // World::GetFacets keeps facets with normal z >= cos(50 deg); WMO faces with SMOPoly 0x40 are skipped.
+    WORLD_QUERY_WALKABLE_ONLY           = 0x00004000u,
+    // Ghost movement: CGGameObject_C::IsCollidable rejects doors (gameobject type 0).
+    WORLD_QUERY_IGNORE_DOORS            = 0x00008000u,
+    // Liquids are tested only when the type has LIQUID_TYPE_FLAG_WATER_WALKING, unless WORLD_QUERY_LIQUID is also set.
+    WORLD_QUERY_WATER_WALK_LIQUID       = 0x00010000u,
+    WORLD_QUERY_LIQUID                  = 0x00020000u,
+    // Doodads with a collision GUID and collidable map entities (via World::s_objectCollisionCallback).
+    WORLD_QUERY_OBJECT_COLLISION        = 0x00100000u,
+    WORLD_QUERY_OBJECT_RENDER           = 0x00200000u,
+    WORLD_QUERY_OBJECT_UNKNOWN_0x400000 = 0x00400000u, // Same reader behavior as OBJECT_RENDER; no producer found.
+    WORLD_QUERY_OBJECT_UNKNOWN_0x800000 = 0x00800000u, // Only read as part of WORLD_QUERY_OBJECT_MASK.
+    // Skips culled doodads and entities; M2 and WMO hits are limited to opaque surfaces.
+    WORLD_QUERY_VISIBLE_OPAQUE          = 0x01000000u,
+    // QueryIntersectingModels also matches WMO doodads flagged MAPOBJ_FLAG_PROJ_TEX.
+    WORLD_QUERY_PROJ_TEX_DOODADS        = 0x02000000u,
+    // Enables the model and entity passes; with VISIBLE_OPAQUE only plain render/detail WMO faces remain. No producer found.
+    WORLD_QUERY_ALL_OBJS_ALL_GEO      = 0x40000000u,
+    // Facet queries substitute bounding-box facets for unloaded terrain areas and WMO groups instead of failing.
+    WORLD_QUERY_UNLOADED_AS_BOUNDS      = 0x80000000u,
+
+    WORLD_QUERY_M2_MASK                 = WORLD_QUERY_M2_COLLISION | WORLD_QUERY_M2_RENDER | WORLD_QUERY_M2_UNKNOWN_0x4 | WORLD_QUERY_M2_NON_OPAQUE,
+    WORLD_QUERY_WMO_MASK                = WORLD_QUERY_WMO_COLLISION | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_WMO_CAMERA | WORLD_QUERY_WMO_NON_OPAQUE,
+    WORLD_QUERY_LIQUID_MASK             = WORLD_QUERY_WATER_WALK_LIQUID | WORLD_QUERY_LIQUID,
+    WORLD_QUERY_OBJECT_MASK             = WORLD_QUERY_OBJECT_COLLISION | WORLD_QUERY_OBJECT_RENDER | WORLD_QUERY_OBJECT_UNKNOWN_0x400000 | WORLD_QUERY_OBJECT_UNKNOWN_0x800000,
+    WORLD_QUERY_DOODAD_MASK             = WORLD_QUERY_M2_MASK | WORLD_QUERY_OBJECT_MASK,
+    WORLD_QUERY_ENTITY_MASK             = WORLD_QUERY_OBJECT_MASK | WORLD_QUERY_ALL_OBJS_ALL_GEO,
+    WORLD_QUERY_MODEL_MASK              = WORLD_QUERY_DOODAD_MASK | WORLD_QUERY_ALL_OBJS_ALL_GEO,
+    WORLD_QUERY_COLLISION_MASK          = WORLD_QUERY_M2_COLLISION | WORLD_QUERY_WMO_COLLISION | WORLD_QUERY_TERRAIN | WORLD_QUERY_OBJECT_COLLISION,
+    WORLD_QUERY_RENDER_MASK             = WORLD_QUERY_M2_RENDER | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_OBJECT_RENDER,
+    // Model hits resolved against render geometry (CM2Scene::EndHitTest) rather than the collision world.
+    WORLD_QUERY_RENDER_HIT_TEST_MASK    = WORLD_QUERY_M2_RENDER | WORLD_QUERY_M2_UNKNOWN_0x4 | WORLD_QUERY_M2_NON_OPAQUE | WORLD_QUERY_WMO_RENDER | WORLD_QUERY_WMO_NON_OPAQUE
+                                        | WORLD_QUERY_OBJECT_RENDER | WORLD_QUERY_OBJECT_UNKNOWN_0x400000 | WORLD_QUERY_VISIBLE_OPAQUE,
+};
+
 typedef void (*CALLBACK_FUNC)(float, void*);
 
 class CChunkLiquid;
 class CDetailDoodadInst;
 class CMapBaseObj;
 class CMapChunk;
+#ifdef WOWDECOMP_TOOL_FEATURES
+class CGCamera;
+#ifdef WOWDECOMP_TOOL_FEATURES
+struct WorldStreamingView;
+#endif
+#endif
 class CMapDoodadDef;
 class CMapDoodadDefMapChunkLink;
 
@@ -75,15 +137,15 @@ struct SMOFog;
 
 class CSortEntry {
     public:
-    /* 0000 */ TSList<CMapChunk, TSGetExplicitLink<CMapChunk> > m_mapChunkList;
-    /* 000C */ TSList<CMapObjDefGroup, TSGetExplicitLink<CMapObjDefGroup> > m_exteriorGroupList;
-    /* 0018 */ TSList<CMapEntity, TSGetExplicitLink<CMapEntity> > m_entityList;
-    /* 0024 */ TSList<CMapDoodadDef, TSGetExplicitLink<CMapDoodadDef> > m_doodadDefList;
-    /* 0030 */ TSList<CChunkLiquid, TSGetExplicitLink<CChunkLiquid> > m_liquidList;
-    /* 003C */ TSList<CWorldOccluder, TSGetExplicitLink<CWorldOccluder> > m_occluderList;
-    /* 0048 */ TSList<CWorldAntiOccluder, TSGetExplicitLink<CWorldAntiOccluder> > m_antiOccluderList;
-    /* 0054 */ TSList<CMapChunk, TSGetExplicitLink<CMapChunk> > m_holedChunkList;
-    /* 0060 */ TSList<void> m_unkList9;
+    /* 0000 */ TSList<CMapChunk, TSGetExplicitLink<CMapChunk> > chunkList;
+    /* 000C */ TSList<CMapObjDefGroup, TSGetExplicitLink<CMapObjDefGroup> > mapObjDefGroupList;
+    /* 0018 */ TSList<CMapEntity, TSGetExplicitLink<CMapEntity> > entityList;
+    /* 0024 */ TSList<CMapDoodadDef, TSGetExplicitLink<CMapDoodadDef> > doodadDefList;
+    /* 0030 */ TSList<CChunkLiquid, TSGetExplicitLink<CChunkLiquid> > liquidList;
+    /* 003C */ TSList<CWorldOccluder, TSGetExplicitLink<CWorldOccluder> > occluderList;
+    /* 0048 */ TSList<CWorldAntiOccluder, TSGetExplicitLink<CWorldAntiOccluder> > antiOccluderList;
+    /* 0054 */ TSList<CMapChunk, TSGetExplicitLink<CMapChunk> > chunkOcclusionList;
+    /* 0060 */ TSList<void> portalList;
 
     CSortEntry();
 };
@@ -104,12 +166,28 @@ struct WorldOccluderData {
 };
 
 struct OcclusionVolume {
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // AddVolume is called with clipToView off.
+        NO_VIEW_CLIP = 0x1,
+        // Kept when CreateOcclusionVolumes runs with onlyFlagged.
+        UNKNOWN_2 = 0x2,
+    };
+
     /* 0000 */ int32_t m_mapID;
-    /* 0004 */ uint32_t m_flags;
+    /* 0004 */ uint32_t m_flags; // FLAGS
     /* 0008 */ OcclusionVolumeData m_data;
 };
 
 struct SPortalExt {
+    enum FLAGS : uint16_t {
+        F_SCREEN_CULLED = 0x1,
+        F_INTERSECT_NEAR = 0x2,
+        F_EXTERIOR_VIEW_HANDLED = 0x4, // Guards repeated exterior portal-view processing.
+        F_INTERIOR_VIEW_HANDLED = 0x8, // Set after interior portal-view processing.
+        F_NO_OCCLUSION = 0x10, // Forwarded to TransformAndClipVerts.
+    };
+
     /* 0000 */ uint16_t m_flags;
     /* 0002 */ uint16_t unused_0002;
     /* 0004 */ CRect m_rect;
@@ -137,6 +215,12 @@ extern TSExplicitList<SWModelFadeout, offsetof(SWModelFadeout, m_link)> s_fadeou
 
 class CWorldScene {
     public:
+    enum CLIP_SIDE : int32_t {
+        SIDE_ON = 0,
+        SIDE_POS = 1,
+        SIDE_NEG = 2,
+    };
+
     static bool IsBeyondFadeDistance(const C3Vector& position, uint32_t fadeLevel);
     static Liquid::CRenderer* s_liquidRenderer;
     static TSExplicitList<CWFrustum, offsetof(CWFrustum, m_link)> frustumFreeList;
@@ -148,7 +232,7 @@ class CWorldScene {
     static GxuScene s_unk_B2EB68;
     static CTexture* s_defaultBlendTexture;
     static CTexture* s_defaultTexture;
-    static int32_t s_hasPendingExteriorGroups;
+    static BOOL s_hasPendingExteriorGroups;
     static int32_t s_fogPermute;
     static float s_fogFovPadding;
     static CMapEntity* camTargetEntity;
@@ -167,9 +251,12 @@ class CWorldScene {
     static CAaBox boundingBox;
     static CiRect s_frustumChunkRect;
     static CPortalView frustumPortalView;
-    static CPortalView s_unk_ADF570;
+    // Screen area through which the exterior world is visible, grown by MergeIntoWorldRect;
+    // m_maxViewDepth < 0 means none of it is (name inferred).
+    static CPortalView s_worldPortalView;
     static char* s_interiorSkybox;
-    static int32_t s_unk_CD8620;
+    // Set by CMapObj::RenderInterior when a viewer group is not exterior-classified (name inferred).
+    static int32_t s_interiorGroupRendered;
     static float s_lodFarClip;
     static C3Vector camVec;
     static C44Matrix projMatrix;
@@ -221,8 +308,8 @@ class CWorldScene {
     static void __fastcall AddMapChunk(CMapChunk* mapChunk);
     static void AddMapObjDefGroup(CMapObjDef* mapObjDef, CMapObjDefGroup* mapObjDefGroup);
     static void ComputeExteriorSortDistances();
-    static void AddMapChunkToRenderList(CMapChunk* mapChunk, C3Vector* pos);
-    static void AddMapObjDefGroupToSortTable(uint32_t groupIndex, void* param);
+    static void AddMapChunkToRenderList(CMapChunk* chunk, C3Vector* pos);
+    static void AddMapObjDefGroupToSortTable(uint32_t groupNum, void* param);
     static void MergeIntoWorldRect(CPortalView* portalView);
     static void MergeIntoFrustumRect(CPortalView* portalView);
     static void AddEntityToSortTable(CMapEntity* entity);
@@ -239,9 +326,9 @@ class CWorldScene {
     static C3Vector* GetCamTarget();
     static void ApplyFogState();
     static void RenderLiquidPass();
-    static void CullDoodads(CSortEntry* entry, uint16_t fadeLevel);
+    static void CullDoodads(CSortEntry* sortEntry, uint16_t fadeLevel);
     static void CullLiquid(CSortEntry* entry);
-    static void CullChunks(CSortEntry* entry, uint32_t index);
+    static void CullChunks(CSortEntry* sortEntry, uint32_t index);
     static void UpdateOcclusion(CSortEntry* entry);
     static void CullSortTable(CRect* rect);
     static void CullHorizon(CRect* rect);
@@ -257,16 +344,20 @@ class CWorldScene {
     static void AddDoodadDefs(TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> >* linkList, uint32_t index);
     static void CullDoodadsExterior(TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> >* linkList, uint8_t fadeLevel);
     static void CullMapObjDefGroup();
-    static void CullMapObjDefGroups(CSortEntry* entry, CRect* a2, uint32_t a3);
-    static void CullEntitys(CSortEntry* entry);
+    static void CullMapObjDefGroups(CSortEntry* sortEntry, CRect* rect, uint32_t index);
+    static void CullEntitys(CSortEntry* sortEntry);
     static void CullThroughPortal(CRect* rect);
     static void CreateInversePortalList();
     static void RenderPortalList(TSGrowableArray<CPortalView>* views, int32_t interior);
     static void UpdateViewerLiquid();
     static void CullDoodadsInterior(TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> >* linkList, CWFrustum* frustum, uint16_t fadeLevel, int32_t interior);
-    static void CullEntitysInterior(TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> >* linkList, CWFrustum* frustum, int32_t force, int32_t interior);
+    static void CullEntitysInterior(TSList<CMapBaseObjLink, TSGetExplicitLink<CMapBaseObjLink> >* linkList, CWFrustum* frustum, BOOL force, int32_t interior);
     static void CullChunks(CSortEntry* entry, int32_t index);
-    static void Render(const C3Vector& cameraPos, float time);
+    static void Render(const C3Vector& cameraPos, float time
+#ifdef WOWDECOMP_TOOL_FEATURES
+    , CGCamera* toolCamera = nullptr
+#endif
+);
     static void RenderChunks();
     static void RenderMapObjDefGroups();
     static void RenderDetailDoodads();
@@ -330,15 +421,27 @@ extern int32_t s_curGroupIsInterior;
 extern int32_t s_cullStateValid;
 extern int32_t s_interiorPass;
 extern uint32_t s_maxPortalDepth;
-extern int32_t s_entityCanLink;
 extern WOWGUID s_highlightedObjectGuid;
 
 class WMOAreaTableRec;
 
 namespace World {
+#ifdef WOWDECOMP_TOOL_FEATURES
+    CGCamera* GetViewCamera();
+    void GetViewCameraPosition(C3Vector* position);
+#endif
     class TriData;
     class HitTestDebug {
         public:
+        // m_type: the kind of map object that was hit (set by CMap::SetHitTestDebug).
+        enum TYPE : int32_t {
+            TYPE_NONE = 0,
+            TYPE_DOODAD = 1, // CMapBaseObj::Type_DoodadDef
+            TYPE_ENTITY = 2, // CMapBaseObj::Type_Entity
+            TYPE_UNKNOWN_3 = 3, // Never set.
+            TYPE_MAP_OBJ_GROUP = 4, // CMapBaseObj::Type_MapObjDefGroup
+        };
+
         struct Model {
             /* 0000 */ const char* m_name;
             /* 0004 */ int32_t m_depth;
@@ -367,7 +470,7 @@ namespace World {
             /* 0008 */ C2iVector m_chunkOffset;
         };
 
-        /* 0000 */ int32_t m_type;
+        /* 0000 */ int32_t m_type; // TYPE
         /* 0004 */ uint32_t m_numModels;
         /* 0008 */ uint32_t m_numParents;
         /* 000C */ Model m_models[16];
@@ -387,7 +490,11 @@ namespace World {
     extern C3Vector s_currentWorldPos;
 
     void GetFrustumCorners(C3Vector* corners);
-    void PrepareAreaOfInterest(const C3Vector& position);
+    void PrepareAreaOfInterest(const C3Vector& position
+#ifdef WOWDECOMP_TOOL_FEATURES
+    , const WorldStreamingView* streaming = nullptr
+#endif
+);
     void SetLoadProgressCallback(CALLBACK_FUNC callback, void* param);
     void UnloadMap();
 
@@ -406,7 +513,7 @@ namespace World {
     C3Vector* GetCamPos();
     void SetObjectCollisionCallback(int32_t (*callback)(WOWGUID* guid, uintptr_t param, ObjectCollisionData* data, uint32_t flags));
     void FindOrCreateDestructibleProxy(CDestructibleProxy* proxy);
-    void CreateWaterRipple(const C3Vector& pos, float a2, float a3, float a4, float a5, float a6, int32_t a7, int32_t a8);
+    void CreateWaterRipple(const C3Vector& pos, float facing, float size, float life, float width, float growth, int32_t type, int32_t player);
     int32_t QueryLiquidSounds(CMapEntity* entity, float radius, TSGrowableArray<World::LiquidQueryResult>& results);
     int32_t QueryLiquidStatus(C3Vector* pos, int32_t* liquidType, float* height);
     int32_t ObjectIsDrawable(CMapBaseObj* object);
@@ -420,12 +527,12 @@ namespace World {
     int32_t QueryMapObjFileName(CMapEntity* entity, const char** fileName);
     bool QueryMapObjMinimap(CMapEntity* entity, CAaBox* box, TSStackArray<MINIMAPQUADINFO>* quads, uint32_t maxQuads, int32_t inside, uint8_t indoorArea);
     bool QueryMapObjMatrix(CMapEntity* entity, C44Matrix* matrix, C44Matrix* invMatrix);
-    void Preload(const C3Vector& position, int32_t a2);
+    void Preload(const C3Vector& position, BOOL showLoading);
     int32_t QueryMapId();
     void UpdateObjectFadeouts();
     void Update(const C3Vector& position);
     int32_t QueryOutdoors(CMapEntity* entity);
-    int32_t QueryObjectLiquid(CMapEntity* entity, int32_t* liquidType, float* height, int32_t* a4);
+    int32_t QueryObjectLiquid(CMapEntity* entity, int32_t* liquidType, float* height, int32_t* unknown4);
     void NewFootprint(int32_t textureId, const float* size, const C3Vector* position, float facing, int32_t left, int32_t terrainType, int32_t activePlayer);
     int32_t QueryGroundType(CMapEntity* entity, int32_t* groundType);
     int32_t QueryObjectLiquidFlags(CMapEntity* entity, int32_t* flag8, int32_t* flag9);
@@ -451,7 +558,7 @@ extern int32_t lodMax;
 void SetFrameCntCallback(void (*callback)());
 extern int32_t lodMin;
 extern C44Matrix idMat;
-extern float s_farClip;
+extern float farClip;
 extern float s_horizonFarClipScale;
 extern float s_horizonNearClipScale;
 extern int32_t s_detailDoodadDensity;
@@ -463,7 +570,7 @@ extern int32_t s_waterLOD;
 
 int32_t FrustumCull(const CAaBox& box);
 int32_t ProjectPositionCallback(const C3Vector& position, float& height, void* param);
-void ProjectTextureCallback(const CAaBox& box, const CImVector& color, int32_t index, void* param, int32_t flags);
+void ProjectTextureCallback(const CAaBox& box, const CImVector& color, int32_t index, void* param, BOOL forceProjection);
 bool MapIsDungeon();
 void ObjectDestroy(CMapEntity* entity);
 void ObjectSetUpdateCallback(CMapEntity* entity, int32_t (*func)(void*, uint32_t, uint64_t, uintptr_t), void* param);
@@ -475,37 +582,37 @@ void SetHorizonNearClipScale(float scale);
 void SetNearClip(float nearClip);
 void SetTexLodBias(float bias);
 float ValidateFarClip(float farClip, int32_t mapID);
-    bool NDCClip(C3Vector* verts, uint32_t count, C3Vector*** outVerts, uint32_t* outCount);
-    bool GetFacets(CAaBox* a1, CAaBox* a2, FacetData* a3, uint32_t a4, uint32_t* a5);
+    bool NDCClip(C3Vector* verts, uint32_t p_inCount, C3Vector*** outVerts, uint32_t* outCount);
+    bool GetFacets(CAaBox* queryBox, CAaBox* box, FacetData* facets, uint32_t flags, uint32_t* status);
     bool NDCXform(CFrustum* frustum, C44Matrix* out, bool includeTranslation);
-    bool IsValidPosition(float x, float y, float z, float a4);
-    bool IsValidPosition(const C3Vector& position, float a4);
+    bool IsValidPosition(float x, float y, float z, float margin);
+    bool IsValidPosition(const C3Vector& position, float margin);
     void AddAaBoxFacets(CAaBox* box, FacetData* facets);
     uint32_t TriDataToFacetData(void* unused, FacetData* facets, WOWGUID guid);
     bool GetFacets(CAaBox* box, FacetData* facets, uint32_t flags, uint32_t* status);
     bool GetFacets(CFrustum* frustum, FacetData* facets, uint32_t flags, uint32_t* status);
     int32_t GetFlightBoundsLower(const C3Vector& pos, float* height);
-    int32_t Intersect(const C3Vector& start, const C3Vector& end, C3Vector* hit, float* distance, uint32_t flags, HitTestDebug* debug);
+    int32_t Intersect(const C3Vector& start, const C3Vector& end, C3Vector* hit, float* dist, uint32_t flags, HitTestDebug* debug);
     void ObjectSetModel(CMapEntity* entity, CM2Model* model);
     void ObjectSetMoveable(CMapEntity* entity, int32_t moveable);
     int32_t ObjectIsLoaded(CMapBaseObj* object);
     int32_t ObjectIsWMO(CMapBaseObj* object);
-    void ObjectSetHidden(CMapEntity* entity, int32_t hidden);
-    void ObjectEnableCollision(CMapBaseObj* object, int32_t enable);
+    void ObjectSetHidden(CMapEntity* entity, BOOL hidden);
+    void ObjectEnableCollision(CMapBaseObj* object, BOOL enable);
     void FreeDestructibleProxy(CDestructibleProxy* proxy);
-    void ObjectUpdate(CMapBaseObj* object, const C3Vector* position, float facing, float a4, float a5, int32_t snap);
-    void ObjectSetAlwaysExterior(CMapBaseObj* object, int32_t enable);
+    void ObjectUpdate(CMapBaseObj* object, const C3Vector* position, float facing, float pitch, float roll, BOOL snap);
+    void ObjectSetAlwaysExterior(CMapBaseObj* object, BOOL enable);
     int32_t ObjectMoveDoodads(CMapBaseObj* source, uint16_t doodadSet, CMapBaseObj* target, uint16_t targetDoodadSet);
-    void ObjectSetDoodadEmittersIgnoresDistance(CMapBaseObj* object, int32_t ignore, uint16_t doodadSet);
-    void ObjectSetDoodadsEnabled(CMapBaseObj* object, int32_t enable, uint16_t doodadSet);
+    void ObjectSetDoodadEmittersIgnoresDistance(CMapBaseObj* object, BOOL ignore, uint16_t doodadSet);
+    void ObjectSetDoodadsEnabled(CMapBaseObj* object, BOOL enable, uint16_t doodadSet);
     void ObjectSetEventCallback(CMapBaseObj* object, void (*callback)(CM2Model* model, uint32_t boneId, uint32_t eventId, uint32_t data, const C3Vector* position, uint32_t time, uint64_t param), uint64_t param, uint16_t doodadSet);
     void ObjectGetExtents(CMapBaseObj* object, CAaBox* extents);
     uint64_t QueryObjectParentParam64(CMapBaseObj* object);
-    void ObjectSetRenderEnabled(CMapBaseObj* object, int32_t enable);
+    void ObjectSetRenderEnabled(CMapBaseObj* object, BOOL enable);
     bool GetTris(const CAaBox& box, World::TriData* triData, uint32_t flags);
     uint32_t GetIntersectingDoodadModels(CM2Model** models, uint32_t maxModels, const CAaBox& box, uint32_t flags);
-    void ObjectSetSequence(CMapEntity* entity, uint32_t sequence, int32_t a3, int32_t a4);
-    void ObjectSetShadow(CMapEntity* entity, uint32_t shadow, uint32_t mask);
+    void ObjectSetSequence(CMapEntity* entity, uint32_t sequence, int32_t unknown3, int32_t doodadSet);
+    void ObjectSetShadow(CMapEntity* entity, uint32_t shadow, uint32_t mask); // shadow and mask use MAP_OBJECT_CREATE_FLAGS bits
     void ObjectSetSequenceFinishedCallback(CMapEntity* entity, void (*callback)(CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time, uint64_t param), uint64_t param, uint16_t doodad);
     bool ObjectTestConvexVolume(CMapEntity* entity, const C3Vector& point);
     void ObjectUpdate(CMapEntity* entity, const C44Matrix& matrix);
@@ -561,10 +668,49 @@ class CWorld {
     static int32_t ConsoleCommand_WaterRipples(const char* command, const char* arguments);
     static void Destroy();
     static void Initialize();
-    static void LoadMap(const char* mapName, C3Vector* position, int32_t zoneID, int32_t unused_a4);
+    static void LoadMap(const char* mapName, C3Vector* position, int32_t zoneID, int32_t unused4
+#ifdef WOWDECOMP_TOOL_FEATURES
+    , const WorldStreamingView* streaming = nullptr
+#endif
+);
     static void ObjectDestroy(CMapBaseObj* object);
-    static CMapBaseObj* ObjectCreate(const char* name, const C3Vector& position, float facing, int32_t waitLoad, int32_t snap, uint64_t guid, uint32_t doodadSetCount, const int16_t* doodadSets, float* radius, uint32_t id);
-    static void Update(C3Vector* camPos, C3Vector* camTarget, C3Vector* position);
+    static CMapBaseObj* ObjectCreate(const char* name, const C3Vector& position, float facing, BOOL waitLoad, int32_t snap, uint64_t guid, uint32_t doodadSetCount, const int16_t* doodadSets, float* radius, uint32_t id);
+    static void Update(C3Vector* camPos, C3Vector* camTarget, C3Vector* position
+#ifdef WOWDECOMP_TOOL_FEATURES
+    , const WorldStreamingView* streaming = nullptr
+#endif
+);
+
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug features (World_Debug.cpp): 0.5.3 console commands and render modes, stripped from the 3.3.5 release build.
+    static void DebugRegisterConsoleCommands();
+    static int32_t ConsoleCommand_DebugBSP(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_DebugZones(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_DetailDoodadTest(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_EnumTextureGxCache(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_EnumTextures(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_GroupOnly(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_MapObjLightMode(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_PortalVis(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_Proj(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowAABoxes(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowCollision(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowCrappyBatches(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowDoodads(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowMapObjBSP(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowMapObjLight(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowMapObjTex(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowMapObjs(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowNormals(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowPortals(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowQuery(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowTerrain(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_ShowTris(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_WaterMaxLOD(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_WaterShow(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_WaterSpecular(const char* command, const char* arguments);
+    static int32_t ConsoleCommand_WaterWaves(const char* command, const char* arguments);
+#endif
 };
 
 extern float s_viewerLiquidDepth;

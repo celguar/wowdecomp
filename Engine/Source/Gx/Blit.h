@@ -74,9 +74,9 @@ class DxtColorBlock {
 
     static Tables s_tables;
 
-    /* 0000 */ uint16_t m_color0;
-    /* 0002 */ uint16_t m_color1;
-    /* 0004 */ uint8_t m_indices[4];
+    /* 0000 */ CRgb565 m_color0;
+    /* 0002 */ CRgb565 m_color1;
+    /* 0004 */ uint8_t m_row[4]; // Four rows of four packed 2-bit color-table indices.
 };
 
 class Dxt1Block {
@@ -84,9 +84,14 @@ class Dxt1Block {
     /* 0000 */ DxtColorBlock m_color;
 };
 
+class Dxt3AlphaBlock {
+    public:
+    /* 0000 */ uint16_t m_row[4]; // Four rows of four packed 4-bit alpha values.
+};
+
 class Dxt3Block {
     public:
-    /* 0000 */ uint16_t m_alpha[4];
+    /* 0000 */ Dxt3AlphaBlock m_alpha;
     /* 0008 */ DxtColorBlock m_color;
 };
 
@@ -141,13 +146,7 @@ void DxtDecodeBlock(const Dxt1Block* block, CRgb565** rows, const DxtRect& rect)
 void DxtDecodeBlock(const Dxt1Block* block, CArgb1555** rows, const DxtRect& rect);
 void DxtDecodeBlock(const Dxt1Block* block, CImVector** rows, const DxtRect& rect);
 
-template <class Block, class Pixel>
-void Blit_DxtUnaligned(const C2iVector& size, const Block* in, uint32_t inStride, Pixel* out, uint32_t outStride);
-
-template <class Block, class Pixel>
-void Blit_Dxt(const C2iVector& size, const Block* in, uint32_t inStride, Pixel* out, uint32_t outStride);
-
 uint32_t CalcRowStride(BlitFormat format, uint32_t width, uint32_t height);
-int32_t Blit(const C2iVector& size, BlitAlpha alpha, const void* in, uint32_t inStride, BlitFormat inFormat, void* out, uint32_t outStride, BlitFormat outFormat);
+int32_t Blit(const C2iVector& size, BlitAlpha alpha, const void* src, uint32_t srcStride, BlitFormat srcFmt, void* dst, uint32_t dstStride, BlitFormat dstFmt);
 
 #endif

@@ -1,8 +1,11 @@
 #ifndef WOW_SOURCE_UIUTIL_TOOLTIP_H
 #define WOW_SOURCE_UIUTIL_TOOLTIP_H
 
+#include "WoW/Common/ComponentCore/Types.h"
+
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include <cstdio>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Frame/CSimpleFrame.h"
@@ -10,8 +13,11 @@
 #include "Engine/Source/FrameScript/Types.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Common/WowTime.h"
+#include "WoW/Source/DB/Rec/ItemSetRec.h"
 #include "WoW/Source/Object/WGUID.h"
 #include "WoW/Source/UIUtil/Types.h"
+
+enum ITEM_ENCHANTMENT_EFFECT : int32_t;
 
 class CImVector;
 class CSimpleFontString;
@@ -47,7 +53,7 @@ class ItemLinkInfo {
     int32_t GetItemIdFromLink(const char* link);
 };
 
-extern const char* s_inventoryTypeTokens[29];
+extern const char* s_inventoryTypeTokens[INVTYPE_COUNT];
 
 class CGItemStatsSummary;
 class CGTalentGroup_C;
@@ -57,6 +63,8 @@ class TalentRec;
 class CAaRect;
 class CGItem_C;
 class CGUnit_C;
+enum ITEM_ENCHANTMENT_EFFECT : int32_t;
+
 class CImVector;
 class CSimpleFontString;
 
@@ -79,7 +87,7 @@ struct FrameStackInfo {
 struct ItemSetTooltipData {
     /* 0000 */ CGTooltip* m_tooltip;
     /* 0004 */ const ItemSetRec* m_set;
-    /* 0008 */ ItemNameCache_C* m_items [17];
+    /* 0008 */ ItemNameCache_C* m_items [NUM_ITEM_SET_ITEMS];
     /* 004C */ int32_t* m_equipped;
     /* 0050 */ uint8_t m_slotUsed [19];
 };
@@ -122,12 +130,12 @@ class CGTooltip : public CSimpleFrame {
     static const char* GetSpellLink(int32_t spellId);
     static const char* GetGlyphLink(int32_t slotId, int32_t glyphId);
     static const char* GetTalentHyperlinkString(const TalentRec* talent, const char* name, int32_t rank);
-    static const char* GetAchievementHyperlink(int32_t achievementId, WOWGUID guid, int32_t a3, WowTime time, int32_t a5, int32_t a6, int32_t a7, int32_t a8);
+    static const char* GetAchievementHyperlink(int32_t achievementId, WOWGUID guid, int32_t completed, WowTime time, int32_t criteria1, int32_t criteria2, int32_t criteria3, int32_t criteria4);
     static int32_t GetObjectType();
     static void RegisterScriptMethods(lua_State* L);
 
     /* 029C */ CSimpleFrame* m_owner;
-    /* 02A0 */ int32_t m_anchorType;
+    /* 02A0 */ TOOLTIP_ANCHORPOINT m_anchorType;
     /* 02A4 */ uint32_t m_numLines;
     /* 02A8 */ uint32_t m_maxLines;
     /* 02AC */ TSFixedArray<CSimpleFontString*> m_leftStrings;
@@ -204,14 +212,14 @@ class CGTooltip : public CSimpleFrame {
     void ClearTooltip();
     void AddDeltaHeader(int32_t* first);
     void AddColoredItemStat(int32_t value, const char* name, int32_t* first);
-    int32_t SetItemDelta(const CGItemStatsSummary* summary, int32_t append);
-    void SetBuff(int32_t spellId, int32_t a2, int32_t a3, int32_t a4, int32_t a5, int32_t a6);
+    int32_t SetItemDelta(const CGItemStatsSummary* summary, BOOL append);
+    void SetBuff(int32_t spellId, int32_t spellLevel, int32_t stackCount, int32_t auraFlags, int32_t parseUnit, int32_t parsePet);
     void SetFrameStack(bool showHidden);
     void FadeOut();
-    void ResetPosition(int32_t force);
+    void ResetPosition(BOOL force);
     void SetOwner(CSimpleFrame* owner, TOOLTIP_ANCHORPOINT anchorType, float offsetX, float offsetY);
     void SetDefaultAnchor();
-    int32_t SetUnit(const WOWGUID& guid, int32_t showHealth, const WOWGUID& healthGuid, int32_t a4);
+    int32_t SetUnit(const WOWGUID& guid, BOOL showHealth, const WOWGUID& healthGuid, BOOL hideOffline);
     void SetObject(const WOWGUID& guid);
     void SetCorpse(const WOWGUID& guid);
     void AddFontStrings(CSimpleFontString* left, CSimpleFontString* right);
@@ -231,22 +239,107 @@ class CGTooltip : public CSimpleFrame {
     void AddSpellReagents(const SpellRec* spell, const char* token, void (*callback)(int32_t id, const WOWGUID& guid, void* param, bool success));
     int32_t SetItemNoStats();
     static void GetFloatDurationString(char* buffer, uint32_t size, float time, const char* token, const char* prefix);
-    int32_t AddTalentPrereqs(const TalentRec* talent, CGTalentGroup_C* group, int32_t isInspect, int32_t isPet, int32_t usePreview);
-    void AddTalentLearnText(const TalentRec* talent, CGTalentGroup_C* group, int32_t prereqsMet, int32_t rank, int32_t maxRank, int32_t a7, int32_t a8, int32_t isPet, int32_t usePreview);
+    int32_t AddTalentPrereqs(const TalentRec* talent, CGTalentGroup_C* group, BOOL isInspect, BOOL isPet, BOOL usePreview);
+    void AddTalentLearnText(const TalentRec* talent, CGTalentGroup_C* group, int32_t prereqsMet, int32_t rank, int32_t maxRank, BOOL isInspect, BOOL useRank, BOOL isPet, BOOL usePreview);
     int32_t SetQuest(int32_t questId);
-    void SetGlyph(int32_t slotId, int32_t glyphId, int32_t enabled, int32_t hideRemove, int32_t parseUnit);
-    void SetTalent(const TalentRec* talent, CGTalentGroup_C* group, int32_t isInspect, int32_t useRank, int32_t rank, int32_t isPet, int32_t usePreview);
-    int32_t SetAchievement(int32_t achievementId, WOWGUID guid, bool completed, WowTime time, uint32_t criteria1, uint32_t criteria2, uint32_t criteria3, uint32_t criteria4, int32_t a10);
-    int32_t SetSpell(int32_t spellId, int32_t brief, uint32_t cooldown, int32_t isPet, int32_t showRank, int32_t isInspect, int32_t a8, const TalentRec* talent, CGTalentGroup_C* talentGroup, int32_t append, int32_t usePreview, int32_t a13, int32_t rank, int32_t maxRank, int32_t showLearn);
-    int32_t SetItem(int32_t itemId, const WOWGUID* requester, const WOWGUID* itemGuid, int32_t nameOnly, int32_t compare, int32_t useLinkInfo, int32_t append, WOWGUID owner, int32_t socketPreview, FILE* stream, int32_t hideCharges, const ItemLinkInfo* link, int32_t minimumLevel, int32_t skipLock, int32_t skipSellPrice);
+    void SetGlyph(int32_t slotId, int32_t glyphId, BOOL enabled, int32_t hideRemove, int32_t parseUnit);
+    void SetTalent(const TalentRec* talent, CGTalentGroup_C* group, BOOL isInspect, BOOL useRank, int32_t rank, BOOL isPet, BOOL usePreview);
+    int32_t SetAchievement(int32_t achievementId, WOWGUID guid, bool completed, WowTime time, uint32_t criteria1, uint32_t criteria2, uint32_t criteria3, uint32_t criteria4, BOOL fromNameCallback);
+    int32_t SetSpell(int32_t spellId, BOOL brief, uint32_t cooldown, BOOL isPet, BOOL showRank, BOOL isInspect, BOOL useRank, const TalentRec* talent, CGTalentGroup_C* talentGroup, BOOL append, BOOL usePreview, int32_t spellRank, int32_t rank, int32_t maxRank, BOOL showLearn);
+    int32_t SetItem(int32_t itemId, const WOWGUID* requester, const WOWGUID* itemGuid, int32_t nameOnly, int32_t compare, BOOL useLinkInfo, BOOL append, WOWGUID owner, int32_t socketPreview, FILE* stream, int32_t hideCharges, const ItemLinkInfo* link, int32_t minimumLevel, int32_t skipLock, int32_t skipSellPrice);
+};
+
+// Item stat (mod) types; names are the s_itemModTokens strings. Slots with an empty token use
+// EnumeratedString names.
+enum ITEM_MOD_TYPE : int32_t {
+    ITEM_MOD_MANA = 0,
+    ITEM_MOD_HEALTH = 1,
+    ITEM_MOD_ENDURANCE = 2,
+    ITEM_MOD_AGILITY = 3,
+    ITEM_MOD_STRENGTH = 4,
+    ITEM_MOD_INTELLECT = 5,
+    ITEM_MOD_SPIRIT = 6,
+    ITEM_MOD_STAMINA = 7,
+    ITEM_MOD_ENERGY = 8,
+    ITEM_MOD_RAGE = 9,
+    ITEM_MOD_FOCUS = 10,
+    ITEM_MOD_WEAPON_RATING = 11,
+    ITEM_MOD_DEFENSE_SKILL_RATING = 12,
+    ITEM_MOD_DODGE_RATING = 13,
+    ITEM_MOD_PARRY_RATING = 14,
+    ITEM_MOD_BLOCK_RATING = 15,
+    ITEM_MOD_HIT_MELEE_RATING = 16,
+    ITEM_MOD_HIT_RANGED_RATING = 17,
+    ITEM_MOD_HIT_SPELL_RATING = 18,
+    ITEM_MOD_CRIT_MELEE_RATING = 19,
+    ITEM_MOD_CRIT_RANGED_RATING = 20,
+    ITEM_MOD_CRIT_SPELL_RATING = 21,
+    ITEM_MOD_HIT_TAKEN_MELEE_RATING = 22,
+    ITEM_MOD_HIT_TAKEN_RANGED_RATING = 23,
+    ITEM_MOD_HIT_TAKEN_SPELL_RATING = 24,
+    ITEM_MOD_CRIT_TAKEN_MELEE_RATING = 25,
+    ITEM_MOD_CRIT_TAKEN_RANGED_RATING = 26,
+    ITEM_MOD_CRIT_TAKEN_SPELL_RATING = 27,
+    ITEM_MOD_HASTE_MELEE_RATING = 28,
+    ITEM_MOD_HASTE_RANGED_RATING = 29,
+    ITEM_MOD_HASTE_SPELL_RATING = 30,
+    ITEM_MOD_HIT_RATING = 31,
+    ITEM_MOD_CRIT_RATING = 32,
+    ITEM_MOD_HIT_TAKEN_RATING = 33,
+    ITEM_MOD_CRIT_TAKEN_RATING = 34,
+    ITEM_MOD_RESILIENCE_RATING = 35,
+    ITEM_MOD_HASTE_RATING = 36,
+    ITEM_MOD_EXPERTISE_RATING = 37,
+    ITEM_MOD_ATTACK_POWER = 38,
+    ITEM_MOD_RANGED_ATTACK_POWER = 39,
+    ITEM_MOD_VERSATILITY = 40, // EnumeratedString name from a later version; no 3.3.5 token.
+    ITEM_MOD_SPELL_HEALING_DONE = 41,
+    ITEM_MOD_SPELL_DAMAGE_DONE = 42,
+    ITEM_MOD_MANA_REGENERATION = 43,
+    ITEM_MOD_ARMOR_PENETRATION_RATING = 44,
+    ITEM_MOD_SPELL_POWER = 45,
+    ITEM_MOD_HEALTH_REGEN = 46,
+    ITEM_MOD_SPELL_PENETRATION = 47,
+    ITEM_MOD_BLOCK_VALUE = 48,
+    NUM_ITEM_MOD_TYPES = 49,
+};
+
+// CGItemStatsSummary::m_stats indices; names follow the tokens CGItem_C::GetStatName builds for each range.
+enum ITEM_STAT_SUMMARY : int32_t {
+    STAT_SUMMARY_RESISTANCE = 0, // 0..6: RESISTANCE<n>_NAME; 0 is armor.
+    STAT_SUMMARY_ATTACK_POWER = 7,
+    STAT_SUMMARY_MELEE_ATTACK_POWER = 8,
+    STAT_SUMMARY_RANGED_ATTACK_POWER = 9,
+    STAT_SUMMARY_FERAL_ATTACK_POWER = 10,
+    STAT_SUMMARY_ITEM_MOD = 11, // 11..59: STAT_SUMMARY_ITEM_MOD + ITEM_MOD_TYPE.
+    STAT_SUMMARY_BLOCK_VALUE = 60,
+    STAT_SUMMARY_POWER_REGEN = 61, // 61..67: ITEM_MOD_POWER_REGEN<n>_SHORT by power type.
+    STAT_SUMMARY_HEALTH_REGEN = 68,
+    STAT_SUMMARY_EMPTY_SOCKET_META = 69, // 69..72 follow s_socketColorNames.
+    STAT_SUMMARY_EMPTY_SOCKET_RED = 70,
+    STAT_SUMMARY_EMPTY_SOCKET_YELLOW = 71,
+    STAT_SUMMARY_EMPTY_SOCKET_BLUE = 72,
+    NUM_STAT_SUMMARY = 73,
 };
 
 class CGItemStatsSummary {
     public:
+    enum SUMMARY_FLAGS : uint32_t {
+        ITEM_SUMMARY_PARSED_NONE = 0, // (inferred)
+        ITEM_SUMMARY_PARSED_AURAS = 0x1,
+        ITEM_SUMMARY_PARSED_RANDOM_PROPERTIES = 0x2,
+        ITEM_SUMMARY_PARSED_WEAPON_DPS = 0x4,
+        ITEM_SUMMARY_PARSED_RESISTANCES = 0x8,
+        ITEM_SUMMARY_PARSED_NUM_GEMS = 0x10,
+        ITEM_SUMMARY_PARSED_BASIC_STATS = 0x20,
+        ITEM_SUMMARY_PARSED_BLOCK_VALUE = 0x40,
+        ITEM_SUMMARY_PARSED_SCALING_ITEM = 0x80,
+    };
+
     static int32_t GetItemComparison(CGTooltip* first, CGTooltip* second, CGItemStatsSummary* result);
 
     /* 0000 */ float m_dps;
-    /* 0004 */ int32_t m_stats[73];
+    /* 0004 */ int32_t m_stats[NUM_STAT_SUMMARY];
     /* 0128 */ uint32_t m_flags;
 
     CGItemStatsSummary();
@@ -260,7 +353,7 @@ class CGItemStatsSummary {
     void AddStatMods(const ItemStats_C* stats);
     void AddResistances(const ItemStats_C* stats);
     void AddSpellEffects(const SpellRec* spell);
-    void AddEnchantEffect(int32_t type, int32_t arg, int32_t amount);
+    void AddEnchantEffect(ITEM_ENCHANTMENT_EFFECT type, int32_t arg, int32_t amount);
     void AddEnchantment(const SpellItemEnchantmentRec* enchant);
     void AddEnchantment(const SpellItemEnchantmentRec* enchant, int32_t amount);
     void AccumulateDpsStat(const ItemStats_C* stats);
@@ -293,6 +386,6 @@ int32_t SetCompareItem(CGTooltip* tooltip, uint32_t itemId, int32_t offset, int3
 int32_t SetTooltipUnitAura(CGTooltip* tooltip, ScriptAuraInfo* info);
 
 extern const char* s_socketColorNames[5];
-extern const char* s_itemModTokens[49];
+extern const char* s_itemModTokens[NUM_ITEM_MOD_TYPES];
 
 #endif

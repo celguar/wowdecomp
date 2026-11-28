@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/SoundInterface/SoundInterface2.h"
 
@@ -19,35 +20,32 @@ struct SI2ZoneSoundInfo {
     ~SI2ZoneSoundInfo();
 };
 
-struct SI2ZoneMusicTimer {
-    /* 0000 */ int32_t m_soundKitId;
-    /* 0004 */ int32_t m_silenceMin;
-    /* 0008 */ int32_t m_silenceMax;
-};
-
 class SI2ZoneSound {
-    public:
+    private:
+    friend class SI2ZoneSoundPair; // (inferred)
     /* 0000 */ int32_t m_soundKitId;
-    /* 0004 */ int32_t m_type;
+    /* 0004 */ SI2::ZONE_SOUND_TYPE m_type;
     /* 0008 */ SE2SoundKitObject m_object;
 
+    public:
     SI2ZoneSound();
 };
 
 class SI2ZoneSoundPair {
-    public:
+    private:
     /* 0000 */ SI2ZoneSound m_sounds[2];
     /* 0038 */ uint32_t m_current;
     /* 003C */ uint32_t m_next;
 
+    public:
     SI2ZoneSoundPair();
     ~SI2ZoneSoundPair();
-    int32_t GetCurrentType();
+    SI2::ZONE_SOUND_TYPE GetCurrentType() const;
     int32_t GetPlayingSoundKitId();
     bool IsPlaying();
     void SetFinishedCallback(void (*callback)(SESound*, void*), void* param);
-    void Stop(int32_t immediate);
-    int32_t Transition(int32_t soundKitId, int32_t type, SE2SoundKitProperties* properties, int32_t immediate, float fadeOutTime);
+    void Stop(BOOL immediate);
+    SI2_RESULT Transition(int32_t soundKitId, SI2::ZONE_SOUND_TYPE type, SE2SoundKitProperties* properties, BOOL immediate, float fadeOutTime);
 };
 
 #endif

@@ -60,7 +60,7 @@ static CGxFormat s_formats[] = {
 // VERIFY: 419fe4e8 auto
 // OFFSET: 0x0076B3F0
 void ConsoleDetectSetDefaults(DefaultSettings& defaults, const Hardware& hardware) {
-    const VideoHardwareRec* video = hardware.m_videoHw;
+    const VideoHardwareRec* video = hardware.videoHw;
     const CpuHardware* cpu = hardware.m_cpuHw;
 
     defaults.m_farClip = s_farClip[2 * video->m_farclipIdx + cpu->m_farclipIdx];
@@ -87,14 +87,14 @@ void ConsoleDetectSetDefaults(DefaultSettings& defaults, const Hardware& hardwar
 // VERIFY: 2f86cffe auto
 // OFFSET: 0x0076B520
 void ConsoleDetectSetDefaultsFormat(DefaultSettings& defaults, const Hardware& hardware) {
-    defaults.m_format = &s_formats[hardware.m_videoHw->m_resolutionIdx];
+    defaults.m_format = &s_formats[hardware.videoHw->m_resolutionIdx];
 }
 
 // VERIFY: d4b42eb1 auto
 // OFFSET: 0x0076B540
 static void SetVideoIdx(Hardware& hardware) {
-    for (int32_t i = 1; i < g_videoHardwareDB.m_numRecords; i++) {
-        const VideoHardwareRec* rec = i < 0 || i >= g_videoHardwareDB.m_numRecords ? nullptr : &g_videoHardwareDB.m_records[i];
+    for (int32_t i = 1; i < g_videoHardwareDB.GetNumRecords(); i++) {
+        const VideoHardwareRec* rec = i < 0 || i >= g_videoHardwareDB.GetNumRecords() ? nullptr : &g_videoHardwareDB.m_records[i];
 
         if (hardware.m_videoDevice.m_vendorID == rec->m_vendorID && hardware.m_videoDevice.m_deviceID == rec->m_deviceID) {
             hardware.m_videoID = rec->m_id;
@@ -106,7 +106,7 @@ static void SetVideoIdx(Hardware& hardware) {
 // VERIFY: b9267b57 manual
 // OFFSET: 0x0076B5A0
 static void ShowFatalMessageBox(int32_t stringID, const char* message) {
-    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
+    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(MSG_TITLE_WOW);
     const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
     Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(stringID);
 
@@ -143,9 +143,9 @@ void ConsoleDetectSaveHardware(const Hardware& hardware, bool& changed) {
     if (hardware.m_cpuIdx == cpuIdx && hardware.m_memIdx == memIdx && (genericVideo || hardware.m_videoID == videoID) && hardware.m_soundIdx == soundIdx) {
         changed = false;
     } else {
-        Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
+        Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(MSG_TITLE_WOW);
         const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
-        Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(5);
+        Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(MSG_HW_CHANGED);
         const char* message = rec ? rec->m_message : "Hardware changed.  Reload default settings?";
 
         changed = OsGuiMessageBox(OsGuiGetWindow(OSGUI_WINDOW_TYPE_FRONT), OSGUI_MESSAGE_STYLE_YESNO, message, caption) == OSGUI_MESSAGE_RESULT_YESOK;
@@ -161,7 +161,7 @@ void ConsoleDetectSaveHardware(const Hardware& hardware, bool& changed) {
 // OFFSET: 0x0076BA30
 void ConsoleDetectDetectHardware(Hardware& hardware, bool& changed) {
     if (OsIsRemoteSession()) {
-        ShowFatalMessageBox(12, "Running World of Warcraft through a Remote Desktop connection is not supported.  Exiting program.");
+        ShowFatalMessageBox(MSG_REMOTE_DESKTOP, "Running World of Warcraft through a Remote Desktop connection is not supported.  Exiting program.");
     }
 
     g_videoHardwareDB.Load(__FILE__, __LINE__);
@@ -182,13 +182,13 @@ void ConsoleDetectDetectHardware(Hardware& hardware, bool& changed) {
         }
 
         if (!hardware.m_videoID) {
-            ShowFatalMessageBox(11, "Failed to find a suitable display device.  Exiting program.");
+            ShowFatalMessageBox(MSG_GX_NO_DEVICE, "Failed to find a suitable display device.  Exiting program.");
         }
     }
 
     hardware.m_soundIdx = 0;
     hardware.m_cpuHw = &s_cpuHwSettings[hardware.m_cpuIdx];
-    hardware.m_videoHw = g_videoHardwareDB.GetRecord(hardware.m_videoID);
+    hardware.videoHw = g_videoHardwareDB.GetRecord(hardware.m_videoID);
     hardware.m_soundHw = &s_soundHwSettings;
 
     ConsoleDetectSaveHardware(hardware, changed);

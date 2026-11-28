@@ -4,6 +4,7 @@
 #include "Engine/Source/Tempest/C3Ray.h"
 #include "Engine/Source/Tempest/C3Segment.h"
 #include "Engine/Source/Tempest/C2Vector.h"
+#include <cfloat>
 #include <cmath>
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Tempest/CAaBox.h"
@@ -19,6 +20,7 @@
 #include "Engine/Source/Model2/M2Data.h"
 #include "Engine/Source/Services/ParticleSystem2.h"
 #include "Engine/Source/ShaderEffect/Types.h"
+#include "Engine/Source/Tempest/CMath.h"
 
 // STATIC: 0x00CD85F8
 CM2Model* CBarrier::s_sparkles[4];
@@ -48,8 +50,11 @@ void CBarrier::AddBarrierConvexPoly(C3Vector* verts, uint32_t count, float radiu
         return;
     }
 
-    static CGxVertexPCT0T1 s_polyVerts[12];
-    static C3Vector s_polyPoints[12];
+    constexpr uint32_t BARRIER_VERT_CACHE = 12;
+    STORM_ASSERT(count >= 3 && count <= BARRIER_VERT_CACHE);
+
+    static CGxVertexPCT0T1 s_polyVerts[BARRIER_VERT_CACHE];
+    static C3Vector s_polyPoints[BARRIER_VERT_CACHE];
 
     C3Vector* points = verts;
 
@@ -112,7 +117,7 @@ void CBarrier::AddBarrierConvexPoly(C3Vector* verts, uint32_t count, float radiu
     ray.origin = this->m_viewerPos;
     ray.dir = -contact.m_plane.n;
 
-    if (!NTempest::Intersect(ray, contact.m_plane, nullptr, &contact.m_point, 0.0099999998f)) {
+    if (!NTempest::Intersect(ray, contact.m_plane, nullptr, &contact.m_point, 0.01f)) {
         return;
     }
 
@@ -157,54 +162,54 @@ void CBarrier::AddAxisAlignedWall(const C2Vector& start, const C2Vector& end, fl
         return;
     }
 
-    float t = 3.4028235e38f;
+    float t = FLT_MAX;
     C3Segment segment;
-    segment.b = C3Vector(start.x, start.y, this->m_viewerPos.z);
-    segment.t = C3Vector(end.x, end.y, this->m_viewerPos.z);
+    segment.start = C3Vector(start.x, start.y, this->m_viewerPos.z);
+    segment.end = C3Vector(end.x, end.y, this->m_viewerPos.z);
     float dist = sqrt(NTempest::DistanceSquared(segment, this->m_viewerPos, &t));
 
-    if (0.99900001f * radius < dist) {
+    if (0.999f * radius < dist) {
         return;
     }
 
-    float dx = segment.t.x - segment.b.x;
+    float dx = segment.end.x - segment.start.x;
     float height = radius - dist;
-    float dy = segment.t.y - segment.b.y;
-    float dz = segment.t.z - segment.b.z;
+    float dy = segment.end.y - segment.start.y;
+    float dz = segment.end.z - segment.start.z;
     float halfWidth = height / sqrt(dx * dx + dy * dy + dz * dz);
 
     float t0 = t - halfWidth;
     t0 = t0 < 0.0f ? 0.0f : (t0 >= 1.0f ? 1.0f : t0);
-    float x0 = dx * t0 + segment.b.x;
-    float y0 = dy * t0 + segment.b.y;
-    float z0 = t0 * dz + segment.b.z;
+    float x0 = dx * t0 + segment.start.x;
+    float y0 = dy * t0 + segment.start.y;
+    float z0 = t0 * dz + segment.start.z;
 
     float t1 = halfWidth + t;
     t1 = t1 < 0.0f ? 0.0f : (t1 >= 1.0f ? 1.0f : t1);
-    float z1 = dz * t1 + segment.b.z;
+    float z1 = dz * t1 + segment.start.z;
 
     C3Vector quad[4];
     quad[0] = C3Vector(x0, y0, height + z0);
     quad[1] = C3Vector(x0, y0, z0 - height);
-    quad[2] = C3Vector(dx * t1 + segment.b.x, dy * t1 + segment.b.y, z1 - height);
-    quad[3] = C3Vector(dx * t1 + segment.b.x, dy * t1 + segment.b.y, height + z1);
+    quad[2] = C3Vector(dx * t1 + segment.start.x, dy * t1 + segment.start.y, z1 - height);
+    quad[3] = C3Vector(dx * t1 + segment.start.x, dy * t1 + segment.start.y, height + z1);
     this->AddBarrierConvexPoly(quad, 4, radius, nullptr, 0, 0);
 }
 
 // VERIFY: d2c5f0b9 manual
 // OFFSET: 0x007946D0
 void CBarrier::AddBarrier(const CAaBox& box, float radius) {
-    if (!this->m_mode || !(box.t.x > box.b.x && box.t.y > box.b.y && box.t.z > box.b.z)) {
+    if (!this->m_mode || !box.IsValid()) {
         return;
     }
 
     CAaBox grown;
-    grown.b.x = box.b.x - 0.050000001f;
-    grown.b.y = box.b.y - 0.050000001f;
-    grown.b.z = box.b.z - 0.050000001f;
-    grown.t.x = box.t.x + 0.050000001f;
-    grown.t.y = box.t.y + 0.050000001f;
-    grown.t.z = box.t.z + 0.050000001f;
+    grown.b.x = box.b.x - 0.05f;
+    grown.b.y = box.b.y - 0.05f;
+    grown.b.z = box.b.z - 0.05f;
+    grown.t.x = box.t.x + 0.05f;
+    grown.t.y = box.t.y + 0.05f;
+    grown.t.z = box.t.z + 0.05f;
 
     if (NTempest::Distance(grown, this->m_viewerPos) > radius) {
         return;
@@ -251,7 +256,7 @@ void CBarrier::AddBarrierMapObjDefGroup(CMapObjDefGroup* mapObjDefGroup, float r
         return;
     }
 
-    if (radius < NTempest::Distance(mapObjDefGroup->m_bbox, this->m_viewerPos)) {
+    if (radius < NTempest::Distance(mapObjDefGroup->aaBox, this->m_viewerPos)) {
         return;
     }
 
@@ -261,7 +266,7 @@ void CBarrier::AddBarrierMapObjDefGroup(CMapObjDefGroup* mapObjDefGroup, float r
         }
     }
 
-    this->AddBarrier(mapObjDefGroup->m_bbox, radius);
+    this->AddBarrier(mapObjDefGroup->aaBox, radius);
     this->m_groups.Add(1, &mapObjDefGroup);
 }
 
@@ -337,39 +342,30 @@ void CBarrier::Render(const C3Vector& viewerPos, float elapsedSec) {
         CM2Model* model = CBarrier::s_sparkles[i];
 
         if (model->m_attachParent) {
-            model->m_fFlags |= 0x80;
+            model->m_runtimeFlags |= M2_FLAGS::M2_ATTACHED_DRAW_ENABLED;
         } else {
-            model->m_fFlags |= 0x8;
+            model->m_runtimeFlags |= M2_FLAGS::M2_DRAW_ENABLED;
         }
 
         if (model->m_attachParent) {
-            model->m_fFlags |= 0x20000;
+            model->m_runtimeFlags |= M2_FLAGS::M2_ATTACHED_PARTICLES_ENABLED;
         } else {
-            model->m_fFlags |= 0x10000;
+            model->m_runtimeFlags |= M2_FLAGS::M2_PARTICLES_ENABLED;
         }
 
-        CBarrier::s_sparkles[i]->m_fFlags |= 0x8000;
-        CBarrier::s_sparkles[i]->m_worldTransform = transform;
+        CBarrier::s_sparkles[i]->SetWorldTransform(transform);
         CBarrier::s_sparkles[i]->m_fadeAlpha = this->m_contacts.m_data[i].m_strength;
 
         for (uint32_t j = 0; ; j++) {
             CM2Model* loaded = CBarrier::s_sparkles[i];
 
-            if (!(loaded->m_fFlags & 0x1)) {
-                loaded->WaitForLoad(nullptr);
-            }
+            loaded->EnsureInitialized();
 
             if (j >= loaded->m_shared->m_data->m_particles.m_count) {
                 break;
             }
 
-            CM2Model* emitterModel = CBarrier::s_sparkles[i];
-
-            if (!(emitterModel->m_fFlags & 0x1)) {
-                emitterModel->WaitForLoad(nullptr);
-            }
-
-            CParticleEmitter2* emitter = emitterModel->m_particleEmitters[j];
+            CParticleEmitter2* emitter = CBarrier::s_sparkles[i]->GetParticleEmitter(j);
             emitter->SetWidth(100.0f);
             emitter->SetHeight(100.0f);
         }
@@ -381,7 +377,7 @@ void CBarrier::Render(const C3Vector& viewerPos, float elapsedSec) {
     g_theGxDevicePtr->RsPush();
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_DepthTest, 1);
-    GxRsSet(GxRs_BlendingMode, 3);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Add);
     GxRsSet(GxRs_Culling, 0);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Fog, 0);
@@ -418,8 +414,8 @@ void CBarrier::Render(const C3Vector& viewerPos, float elapsedSec) {
     uint16_t* indices = reinterpret_cast<uint16_t*>(g_theGxDevicePtr->BufLock(indexBuf));
     s_patternPhase = elapsedSec * 0.1f + s_patternPhase;
 
-    if (s_patternPhase > 3.1415927f) {
-        s_patternPhase = s_patternPhase - 3.1415927f;
+    if (s_patternPhase > PI) {
+        s_patternPhase = s_patternPhase - PI;
     }
 
     if (vertices && indices) {
@@ -457,8 +453,8 @@ void CBarrier::Render(const C3Vector& viewerPos, float elapsedSec) {
                 vertices->m_color = color;
 
                 if (odd) {
-                    vertices->m_t1x = source->m_t1x * 0.050000001f + 0.5f;
-                    vertices->m_t1y = 0.050000001f * source->m_t1y - static_cast<float>(fmod(s_patternPhase, 3.1415927410125732)) * 1.5915494f;
+                    vertices->m_t1x = source->m_t1x * 0.05f + 0.5f;
+                    vertices->m_t1y = 0.05f * source->m_t1y - static_cast<float>(fmod(s_patternPhase, 3.1415927410125732)) * 1.5915494f;
                 } else {
                     vertices->m_t1x = source->m_t1x * 0.1f;
                     vertices->m_t1y = 0.1f * source->m_t1y - static_cast<float>(fmod(s_patternPhase, 3.1415927410125732)) * 1.5915494f;

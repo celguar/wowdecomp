@@ -68,18 +68,18 @@ void DayNight::DNStars::Render() {
     CM2Model* parent = model->m_attachParent;
 
     if (parent) {
-        model->m_fFlags |= 0x80;
+        model->m_runtimeFlags |= M2_FLAGS::M2_ATTACHED_DRAW_ENABLED;
     } else {
-        model->m_fFlags |= 0x8;
+        model->m_runtimeFlags |= M2_FLAGS::M2_DRAW_ENABLED;
     }
 
     if (parent) {
-        model->m_fFlags |= 0x20000;
+        model->m_runtimeFlags |= M2_FLAGS::M2_ATTACHED_PARTICLES_ENABLED;
     } else {
-        model->m_fFlags |= 0x10000;
+        model->m_runtimeFlags |= M2_FLAGS::M2_PARTICLES_ENABLED;
     }
 
-    this->m_model->m_fadeAlpha = this->m_color.a * 0.0039215689f;
+    this->m_model->m_fadeAlpha = this->m_color.a * ONE_OVER_255;
 
     uint32_t elapsed = OsGetAsyncTimeMs() - this->m_lastTimeMs;
     this->m_scene->AdvanceTime(elapsed);
@@ -131,7 +131,7 @@ void DayNight::DNPlanet::Render() {
     g_theGxDevicePtr->m_xforms[GxXform_World].Identity();
     g_theGxDevicePtr->XformSetView(billboard * view);
 
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Fog, 0);
@@ -163,17 +163,14 @@ void DayNight::DNSky::Render() {
     g_theGxDevicePtr->m_xforms[GxXform_World].Identity();
 
     C3Vector scale(6.6666665f, 6.6666665f, 6.6666665f);
-    CGxMatrixStack& world = g_theGxDevicePtr->m_xforms[GxXform_World];
-    world.m_dirty = 1;
-    world.m_flags[world.m_level] &= ~CGxMatrixStack::F_Identity;
-    world.m_mtx[world.m_level].Scale(scale);
+    GxXformScale(GxXform_World, scale);
 
     g_theGxDevicePtr->RsPush();
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_Culling, 0);
     GxRsSet(GxRs_DepthWrite, 0);
-    GxRsSet(GxRs_BlendingMode, 3);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Add);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
     GxPrimVertexPtr(this->m_nVerts, this->m_geoVerts.m_data, sizeof(C3Vector), nullptr, 0, this->m_clrVerts.m_data, sizeof(CImVector), nullptr, 0, nullptr, 0);
@@ -209,7 +206,7 @@ void DayNight::DNClouds::Render() {
     GxXformScale(GxXform_World, C3Vector(6.6666665f, 6.6666665f, 6.6666665f));
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Fog, 0);
@@ -217,7 +214,7 @@ void DayNight::DNClouds::Render() {
     GxRsSet(GxRs_Culling, 0);
     g_theGxDevicePtr->RsSet(GxRs_Texture0, gxTex);
 
-    if (DayNight::s_lightFlags & 1) {
+    if (DayNight::s_lightFlags & DayNight::LIGHT_FLAG_GLOW) {
         CImVector glow;
         glow.b = 0xFF;
         glow.g = 0xFF;

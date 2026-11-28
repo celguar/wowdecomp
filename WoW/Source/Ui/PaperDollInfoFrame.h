@@ -2,9 +2,11 @@
 #define WOW_SOURCE_UI_PAPERDOLLINFOFRAME_H
 
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Net/Types.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Object/WGUID.h"
+#include "WoW/Source/Object/Player.h"
 
 struct lua_State;
 
@@ -24,7 +26,7 @@ struct InspectArenaTeam {
 class CGCharacterInfo {
     public:
     static TSFixedArray<int32_t> m_invAlertStatus;
-    static int32_t m_hasHonorData;
+    static BOOL m_hasHonorData;
     static int32_t m_honorRequestPending;
     static uint32_t m_inspectLifetimeHonorableKills;
     static uint32_t m_inspectYesterdayHonor;
@@ -32,14 +34,14 @@ class CGCharacterInfo {
     static uint16_t m_inspectYesterdayHonorableKills;
     static uint8_t m_inspectLifetimeHighestRank;
     static uint16_t m_inspectTodayHonorableKills;
-    static InspectArenaTeam m_inspectArenaTeams[3];
+    static InspectArenaTeam m_inspectArenaTeams[MAX_ARENA_TEAMS];
     static int32_t CalculateInventoryAlertStatus(CGPlayer_C* player, uint32_t slot);
     static void RegisterMirrorHandlers(WOWGUID guid);
     static WOWGUID m_inspectTarget;
-    static int32_t CanInspect(const CGPlayer_C* unit);
+    static BOOL CanInspect(const CGPlayer_C* unit);
     static int32_t GetActivePlayerAmmoID(const CGPlayer_C* player);
     static void PickupInventoryItem(int32_t slot);
-    static int32_t PutItemInBackpack(uint32_t slot);
+    static int32_t PutItemInBag(uint32_t slot);
     static void EnterWorld();
     static void LeaveWorld();
     static void SetInspectTarget(const WOWGUID& guid);

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "WoW/Source/Object/ObjectClient/Missile_C.h"
@@ -25,6 +26,28 @@ class CVehicleCameraHeap {
 
 class CVehicleCamera_C {
     public:
+    // Reconstructed camera timing phases;passenger state and CAMERA_FLAGS are separate.
+    enum CAMERA_STATE : uint32_t {
+        STATE_NONE = 0,
+        STATE_ENTER_DELAY = 1,
+        STATE_ENTERING = 2,
+        STATE_ATTACHED = 3,
+        STATE_EXIT_DELAY = 4,
+        STATE_EXITING = 5,
+    };
+
+    enum CAMERA_FLAGS : uint32_t {
+        FLAG_NONE = 0,
+        FLAG_MOTION_TIMING_SET = 0x1,
+        FLAG_POSITION_INTERPOLATION = 0x2,
+        FLAG_SYNC_FACING = 0x4,
+        FLAG_WORLD_STATE_UPDATED = 0x8,
+        FLAG_FACING_INTERPOLATION = 0x10,
+        FLAG_RESET_END_CHASERS = 0x20,
+        FLAG_SAFE_POSITION_VALID = 0x40,
+        FLAG_CHANGING_TARGET = 0x80,
+    };
+
     static CVehicleCameraHeap* s_cameraPool;
     static uint32_t s_cameraCount;
 
@@ -58,7 +81,7 @@ class CVehicleCamera_C {
     /* 0094 */ CSmoothAngle m_endFacingChaser;
     /* 009C */ uint32_t m_motionDuration;
     /* 00A0 */ uint32_t m_lastUpdateTime;
-    /* 00A4 */ uint32_t m_state;
+    /* 00A4 */ CAMERA_STATE m_state;
     /* 00A8 */ uint32_t m_transitionStartTime;
     /* 00AC */ uint32_t m_transitionDuration;
     /* 00B0 */ WOWGUID m_targetGuid;
@@ -69,8 +92,8 @@ class CVehicleCamera_C {
     uint64_t GetRelativeTo() const;
     int32_t WouldAddingNextCameraCreateLoop(const CVehicleCamera_C* next) const;
     void Destroy();
-    int32_t IsHierarchyChasingFacing() const;
-    int32_t IsTransitioningFacing() const;
+    BOOL IsHierarchyChasingFacing() const;
+    BOOL IsTransitioningFacing() const;
     int32_t UpdateTransitionFlags();
     float GetTransitionProgress(uint32_t time) const;
     int32_t AttachToHierarchy();

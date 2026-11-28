@@ -1,3 +1,4 @@
+#include <cfloat>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -30,18 +31,14 @@
 // OFFSET: 0x0049E5B0
 static int32_t Script_GetTitleRegion(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
-    CScriptRegion* titleRegion = frame->m_titleRegion;
+    CSimpleTitleRegion* titleRegion = frame->m_titleRegion;
 
     if (!titleRegion) {
         lua_pushnil(L);
         return 1;
     }
 
-    if (!titleRegion->m_luaRegistered) {
-        titleRegion->RegisterScriptObject(nullptr);
-    }
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, titleRegion->m_luaObjectRef);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, titleRegion->GetLuaObjectRef());
     return 1;
 }
 
@@ -49,7 +46,7 @@ static int32_t Script_GetTitleRegion(lua_State* L) {
 // OFFSET: 0x0049E630
 static int32_t Script_CreateTitleRegion(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
-    CScriptRegion* titleRegion = frame->m_titleRegion;
+    CSimpleTitleRegion* titleRegion = frame->m_titleRegion;
 
     if (titleRegion) {
         titleRegion->MarkFramePointsUnused();
@@ -58,14 +55,10 @@ static int32_t Script_CreateTitleRegion(lua_State* L) {
         titleRegion = data ? new (data) CSimpleTitleRegion : nullptr;
         titleRegion->SetParent(frame);
         frame->m_titleRegion = titleRegion;
-        titleRegion->SetDeferredResize((frame->m_layoutFlags >> 8) & 2);
+        titleRegion->SetDeferredResize((frame->m_layoutFlags >> 8) & (CLayoutFrame::LayoutFlags::LAYOUT_DEFERRED_RESIZE >> 8));
     }
 
-    if (!titleRegion->m_luaRegistered) {
-        titleRegion->RegisterScriptObject(nullptr);
-    }
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, titleRegion->m_luaObjectRef);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, titleRegion->GetLuaObjectRef());
     return 1;
 }
 
@@ -105,7 +98,7 @@ static int32_t Script_CreateTexture(lua_State* L) {
         }
     }
 
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     CSimpleTexture* texture = data ? new (data) CSimpleTexture(frame, drawLayer, 1) : nullptr;
 
     if (name && *name) {
@@ -127,11 +120,7 @@ static int32_t Script_CreateTexture(lua_State* L) {
         texture->AnimActivated(nullptr, 1, alphaAnimating);
     }
 
-    if (!texture->m_luaRegistered) {
-        texture->RegisterScriptObject(nullptr);
-    }
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, texture->m_luaObjectRef);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, texture->GetLuaObjectRef());
     return 1;
 }
 
@@ -177,7 +166,7 @@ static int32_t Script_CreateFontString(lua_State* L) {
         }
     }
 
-    void* data = CSimpleFontString::s_allocator.GetData(0, typeid(CSimpleFontString).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleFontString::Allocate(sizeof(CSimpleFontString));
     CSimpleFontString* string = data ? new (data) CSimpleFontString(frame, drawLayer, true) : nullptr;
 
     if (name && *name) {
@@ -201,11 +190,7 @@ static int32_t Script_CreateFontString(lua_State* L) {
         string->AnimActivated(nullptr, 1, alphaAnimating);
     }
 
-    if (!string->m_luaRegistered) {
-        string->RegisterScriptObject(nullptr);
-    }
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, string->m_luaObjectRef);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, string->GetLuaObjectRef());
     return 1;
 }
 
@@ -213,7 +198,7 @@ static int32_t Script_CreateFontString(lua_State* L) {
 // OFFSET: 0x0049E700
 static int32_t Script_GetBoundsRect(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
-    CRect rect = { 3.4028235e38f, 3.4028235e38f, 0.0f, 0.0f };
+    CRect rect = { FLT_MAX, FLT_MAX, 0.0f, 0.0f };
 
     if (!frame->GetBoundsRect(rect)) {
         return 0;
@@ -261,11 +246,7 @@ static int32_t Script_GetRegions(lua_State* L) {
     }
 
     for (CSimpleRegion* region = frame->m_regions.Head(); region; region = frame->m_regions.Next(region)) {
-        if (!region->m_luaRegistered) {
-            region->RegisterScriptObject(nullptr);
-        }
-
-        lua_rawgeti(L, LUA_REGISTRYINDEX, region->m_luaObjectRef);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, region->GetLuaObjectRef());
     }
 
     return count;
@@ -304,11 +285,7 @@ static int32_t Script_GetChildren(lua_State* L) {
     for (SIMPLEFRAMENODE* node = frame->m_children.Head(); node; node = node->m_link.Next()) {
         CSimpleFrame* child = node->m_frame;
 
-        if (!child->m_luaRegistered) {
-            child->RegisterScriptObject(nullptr);
-        }
-
-        lua_rawgeti(L, LUA_REGISTRYINDEX, child->m_luaObjectRef);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, child->GetLuaObjectRef());
     }
 
     return count;
@@ -329,9 +306,7 @@ static int32_t Script_SetFrameStrata(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -369,9 +344,7 @@ static int32_t Script_SetFrameLevel(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -783,9 +756,7 @@ static int32_t Script_SetAttribute(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed() && !frame->AttributeChangesAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -850,9 +821,7 @@ static int32_t Script_SetScale(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -932,9 +901,7 @@ static int32_t Script_SetID(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -955,14 +922,12 @@ static int32_t Script_SetToplevel(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
 
-    frame->SetFrameFlag(0x1, StringToBOOL(L, 2, 1));
+    frame->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_TOPLEVEL, StringToBOOL(L, 2, 1));
     return 0;
 }
 
@@ -971,7 +936,7 @@ static int32_t Script_SetToplevel(lua_State* L) {
 static int32_t Script_IsToplevel(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_frameFlags & 0x1) {
+    if (frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_TOPLEVEL) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1014,9 +979,7 @@ static int32_t Script_Show(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1031,9 +994,7 @@ static int32_t Script_Hide(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1047,7 +1008,7 @@ static int32_t Script_Hide(lua_State* L) {
 static int32_t Script_IsVisible(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_isVisible) {
+    if (frame->IsVisible()) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1076,9 +1037,7 @@ static int32_t Script_Raise(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1093,9 +1052,7 @@ static int32_t Script_Lower(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1129,9 +1086,7 @@ static int32_t Script_SetHitRectInsets(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1269,7 +1224,7 @@ static int32_t Script_SetMaxResize(lua_State* L) {
 static int32_t Script_SetMovable(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    frame->SetFrameFlag(0x100, StringToBOOL(L, 2, 1));
+    frame->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_MOVABLE, StringToBOOL(L, 2, 1));
     return 0;
 }
 
@@ -1278,7 +1233,7 @@ static int32_t Script_SetMovable(lua_State* L) {
 static int32_t Script_IsMovable(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_frameFlags & 0x100) {
+    if (frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_MOVABLE) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1292,7 +1247,7 @@ static int32_t Script_IsMovable(lua_State* L) {
 static int32_t Script_SetDontSavePosition(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    frame->SetFrameFlag(0x80000, StringToBOOL(L, 2, 1));
+    frame->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_DONT_SAVE_POSITION, StringToBOOL(L, 2, 1));
     return 0;
 }
 
@@ -1301,7 +1256,7 @@ static int32_t Script_SetDontSavePosition(lua_State* L) {
 static int32_t Script_GetDontSavePosition(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_frameFlags & 0x80000) {
+    if (frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_DONT_SAVE_POSITION) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1315,7 +1270,7 @@ static int32_t Script_GetDontSavePosition(lua_State* L) {
 static int32_t Script_SetResizable(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    frame->SetFrameFlag(0x200, StringToBOOL(L, 2, 1));
+    frame->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_RESIZABLE, StringToBOOL(L, 2, 1));
     return 0;
 }
 
@@ -1324,7 +1279,7 @@ static int32_t Script_SetResizable(lua_State* L) {
 static int32_t Script_IsResizable(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_frameFlags & 0x200) {
+    if (frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_RESIZABLE) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1338,7 +1293,7 @@ static int32_t Script_IsResizable(lua_State* L) {
 static int32_t Script_StartMoving(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (!(frame->m_frameFlags & 0x100)) {
+    if (!(frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_MOVABLE)) {
         const char* name = frame->GetName();
         luaL_error(L, "Frame %s is not movable", name ? name : "<unnamed>");
         return 0;
@@ -1364,7 +1319,7 @@ static int32_t Script_StartMoving(lua_State* L) {
 static int32_t Script_StartSizing(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (!(frame->m_frameFlags & 0x200)) {
+    if (!(frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_RESIZABLE)) {
         const char* name = frame->GetName();
         luaL_error(L, "Frame %s is not resizable", name ? name : "<unnamed>");
         return 0;
@@ -1409,13 +1364,13 @@ static int32_t Script_StopMovingOrSizing(lua_State* L) {
 static int32_t Script_SetUserPlaced(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (!(frame->m_frameFlags & 0x300)) {
+    if (!(frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_MOVABLE_OR_RESIZABLE_MASK)) {
         const char* name = frame->GetName();
         luaL_error(L, "Frame %s is not movable or resizable", name ? name : "<unnamed>");
         return 0;
     }
 
-    frame->SetFrameFlag(0x1000, StringToBOOL(L, 2, 1));
+    frame->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_USER_PLACED, StringToBOOL(L, 2, 1));
     return 0;
 }
 
@@ -1424,7 +1379,7 @@ static int32_t Script_SetUserPlaced(lua_State* L) {
 static int32_t Script_IsUserPlaced(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_frameFlags & 0x1000) {
+    if (frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_USER_PLACED) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1447,7 +1402,7 @@ static int32_t Script_SetClampedToScreen(lua_State* L) {
 static int32_t Script_IsClampedToScreen(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_layoutFlags & 0x1000) {
+    if (frame->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_CLAMPED_TO_SCREEN) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1476,9 +1431,7 @@ static int32_t Script_EnableKeyboard(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1499,7 +1452,7 @@ static int32_t Script_EnableKeyboard(lua_State* L) {
 static int32_t Script_IsKeyboardEnabled(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (((frame->m_enabledEventsBitmask >> SIMPLE_EVENT_KEY) & 1) || ((frame->m_enabledEventsBitmask >> SIMPLE_EVENT_CHAR) & 1)) {
+    if (((frame->m_eventmask >> SIMPLE_EVENT_KEY) & 1) || ((frame->m_eventmask >> SIMPLE_EVENT_CHAR) & 1)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1514,9 +1467,7 @@ static int32_t Script_EnableMouse(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1535,7 +1486,7 @@ static int32_t Script_EnableMouse(lua_State* L) {
 static int32_t Script_IsMouseEnabled(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if ((frame->m_enabledEventsBitmask >> SIMPLE_EVENT_MOUSE) & 1) {
+    if ((frame->m_eventmask >> SIMPLE_EVENT_MOUSE) & 1) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1550,9 +1501,7 @@ static int32_t Script_EnableMouseWheel(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1571,7 +1520,7 @@ static int32_t Script_EnableMouseWheel(lua_State* L) {
 static int32_t Script_IsMouseWheelEnabled(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if ((frame->m_enabledEventsBitmask >> SIMPLE_EVENT_MOUSEWHEEL) & 1) {
+    if ((frame->m_eventmask >> SIMPLE_EVENT_MOUSEWHEEL) & 1) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1586,9 +1535,7 @@ static int32_t Script_EnableJoystick(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
     if (!frame->ProtectedFunctionsAllowed()) {
-        if (CSimpleTop::s_instance->m_actionBlockedCallback) {
-            CSimpleTop::s_instance->m_actionBlockedCallback(frame);
-        }
+        CSimpleTop::s_instance->NotifyActionBlocked(frame);
 
         return 0;
     }
@@ -1607,7 +1554,7 @@ static int32_t Script_EnableJoystick(lua_State* L) {
 static int32_t Script_IsJoystickEnabled(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if ((frame->m_enabledEventsBitmask >> SIMPLE_EVENT_JOYSTICK) & 1) {
+    if ((frame->m_eventmask >> SIMPLE_EVENT_JOYSTICK) & 1) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -1630,9 +1577,9 @@ static int32_t Script_GetBackdrop(lua_State* L) {
         lua_createtable(L, 0, 0);
     }
 
-    const char* bgFile = backdrop->m_bgFile.m_str ? backdrop->m_bgFile.m_str : "";
-    const char* edgeFile = backdrop->m_edgeFile.m_str ? backdrop->m_edgeFile.m_str : "";
-    uint32_t tile = backdrop->m_tile;
+    const char* bgFile = backdrop->m_background.m_str ? backdrop->m_background.m_str : "";
+    const char* edgeFile = backdrop->m_border.m_str ? backdrop->m_border.m_str : "";
+    uint32_t tile = backdrop->m_tileBackground;
 
     lua_pushstring(L, "bgFile");
     lua_pushstring(L, bgFile);
@@ -1653,11 +1600,11 @@ static int32_t Script_GetBackdrop(lua_State* L) {
     lua_settable(L, -3);
 
     lua_pushstring(L, "tileSize");
-    lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * backdrop->m_tileSize));
+    lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * backdrop->m_backgroundSize));
     lua_settable(L, -3);
 
     lua_pushstring(L, "edgeSize");
-    lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * backdrop->m_edgeSize));
+    lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * backdrop->m_cornerSize));
     lua_settable(L, -3);
 
     lua_pushstring(L, "insets");
@@ -1672,10 +1619,10 @@ static int32_t Script_GetBackdrop(lua_State* L) {
         lua_gettable(L, -2);
     }
 
-    float left = backdrop->m_insetLeft;
-    float right = backdrop->m_insetRight;
-    float top = backdrop->m_insetTop;
-    float bottom = backdrop->m_insetBottom;
+    float left = backdrop->m_leftInset;
+    float right = backdrop->m_rightInset;
+    float top = backdrop->m_topInset;
+    float bottom = backdrop->m_bottomInset;
 
     lua_pushstring(L, "left");
     lua_pushnumber(L, DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * left));
@@ -1731,11 +1678,11 @@ static int32_t Script_SetBackdrop(lua_State* L) {
     int32_t tile = StringToBOOL(L, -1, 0);
     lua_settop(L, -2);
 
-    uint32_t pieces = edgeFile && *edgeFile ? 0xFF : 0;
-    backdrop->m_bgFile.Copy(bgFile);
+    CBackdropGenerator::BACKDROPPIECES pieces = edgeFile && *edgeFile ? CBackdropGenerator::BACKDROPPIECES::THEWORKS : CBackdropGenerator::BACKDROPPIECES::BACKDROPONLY;
+    backdrop->m_background.Copy(bgFile);
     backdrop->m_pieces = pieces;
-    backdrop->m_tile = tile;
-    backdrop->m_edgeFile.Copy(edgeFile);
+    backdrop->m_tileBackground = tile;
+    backdrop->m_border.Copy(edgeFile);
     backdrop->m_alphaMode = GxBlend_Alpha;
 
     lua_pushstring(L, "tileSize");
@@ -1743,7 +1690,7 @@ static int32_t Script_SetBackdrop(lua_State* L) {
 
     if (lua_isnumber(L, -1)) {
         float tileSize = lua_tonumber(L, -1);
-        backdrop->m_tileSize = NDCToDDCWidth(tileSize / (CoordinateGetAspectCompensation() * 1024.0f));
+        backdrop->m_backgroundSize = NDCToDDCWidth(tileSize / (CoordinateGetAspectCompensation() * 1024.0f));
     }
 
     lua_settop(L, -2);
@@ -1753,7 +1700,7 @@ static int32_t Script_SetBackdrop(lua_State* L) {
 
     if (lua_isnumber(L, -1)) {
         float edgeSize = lua_tonumber(L, -1);
-        backdrop->m_edgeSize = NDCToDDCWidth(edgeSize / (CoordinateGetAspectCompensation() * 1024.0f));
+        backdrop->m_cornerSize = NDCToDDCWidth(edgeSize / (CoordinateGetAspectCompensation() * 1024.0f));
     }
 
     lua_settop(L, -2);
@@ -1807,10 +1754,10 @@ static int32_t Script_SetBackdrop(lua_State* L) {
 
         lua_settop(L, -2);
 
-        backdrop->m_insetLeft = left;
-        backdrop->m_insetRight = right;
-        backdrop->m_insetTop = top;
-        backdrop->m_insetBottom = bottom;
+        backdrop->m_leftInset = left;
+        backdrop->m_rightInset = right;
+        backdrop->m_topInset = top;
+        backdrop->m_bottomInset = bottom;
     }
 
     lua_settop(L, -2);
@@ -1836,7 +1783,7 @@ static int32_t Script_GetBackdropColor(lua_State* L) {
         return 0;
     }
 
-    CImVector color = backdrop->m_backgroundColor;
+    CImVector color = backdrop->m_color;
     lua_pushnumber(L, color.r * 0.00392156f);
     lua_pushnumber(L, color.g * 0.00392156f);
     lua_pushnumber(L, color.b * 0.00392156f);
@@ -1914,7 +1861,7 @@ static int32_t Script_SetDepth(lua_State* L) {
 static int32_t Script_GetDepth(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_frameFlags & 0x40000) {
+    if (frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_HIDE_SCRIPT_DEPTH) {
         return 0;
     }
 
@@ -1927,7 +1874,7 @@ static int32_t Script_GetDepth(lua_State* L) {
 static int32_t Script_GetEffectiveDepth(lua_State* L) {
     CSimpleFrame* frame = static_cast<CSimpleFrame*>(FrameScript_GetObjectThis(L, CSimpleFrame::GetObjectType()));
 
-    if (frame->m_frameFlags & 0x40000) {
+    if (frame->m_frameFlags & CSimpleFrame::FrameFlags::FRAME_HIDE_SCRIPT_DEPTH) {
         return 0;
     }
 

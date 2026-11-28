@@ -2,6 +2,7 @@
 #define WOW_SOURCE_UI_ADDONS_H
 
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/UIUtil/Types.h"
 
@@ -21,12 +22,12 @@ bool IsAddOnLoadable(const char* name, bool demandLoad, UIADDON_LOADABLE_REASON&
 bool IsAddOnLoaded(const char* name);
 bool IsAddOnLoadOnDemand(const char* name);
 TSGrowableArray<char*>* GetAddonDeps(const char* name);
-const char* AddOnSecurityToken(int32_t security);
+const char* AddOnSecurityToken(UIADDON_SECURITY security);
 const char* GetAddOnName(const char* name);
 const char* GetAddOnTitle(const char* name);
 const char* GetAddOnNotes(const char* name);
 const char* GetAddOnMetadata(const char* name, const char* key);
-int32_t GetAddOnSecurity(const char* name);
+UIADDON_SECURITY GetAddOnSecurity(const char* name);
 void SetAddOnEnableState(const char* name, const char* character, int32_t state);
 char* AddOnUnloadableToken(UIADDON_LOADABLE_REASON reason, UIADDON_LOADABLE_REASON dependencyReason, char* buffer, uint32_t size);
 bool LoadAddOn(const char* name, bool demandLoad, CStatus* status);
@@ -35,7 +36,7 @@ void LoadAddOns(CStatus* status);
 void UnloadAddOns();
 void SaveAddOnEnableState();
 bool IsAddonVersionCheckEnabled();
-void SetAddonVersionCheck(int32_t enable);
+void SetAddonVersionCheck(BOOL enable);
 const char* GetAddOnURL(const char* name);
 bool IsAddOnUpdateAvailable(const char* name);
 

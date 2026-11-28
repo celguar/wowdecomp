@@ -6,6 +6,7 @@
 #include <cstring>
 #include "Engine/Source/Base/CDataStore.h"
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
+#include "Engine/Source/BlizzardCore/Source/Packages/Mopaq/Types.h"
 #include "Engine/Source/BlizzardCore/Source/System/Version/Version.h"
 #include "Engine/Source/ConsoleBase/IConsole.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
@@ -35,6 +36,15 @@ bool BattlenetLogin::s_monolithicComponent;
 
 // STATIC: 0x00D45CB0
 char BattlenetLogin::s_monolithicPlatform[5];
+
+// INLINED: asserts the tumor manager exists and sends it a creep event.
+static void SendCreepEvent(Battlenet::Event::Creep::Invoke& invoke) {
+    if (!g_tumorManager) {
+        SErrDisplayAppFatalMessage("", "", 0);
+    }
+
+    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+}
 
 // VERIFY: 4bbf2db9 auto
 // OFFSET: 0x008C51D0
@@ -140,94 +150,94 @@ void BattlenetLogin::LogonResultBN(int32_t result) {
     this->m_logonResult = result;
 
     switch (result) {
-        case 0:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_SUCCESS:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_AUTHENTICATED, LOGIN_OK, nullptr, 0);
             break;
 
-        case 103:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_BAD_SERVER_PROOF:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_BAD_SERVER_PROOF, nullptr, 0);
             break;
 
-        case 104:
-        case 108:
-        case 116:
-        case 201:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_104:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_108:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_116:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_201:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_UNKNOWN_ACCOUNT, nullptr, 0);
             break;
 
-        case 105:
-        case 106:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_105:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_106:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_DISCONNECTED, nullptr, 0);
             break;
 
-        case 107:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_NO_GAME_ACCOUNT:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_NO_GAME_ACCOUNT, nullptr, 0);
             break;
 
-        case 109:
-        case 110:
-        case 111:
-        case 112:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_109:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_110:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_111:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_112:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_BADVERSION, nullptr, 0);
             break;
 
-        case 113:
-        case 200:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_113:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_200:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_AUTH_OUTAGE, nullptr, 0);
             break;
 
-        case 115:
-        case 205:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_115:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_205:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_ALREADYONLINE, nullptr, 0);
             break;
 
-        case 123:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_TOO_FAST:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_TOO_FAST, nullptr, 0);
             break;
 
-        case 124:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_USE_GRUNT:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_USE_GRUNT, nullptr, 0);
             break;
 
-        case 140:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_NO_GAME_ACCOUNTS_IN_REGION:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_NO_GAME_ACCOUNTS_IN_REGION, nullptr, 0);
             break;
 
-        case 141:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_ACCOUNT_LOCKED:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_ACCOUNT_LOCKED, nullptr, 0);
             break;
 
-        case 202:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_BANNED:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_BANNED, nullptr, 0);
             break;
 
-        case 203:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_SUSPENDED:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_SUSPENDED, nullptr, 0);
             break;
 
-        case 204:
-        case 212:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_204:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_212:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_GAME_ACCOUNT_LOCKED, nullptr, 0);
             break;
 
-        case 206:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_NO_TIME:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_NOTIME, nullptr, 0);
             break;
 
-        case 207:
-        case 208:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_207:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_208:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_EXPIRED, nullptr, 0);
             break;
 
-        case 209:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_PARENTAL_CONTROL:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_PARENTALCONTROL, nullptr, 0);
             break;
 
-        case 210:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_TRIAL_EXPIRED:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_TRIAL_EXPIRED, nullptr, 0);
             break;
 
-        case 211:
+        case BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UI_ANTI_INDULGENCE:
             this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_ANTI_INDULGENCE, nullptr, 0);
             break;
 
@@ -295,7 +305,7 @@ static uint32_t GetWowLangVersion(const char* locale) {
             }
         }
 
-        if (!SFile::OpenArchive(path, 0, 0x800, &archive)) {
+        if (!SFile::OpenArchive(path, 0, System_SFile::ARCHIVE_FLAG_INITIALIZE_TABLES_ON_OPEN, &archive)) {
             return GAME_BUILD;
         }
     }
@@ -466,7 +476,7 @@ void BattlenetApplication::Disconnect(uint32_t connection) {
 
     if (this->m_wowConnection) {
         this->m_wowConnection->Disconnect();
-        BattlenetLogin::LogConnectionStatus("Disconnected from %x", this->m_wowConnection->m_connectAddress);
+        BattlenetLogin::LogConnectionStatus("Disconnected from %x", this->m_wowConnection->GetConnectAddress());
     }
 }
 
@@ -484,8 +494,8 @@ BattlenetApplication::BattlenetApplication() {
 bool BattlenetLogin::CantConnect() {
     ConsoleWrite("BattlenetLogin was unable to connect to Sunken", DEFAULT_COLOR);
     this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_FAILED, LOGIN_SERVER_DOWN, nullptr, 0);
-    this->m_logonStatus = 1;
-    this->LogonResultBN(2);
+    this->m_logonStatus = LOGON_STATUS_FAILED;
+    this->LogonResultBN(BattlenetLogin::LOGON_RESULT::LOGON_RESULT_LOCAL_CONNECTION_FAILURE);
     this->m_loggedOn = false;
     this->m_online = false;
 
@@ -617,7 +627,7 @@ void BattlenetLogin::BuildRealmListResult() {
         msg->Put(info.m_realmId);
         msg->Put(info.m_build);
 
-        if (info.m_flags & 0x4) {
+        if (info.m_flags & REALM_FLAG_SPECIFY_BUILD) {
             msg->Put(info.m_versionMajor);
             msg->Put(info.m_versionMinor);
             msg->Put(info.m_versionRevision);
@@ -656,11 +666,7 @@ void BattlenetLogin::JoinRealm(uint32_t region, uint32_t battlegroup, uint32_t i
         join->m_exists = false;
     }
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
 }
 
 // VERIFY: 102510bd manual
@@ -683,11 +689,7 @@ void BattlenetLogin::GetLogonMethod() {
     SMemFree(this->m_password, __FILE__, __LINE__, 0);
     this->m_password = nullptr;
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
 }
 
 // VERIFY: a8bc2c7e auto
@@ -834,11 +836,7 @@ void BattlenetLogin::EnterPIN(int32_t count, uint8_t* digits) {
     Battlenet::Authentication::ModuleParam* param = message->m_params.New();
     *param->Set<0, BSN::String<256>>() = pin;
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
 }
 
 // VERIFY: e5dd91ee manual
@@ -857,11 +855,7 @@ void BattlenetLogin::EnterMatrix(uint8_t value) {
     Battlenet::Authentication::ModuleParam* param = message->m_params.New();
     *param->Set<1, uint32_t>() = value;
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
 }
 
 // VERIFY: 34fe48e7 manual
@@ -877,11 +871,7 @@ void BattlenetLogin::RevertMatrix() {
     message->m_moduleId = this->m_moduleId;
     message->m_name = Battlenet::Event::AuthModule::RevertMatrixCard;
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
 }
 
 // VERIFY: 1993fec7 manual
@@ -897,11 +887,7 @@ void BattlenetLogin::CommitMatrix() {
     message->m_moduleId = this->m_moduleId;
     message->m_name = Battlenet::Event::AuthModule::CommitMatrixCard;
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
 }
 
 // VERIFY: a977f694 manual
@@ -919,11 +905,7 @@ void BattlenetLogin::FinalizeMatrix() {
     message->m_moduleId = this->m_moduleId;
     message->m_name = Battlenet::Event::AuthModule::FinalizeMatrixCard;
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
 }
 
 // VERIFY: d8ce7391 manual
@@ -944,11 +926,7 @@ void BattlenetLogin::EnterToken(const char* token) {
     Battlenet::Authentication::ModuleParam* param = message->m_params.New();
     *param->Set<0, BSN::String<256>>() = token;
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
 }
 
 // VERIFY: efe382b2 manual
@@ -983,11 +961,7 @@ bool BattlenetLogin::SetGameAccount(uint32_t index) {
     param = message->m_params.New();
     *param->Set<0, BSN::String<256>>() = account.m_name;
 
-    if (!g_tumorManager) {
-        SErrDisplayAppFatalMessage("", "", 0);
-    }
-
-    g_tumorManager->SendEvent<Battlenet::Event::Creep::Invoke, Protocol>(Battlenet::Event::CREEP, invoke);
+    SendCreepEvent(invoke);
     this->m_gameAccountSelected = 1;
 
     return true;
@@ -1017,9 +991,9 @@ void BattlenetLogin::Logon(const char* loginServer, const char* portal) {
     }
 
     this->m_reconnect = false;
-    this->m_serviceState = 4;
-    this->m_logonStatus = -1;
-    this->m_logonResult = 0;
+    this->m_serviceState = SERVICE_STATE::SERVICE_STATE_DISCONNECTED;
+    this->m_logonStatus = LOGON_STATUS_PENDING;
+    this->m_logonResult = BattlenetLogin::LOGON_RESULT::LOGON_RESULT_SUCCESS;
     this->m_loginResponse->UpdateLoginStatus(LOGIN_STATE_CONNECTING, LOGIN_OK, nullptr, 0);
 
     if (portal && *portal) {
@@ -1044,7 +1018,7 @@ void BattlenetLogin::Logon(const char* loginServer, const char* portal) {
 void BattlenetLogin::QueueEvent(BN_EVENT_ID id, void* data, int32_t size) {
     this->m_eventLock.Enter();
 
-    BN_EVENT* event = this->m_events[this->m_eventIndex].NewNode(2, 0, 0);
+    BN_EVENT* event = this->m_events[this->m_eventIndex].NewNode(TSLIST_LINK_BEFORE, 0, 0);
     event->m_data = data;
     event->m_id = id;
     event->m_size = size;
@@ -1122,7 +1096,7 @@ void BattlenetLogin::UpdateRealmListData(uint32_t region, uint32_t battlegroup, 
     }
 
     if (!realm) {
-        BN_REALM* node = this->m_realms.NewNode(2, 0, 0);
+        BN_REALM* node = this->m_realms.NewNode(TSLIST_LINK_BEFORE, 0, 0);
 
         if (!node) {
             this->m_realmLock.Leave();
@@ -1171,7 +1145,7 @@ void BattlenetLogin::UpdateRealmListData(uint32_t region, uint32_t battlegroup, 
 
             if (cursor) {
                 realm->m_versionBuild = SStrToInt(cursor + 1);
-                realm->m_flags |= 0x4;
+                realm->m_flags |= REALM_FLAG_SPECIFY_BUILD;
             }
         }
     }
@@ -1207,8 +1181,8 @@ BattlenetLogin::BattlenetLogin() {
     this->m_application = nullptr;
     g_tumorManager = nullptr;
     this->m_moduleId = 0;
-    this->m_logonResult = 0;
-    this->m_serviceState = 4;
+    this->m_logonResult = BattlenetLogin::LOGON_RESULT::LOGON_RESULT_SUCCESS;
+    this->m_serviceState = SERVICE_STATE::SERVICE_STATE_DISCONNECTED;
 
     this->m_realmLock.Enter();
     this->m_realms.Clear();
@@ -1275,8 +1249,8 @@ void BattlenetLogin::Init(LoginResponse* loginResponse) {
     }
 
     this->m_loginResponse = loginResponse;
-    this->m_logonResult = 0;
-    this->m_serviceState = 4;
+    this->m_logonResult = BattlenetLogin::LOGON_RESULT::LOGON_RESULT_SUCCESS;
+    this->m_serviceState = SERVICE_STATE::SERVICE_STATE_DISCONNECTED;
 
     this->m_realmLock.Enter();
     this->m_realms.Clear();
@@ -1364,7 +1338,7 @@ void BattlenetLogin::HandleDisconnectEvents(uint32_t index) {
     }
 
     if (!this->m_online) {
-        this->m_logonStatus = 1;
+        this->m_logonStatus = LOGON_STATUS_FAILED;
     }
 
     if (serviceDisconnected) {
@@ -1373,7 +1347,7 @@ void BattlenetLogin::HandleDisconnectEvents(uint32_t index) {
         int32_t result = this->m_logonResult;
 
         if (!result) {
-            result = 105;
+            result = BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_105;
         }
 
         this->LogonResultBN(result);
@@ -1434,26 +1408,26 @@ void BattlenetLogin::HandleInvoke(const Battlenet::Event::Larva::Invoke* invoke)
                 this->QueueEvent(BN_EVENT_SHOW_SURVEY, nullptr, 0);
             }
         } else if (invoke->m_authentication.m_tag == 1) {
-            if (this->m_serviceState == 6) {
+            if (this->m_serviceState == SERVICE_STATE::SERVICE_STATE_RECOVERED) {
                 this->m_application->LogLevel("Ignoring Authentication Success invoke while in Service::RECOVERED state.", 4);
             } else {
                 const Battlenet::Authentication::Complete& complete = invoke->Get<0, Battlenet::Authentication::Response>().Get<1, Battlenet::Authentication::Complete>();
                 SStrCopy(this->m_username, complete.m_accountName.m_data, STORM_MAX_STR);
                 this->m_accountFlags = complete.m_accountFlags;
                 this->m_accountFlags2 = complete.m_accountFlags2;
-                this->LogonResultBN(0);
+                this->LogonResultBN(BattlenetLogin::LOGON_RESULT::LOGON_RESULT_SUCCESS);
             }
-        } else if (invoke->m_authentication.m_tag == 2 && this->m_serviceState != 5) {
+        } else if (invoke->m_authentication.m_tag == 2 && this->m_serviceState != SERVICE_STATE::SERVICE_STATE_INTERRUPTED) {
             char text[64];
             const Battlenet::Authentication::Failure& failure = invoke->Get<0, Battlenet::Authentication::Response>().Get<2, Battlenet::Authentication::Failure>();
 
             SStrPrintf(text, 63, "Battle.net Authentication failure code: %d", failure.m_error);
             ConsoleWrite(text, DEFAULT_COLOR);
 
-            if (failure.m_error != 138) {
+            if (failure.m_error != BattlenetLogin::LOGON_RESULT::LOGON_RESULT_UNKNOWN_138) {
                 this->LogonResultBN(failure.m_error);
 
-                if (this->m_serviceState != 7) {
+                if (this->m_serviceState != SERVICE_STATE::SERVICE_STATE_ESTABLISHED) {
                     this->QueueEvent(BN_EVENT_LOGOFF, nullptr, 0);
                 }
             }
@@ -1462,30 +1436,30 @@ void BattlenetLogin::HandleInvoke(const Battlenet::Event::Larva::Invoke* invoke)
         this->m_serviceState = invoke->m_service.m_tag;
 
         switch (invoke->m_service.m_tag) {
-            case 2:
+            case SERVICE_STATE::SERVICE_STATE_LOST:
                 this->QueueEvent(BN_EVENT_SERVICE_FAILED, nullptr, 0);
                 break;
 
-            case 3:
-                if (!invoke->Get<1, Battlenet::Service::State>().Get<3, uint32_t>()) {
-                    this->m_serviceState = 6;
+            case SERVICE_STATE::SERVICE_STATE_FLOODING_ERROR:
+                if (!invoke->Get<1, Battlenet::Service::State>().Get<SERVICE_STATE::SERVICE_STATE_FLOODING_ERROR, uint32_t>()) {
+                    this->m_serviceState = SERVICE_STATE::SERVICE_STATE_RECOVERED;
                 }
 
                 break;
 
-            case 4:
+            case SERVICE_STATE::SERVICE_STATE_DISCONNECTED:
                 this->QueueEvent(BN_EVENT_SERVICE_DISCONNECTED, nullptr, 0);
                 break;
 
-            case 5:
+            case SERVICE_STATE::SERVICE_STATE_INTERRUPTED:
                 this->QueueEvent(BN_EVENT_SERVICE_LOST, nullptr, 0);
                 break;
 
-            case 6:
+            case SERVICE_STATE::SERVICE_STATE_RECOVERED:
                 this->QueueEvent(BN_EVENT_SERVICE_RECOVERED, nullptr, 0);
                 break;
 
-            case 7:
+            case SERVICE_STATE::SERVICE_STATE_ESTABLISHED:
                 this->QueueEvent(BN_EVENT_RECONNECTED, nullptr, 0);
                 break;
         }
@@ -1675,11 +1649,11 @@ void BattlenetLogin::EventQueueUpdate() {
 // VERIFY: 09ca53f7 manual
 // OFFSET: 0x008C9EA0
 void BattlenetApplication::RecvEvent(const Battlenet::Event::Header& header, const BSN::EncodedObject* data) {
-    if (header.m_eventType == 5) {
+    if (header.m_eventType == Battlenet::Event::EVENT_TYPE_LARVA) {
         BSN::BSNEncodedObject<Battlenet::Event::Larva::Invoke, Protocol> invoke;
         invoke.WalkAndGet(data);
         this->m_login->HandleInvoke(&invoke.m_data);
-    } else if (header.m_eventType == 1) {
+    } else if (header.m_eventType == Battlenet::Event::EVENT_TYPE_UPDATE) {
         BSN::BSNEncodedObject<Battlenet::Event::Update::Invoke, Protocol> invoke;
         invoke.WalkAndGet(data);
         this->m_login->HandleUpdateInvoke(&invoke.m_data);
@@ -1696,7 +1670,7 @@ void BattlenetLogin::Update() {
         client.Process(OsGetAsyncTimeMs());
     }
 
-    if (this->m_surveyPending && this->m_serviceState != 2 && this->m_serviceState != 5 && OsGetAsyncTimeMs() - this->m_surveyTime > 1000) {
+    if (this->m_surveyPending && this->m_serviceState != SERVICE_STATE::SERVICE_STATE_LOST && this->m_serviceState != SERVICE_STATE::SERVICE_STATE_INTERRUPTED && OsGetAsyncTimeMs() - this->m_surveyTime > 1000) {
         this->m_surveyPending = false;
         FrameScript_SignalEvent(GLUE_EVENT_CLOSE_STATUS_DIALOG, nullptr);
 
@@ -1714,13 +1688,13 @@ void BattlenetLogin::Update() {
 // VERIFY: 77b47832 auto
 // OFFSET: 0x00530CE0
 bool BattlenetLogin::IsConnected() {
-    return this->m_serviceState == 7 || this->m_serviceState == 6 || this->m_serviceState == 3;
+    return this->m_serviceState == SERVICE_STATE::SERVICE_STATE_ESTABLISHED || this->m_serviceState == SERVICE_STATE::SERVICE_STATE_RECOVERED || this->m_serviceState == SERVICE_STATE::SERVICE_STATE_FLOODING_ERROR;
 }
 
 // VERIFY: 191ce575 auto
 // OFFSET: 0x008C52D0
 LOGIN_STATE BattlenetLogin::NextSecurityState(LOGIN_STATE state) {
-    return static_cast<LOGIN_STATE>(14);
+    return LOGIN_STATE_CHECKINGVERSIONS;
 }
 
 // VERIFY: 9df286c6 auto
@@ -1732,19 +1706,19 @@ const uint8_t* BattlenetLogin::GetKeyMap() {
 // VERIFY: f1a20f90 manual
 // OFFSET: 0x008C5B40
 bool BattlenetLogin::IsTrialAccount() {
-    return (this->m_accountFlags & 0x8) != 0;
+    return (this->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_TRIAL) != 0;
 }
 
 // VERIFY: 8e8b170c manual
 // OFFSET: 0x008C5B60
 bool BattlenetLogin::IsProPassAccount() {
-    return (this->m_accountFlags & 0x800000) != 0;
+    return (this->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_PRO_PASS) != 0;
 }
 
 // VERIFY: 3d74de1d manual
 // OFFSET: 0x008C5B80
 bool BattlenetLogin::IsGMAccount() {
-    return (this->m_accountFlags & 0x1) != 0;
+    return (this->m_accountFlags & ACCOUNT_FLAGS::ACCOUNT_GAME_MASTER) != 0;
 }
 
 // VERIFY: 781acb9e auto
@@ -1926,6 +1900,6 @@ void BattlenetLogin::SendSurveyFailed() {
 
 // VERIFY: 4092e10a auto
 // OFFSET: 0x008C8DE0
-int32_t BattlenetLogin::GetLoginServerType() {
-    return 1;
+LOGIN_SERVER_TYPE BattlenetLogin::GetLoginServerType() {
+    return LOGIN_SERVER_BATTLENET;
 }

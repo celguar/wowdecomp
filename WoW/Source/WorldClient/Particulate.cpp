@@ -1,10 +1,12 @@
 #include "Particulate.h"
+#include "Engine/Source/Tempest/Color.h"
 #include <cmath>
 #include "Engine/Source/Base/Handle.h"
 #include "Engine/Source/Base/Status.h"
 #include "Engine/Source/Gx/CGxTexFlags.h"
 #include "Engine/Source/Services/SysMessage.h"
 #include "Engine/Source/Services/Texture.h"
+#include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Tempest/CRandom.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
@@ -19,9 +21,10 @@
 #include "WoW/Source/WorldClient/World.h"
 
 static const float PTSIZE = 0.19921875f;
+static constexpr uint32_t PARTICLE_TEX_SLOTS_CNT = 5;
 
 // STATIC: 0x00A3F970
-static const int32_t s_texSlots[5][8] = {
+static const int32_t s_texSlots[PARTICLE_TEX_SLOTS_CNT][8] = {
     { 0, 1, 2, 3, 4, 5, 6, 7 },
     { 8, 9, 10, 11, 8, 9, 10, 11 },
     { 12, 12, 12, 12, 12, 12, 12, 12 },
@@ -117,26 +120,26 @@ void Particulate::InitParticles(uint32_t count) {
 // VERIFY: d68e0ec8 manual
 // OFFSET: 0x0079BCC0
 void Particulate::InitMovement() {
-    float theta = CRandom::sfloat_(g_rndSeed) * 3.1415927f;
-    float phi = CRandom::sfloat_(g_rndSeed) * 3.1415927f;
+    float theta = CRandom::sfloat_(g_rndSeed) * PI;
+    float phi = CRandom::sfloat_(g_rndSeed) * PI;
     float sinTheta = sin(theta);
 
-    this->m_direction.y = sin(phi) * sinTheta;
-    this->m_direction.x = sinTheta * cos(phi);
-    this->m_direction.z = cos(theta) * 0.25f;
+    this->m_movement.m_dir.y = sin(phi) * sinTheta;
+    this->m_movement.m_dir.x = sinTheta * cos(phi);
+    this->m_movement.m_dir.z = cos(theta) * 0.25f;
 
-    if (this->m_direction.z < 0.0f) {
-        this->m_direction.z = -this->m_direction.z;
+    if (this->m_movement.m_dir.z < 0.0f) {
+        this->m_movement.m_dir.z = -this->m_movement.m_dir.z;
     }
 
-    float invLength = 1.0f / sqrt(this->m_direction.x * this->m_direction.x + this->m_direction.y * this->m_direction.y + this->m_direction.z * this->m_direction.z);
-    this->m_direction.x = this->m_direction.x * invLength;
-    this->m_direction.y = this->m_direction.y * invLength;
-    this->m_direction.z = this->m_direction.z * invLength;
+    float invLength = 1.0f / sqrt(this->m_movement.m_dir.SquaredMag());
+    this->m_movement.m_dir.x = this->m_movement.m_dir.x * invLength;
+    this->m_movement.m_dir.y = this->m_movement.m_dir.y * invLength;
+    this->m_movement.m_dir.z = this->m_movement.m_dir.z * invLength;
 
-    this->m_timer = 0.0f;
-    this->m_speed = (CRandom::ufloat_(g_rndSeed) + 1.0f) * 0.0125f;
-    this->m_rotationSpeed = (CRandom::ufloat_(g_rndSeed) + 1.0f) * 0.005f;
+    this->m_movement.m_time = 0.0f;
+    this->m_movement.m_freq = (CRandom::ufloat_(g_rndSeed) + 1.0f) * 0.0125f;
+    this->m_movement.m_amplitude = (CRandom::ufloat_(g_rndSeed) + 1.0f) * 0.005f;
 }
 
 // VERIFY: d40a0168 manual
@@ -156,28 +159,29 @@ void Particulate::SetTexture(const char* textureName) {
 C3Vector Particulate::ComputeMovement(float elapsed) {
     LiquidTypeRec* liquidType = g_liquidTypeDB.GetRecord(this->m_liquidType);
 
-    if (liquidType->m_particleMovement == 1) {
+    if (liquidType->m_particleMovement == LIQUID_PARTICLE_MOVEMENT_SINK) {
         return C3Vector(0.0f, 0.0f, s_sinkSpeed * elapsed);
     }
 
-    if (liquidType->m_particleMovement == 2) {
+    if (liquidType->m_particleMovement == LIQUID_PARTICLE_MOVEMENT_RISE) {
         return C3Vector(0.0f, 0.0f, s_riseSpeed * elapsed);
     }
 
-    if (liquidType->m_particleMovement) {
+    if (liquidType->m_particleMovement != LIQUID_PARTICLE_MOVEMENT_DEFAULT) {
+        STORM_ASSERT(0 && "Unknown particle movement type!");
         return C3Vector(0.0f, 0.0f, 0.0f);
     }
 
-    this->m_timer = elapsed + this->m_timer;
-    float phase = this->m_timer * this->m_speed;
+    this->m_movement.m_time = elapsed + this->m_movement.m_time;
+    float phase = this->m_movement.m_time * this->m_movement.m_freq;
 
     if (phase > 0.5f) {
         this->InitMovement();
         phase = 0.0f;
     }
 
-    float amount = CMath::sin_(phase * 6.2831855f) * this->m_rotationSpeed;
-    return C3Vector(this->m_direction.x * amount, this->m_direction.y * amount, amount * this->m_direction.z);
+    float amount = CMath::sin_(phase * TWO_PI) * this->m_movement.m_amplitude;
+    return C3Vector(this->m_movement.m_dir.x * amount, this->m_movement.m_dir.y * amount, amount * this->m_movement.m_dir.z);
 }
 
 // VERIFY: 680e77ec manual
@@ -191,7 +195,7 @@ void Particulate::Update() {
     C3Vector delta(this->m_prevCameraPos.x - CWorldScene::s_activeWorldView.x, this->m_prevCameraPos.y - CWorldScene::s_activeWorldView.y, this->m_prevCameraPos.z - CWorldScene::s_activeWorldView.z);
     this->m_prevCameraPos = CWorldScene::s_activeWorldView;
 
-    if (this->m_spawnAreaSize * this->m_spawnAreaSize < delta.x * delta.x + delta.y * delta.y + delta.z * delta.z) {
+    if (this->m_spawnAreaSize * this->m_spawnAreaSize < delta.SquaredMag()) {
         this->InitParticles(this->m_liquidType);
         delta.x = 0.0f;
         delta.y = 0.0f;
@@ -253,7 +257,8 @@ void Particulate::Render() {
     GxXformView(view);
     C44Matrix identity;
     g_theGxDevicePtr->XformSetView(identity);
-    LiquidTypeRec* liquidType = g_liquidTypeDB.GetRecord(this->m_liquidType);
+    LiquidTypeRec* rec = g_liquidTypeDB.GetRecord(this->m_liquidType);
+    STORM_ASSERT(rec->m_particleTexSlots < PARTICLE_TEX_SLOTS_CNT);
     uint32_t vertexCount = 0;
     int32_t texSlot = 8;
 
@@ -270,7 +275,7 @@ void Particulate::Render() {
                     vertices->p.x = s_corners[j].x * particle.m_size + viewX;
                     vertices->p.y = s_corners[j].y * particle.m_size + viewY;
                     vertices->p.z = depth;
-                    vertices->c = CImVector(0xFF, 0xFF, 0xFF, 0xFF);
+                    vertices->c = CImVector(COLOR_WHITE_BGRA);
                     vertices->tc = s_texCoords[texSlot][j];
                     vertices++;
                 }
@@ -290,15 +295,15 @@ void Particulate::Render() {
             }
         }
 
-        texSlot = s_texSlots[liquidType->m_particleTexSlots][i & 7];
+        texSlot = s_texSlots[rec->m_particleTexSlots][i & 7];
     }
 
     GxBufUnlock(indexBuf, 0);
     GxBufUnlock(vertexBuf, 0);
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_Fog, (liquidType->m_flags >> 4) & 1);
+    GxRsSet(GxRs_Fog, (rec->m_flags & LIQUID_TYPE_FLAG_PARTICLE_FOG) != 0);
     GxRsSet(GxRs_Texture0, texture);
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);

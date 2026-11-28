@@ -3,12 +3,23 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C3Vector.h"
+#include "Engine/Source/Tempest/CRange.h"
+#include "WoW/Source/SoundInterface/Types.h"
 
 class SE2SoundKitObject;
 class SI2AdvancedSound;
 class SoundEntriesAdvancedRec;
+
+// Shared indexes for advanced-sound ducking targets and suppressor volumes.
+enum SI2_DUCK_CATEGORY : int32_t {
+    SI2_DUCK_SFX = 0,
+    SI2_DUCK_MUSIC = 1,
+    SI2_DUCK_AMBIENCE = 2,
+    SI2_DUCK_COUNT = 3
+};
 
 class SI2AdvancedSound {
     public:
@@ -16,7 +27,7 @@ class SI2AdvancedSound {
     /* 0008 */ int32_t unused_0008;
     /* 000C */ int32_t m_stopped;
     /* 0010 */ int32_t m_finished;
-    /* 0014 */ SE2SoundKitObject* m_object;
+    /* 0014 */ SE2SoundKitObject* m_pSoundHandle;
     /* 0018 */ int32_t m_externalObject;
     /* 001C */ SoundEntriesAdvancedRec* m_rec;
     /* 0020 */ int32_t m_soundKitId;
@@ -31,15 +42,14 @@ class SI2AdvancedSound {
     /* 004C */ int32_t m_randomOffsetRange;
     /* 0050 */ int32_t m_randomOffset;
     /* 0054 */ float m_volume;
-    /* 0058 */ int32_t m_usage;
+    /* 0058 */ SI2_SOUND_USAGE m_usage;
     /* 005C */ int32_t m_nextInterval;
-    /* 0060 */ int32_t m_intervalMin;
-    /* 0064 */ int32_t m_intervalMax;
-    /* 0068 */ int32_t m_volumeSliderCategory;
-    /* 006C */ float m_duck[3];
+    /* 0060 */ CiRange m_interval;
+    /* 0068 */ SI2_SOUND_GROUP m_volumeSliderCategory;
+    /* 006C */ float m_duck[SI2_DUCK_COUNT];
     /* 0078 */ float m_innerRadiusOfInfluence;
     /* 007C */ float m_outerRadiusOfInfluence;
-    /* 0080 */ int32_t m_inRange;
+    /* 0080 */ BOOL m_inRange;
     /* 0084 */ int32_t m_timeToDuck;
     /* 0088 */ int32_t m_timeToUnduck;
     /* 008C */ float m_insideAngle;
@@ -52,14 +62,14 @@ class SI2AdvancedSound {
     SI2AdvancedSound();
     ~SI2AdvancedSound();
     void AddSuppressor();
-    int32_t Play();
+    SI2_RESULT Play();
     void Stop(int32_t remove, float fadeOutTime);
 };
 
 class SuppressorSound : public TSLinkedNode<SuppressorSound> {
     public:
     /* 0008 */ SI2AdvancedSound* m_sound;
-    /* 000C */ float m_volume[3];
+    /* 000C */ float m_volume[SI2_DUCK_COUNT];
     /* 0018 */ float m_distance;
     /* 001C */ int32_t m_fadeTime;
 

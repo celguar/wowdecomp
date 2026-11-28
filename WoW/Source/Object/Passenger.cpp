@@ -1,23 +1,24 @@
 #include "Passenger.h"
+#include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Tempest/CMath.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "WoW/Source/Object/ObjectClient/Movement_C.h"
 
 // VERIFY: 185d3db3 auto
 // OFFSET: 0x004F48E0
-CPassenger::CPassenger(const WOWGUID& transportGuid, const C3Vector& position, const WOWGUID& ownerGuid) : m_transportGuid(transportGuid), m_position(position) {
+CPassenger::CPassenger(const WOWGUID& transportGuid, const C3Vector& position, const WOWGUID& ownerGuid) : m_transportGUID(transportGuid), m_position(position) {
     this->m_facing = 0.0f;
     this->m_pitch = 0.0f;
     this->m_ownerGuid = &ownerGuid;
-    this->m_passengerFlags = 0;
+    this->m_passengerFlags = CPassenger::PASSENGER_NONE;
 }
 
 // VERIFY: 3f84735d auto
 // OFFSET: 0x004F4230
 void CPassenger::PostInit(const C3Vector& position) {
-    if (this->m_transportGuid) {
-        if (!MovementAddToTransport(this, this->m_transportGuid, 1)) {
-            this->m_transportGuid = WOWGUID();
+    if (this->m_transportGUID) {
+        if (!MovementAddToTransport(this, this->m_transportGUID, 1)) {
+            this->m_transportGUID = WOWGUID();
             this->m_position = position;
         }
     }
@@ -26,7 +27,7 @@ void CPassenger::PostInit(const C3Vector& position) {
 // VERIFY: 871c8fad manual
 // OFFSET: 0x004F4280
 void CPassenger::Reenable() {
-    WOWGUID transport = this->m_transportGuid;
+    WOWGUID transport = this->m_transportGUID;
 
     if (transport) {
         MovementAddToTransport(this, transport, 1);
@@ -36,27 +37,27 @@ void CPassenger::Reenable() {
 // VERIFY: 2668c115 auto
 // OFFSET: 0x004F42A0
 float CPassenger::GetFacing(float facing) const {
-    if (!this->m_transportGuid) {
+    if (!this->m_transportGUID) {
         return facing;
     }
 
-    return CMath::normalizeangle0to2pi_(MovementGetTransportFacing(this->m_transportGuid) + facing);
+    return CMath::normalizeangle0to2pi_(MovementGetTransportFacing(this->m_transportGUID) + facing);
 }
 
 // VERIFY: dcd90e3b auto
 // OFFSET: 0x004F42E0
 float CPassenger::GetRawFacing(float facing) const {
-    if (!this->m_transportGuid) {
+    if (!this->m_transportGUID) {
         return facing;
     }
 
-    return CMath::normalizeangle0to2pi_(facing - MovementGetTransportFacing(this->m_transportGuid));
+    return CMath::normalizeangle0to2pi_(facing - MovementGetTransportFacing(this->m_transportGUID));
 }
 
 // VERIFY: eeaa5f5d auto
 // OFFSET: 0x004F4460
 C3Vector CPassenger::GetPosition(const C3Vector& position) const {
-    WOWGUID transport = this->m_transportGuid;
+    WOWGUID transport = this->m_transportGUID;
 
     if (!transport) {
         return position;
@@ -70,7 +71,7 @@ C3Vector CPassenger::GetPosition(const C3Vector& position) const {
 // VERIFY: d6a74e0d manual
 // OFFSET: 0x004F4500
 C3Vector CPassenger::GetRawPosition(const C3Vector& position) const {
-    WOWGUID transport = this->m_transportGuid;
+    WOWGUID transport = this->m_transportGUID;
 
     if (!transport) {
         return position;
@@ -86,13 +87,13 @@ C3Vector CPassenger::GetRawPosition(const C3Vector& position) const {
 C4Quaternion CPassenger::GetRotation() const {
     C4Quaternion rotation(*reinterpret_cast<const C4QuaternionCompressed*>(&this->m_facing));
 
-    if (this->m_transportGuid.m_guid) {
+    if (this->m_transportGUID.m_guid) {
         C4Quaternion transport;
         transport.x = 0.0f;
         transport.y = 0.0f;
         transport.z = 0.0f;
         transport.w = 1.0f;
-        MovementGetTransportQuat(this->m_transportGuid, &transport);
+        MovementGetTransportQuat(this->m_transportGUID, &transport);
         return rotation * transport;
     }
 
@@ -102,35 +103,37 @@ C4Quaternion CPassenger::GetRotation() const {
 // VERIFY: a4878ae8 manual
 // OFFSET: 0x004F4630
 float CPassenger::GetRawFacingFromRotation() const {
+    STORM_ASSERT(UsesQuat());
+
     C4Quaternion rotation = this->GetRotation();
     float x = 1.0f - (rotation.z * rotation.z + rotation.y * rotation.y) * 2.0f;
     float y = (rotation.w * rotation.z + rotation.y * rotation.x) * 2.0f;
 
     if (2.3841858e-7f <= fabsf(x)) {
         if (fabsf(y) < 2.3841858e-7f) {
-            return 0.0f < x ? 0.0f : 3.1415927f;
+            return 0.0f < x ? 0.0f : PI;
         }
 
         return static_cast<float>(atan2(y, x));
     }
 
-    return 0.0f <= y ? 0.5f * 3.1415927f : 1.5f * 3.1415927f;
+    return 0.0f <= y ? HALF_PI : 1.5f * PI;
 }
 
 // VERIFY: 954d19c3 manual
 // OFFSET: 0x004F46E0
 float CPassenger::RemoveFromTransportFinish(const C44Matrix& matrix) {
-    float facing = MovementGetTransportFacing(this->m_transportGuid);
+    float facing = MovementGetTransportFacing(this->m_transportGUID);
     this->m_position *= matrix;
 
-    if (this->m_passengerFlags & 0x2) {
+    if (this->m_passengerFlags & CPassenger::PASSENGER_QUATERNION_FACING) {
         C4Quaternion rotation(*reinterpret_cast<const C4QuaternionCompressed*>(&this->m_facing));
         C4Quaternion transport;
         transport.x = 0.0f;
         transport.y = 0.0f;
         transport.z = 0.0f;
         transport.w = 1.0f;
-        MovementGetTransportQuat(this->m_transportGuid, &transport);
+        MovementGetTransportQuat(this->m_transportGUID, &transport);
         rotation = rotation * transport;
         *reinterpret_cast<C4QuaternionCompressed*>(&this->m_facing) = rotation;
     } else {
@@ -143,7 +146,7 @@ float CPassenger::RemoveFromTransportFinish(const C44Matrix& matrix) {
 // VERIFY: 65f817a1 manual
 // OFFSET: 0x004F4930
 float CPassenger::RemoveFromTransport(C44Matrix* matrix) {
-    MovementGetTransportMtxX(this->m_transportGuid, matrix, *this->m_ownerGuid, __FILE__, __LINE__);
+    MovementGetTransportMtxX(this->m_transportGUID, matrix, *this->m_ownerGuid, __FILE__, __LINE__);
     return this->RemoveFromTransportFinish(*matrix);
 }
 
@@ -162,7 +165,7 @@ float CPassenger::AddToTransport(WOWGUID transport, C44Matrix* inverse, C44Matri
 
     this->m_position *= *inverse;
 
-    if (this->m_passengerFlags & 0x2) {
+    if (this->m_passengerFlags & CPassenger::PASSENGER_QUATERNION_FACING) {
         C4Quaternion rotation;
         rotation.x = 0.0f;
         rotation.y = 0.0f;
@@ -181,13 +184,13 @@ float CPassenger::AddToTransport(WOWGUID transport, C44Matrix* inverse, C44Matri
 // VERIFY: 346a66a5 auto
 // OFFSET: 0x004F4970
 void CPassenger::SetTransport(WOWGUID transport) {
-    if (transport == this->m_transportGuid || (transport && !MovementObjIsTransport(transport))) {
+    if (transport == this->m_transportGUID || (transport && !MovementObjIsTransport(transport))) {
         return;
     }
 
     C44Matrix matrix;
 
-    if (this->m_transportGuid) {
+    if (this->m_transportGUID) {
         this->RemoveFromTransport(&matrix);
     }
 
@@ -195,5 +198,5 @@ void CPassenger::SetTransport(WOWGUID transport) {
         this->AddToTransport(transport, &matrix, nullptr);
     }
 
-    this->m_transportGuid = transport;
+    this->m_transportGUID = transport;
 }

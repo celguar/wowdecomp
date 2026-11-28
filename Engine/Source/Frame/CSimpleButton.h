@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Frame/CSimpleFrame.h"
 #include "Engine/Source/Frame/Types.h"
@@ -130,17 +131,17 @@ class CSimpleButton : public CSimpleFrame {
     virtual void UnregisterRegion(CSimpleRegion* region);
     virtual void OnLayerHide();
     virtual void OnLayerCursorEnter(int32_t motion);
-    virtual void OnLayerCursorExit(int32_t motion, int32_t a3);
+    virtual void OnLayerCursorExit(int32_t motion, BOOL releaseMouse);
     virtual int32_t OnLayerMouseDown(const CMouseEvent& evt, const char* btn);
     virtual int32_t OnLayerMouseUp(const CMouseEvent& evt, const char* btn);
     virtual void OnDragStart(const CMouseEvent& evt);
     virtual void LockHighlight(int32_t lock);
     virtual void LoadXML(XMLNode* node, CStatus* status);
-    virtual void Enable(int32_t enabled);
+    virtual void Enable(BOOL enabled);
     virtual void OnClick(const char* btn, int32_t down);
     virtual void OnDoubleClick(const char* btn);
     virtual void SetButtonState(CSimpleButtonState state, int32_t stateLocked);
-    virtual void SetMotionScriptsWhileDisabled(int32_t enabled);
+    virtual void SetMotionScriptsWhileDisabled(BOOL enabled);
     virtual int32_t GetMotionScriptsWhileDisabled();
 
     CSimpleButton(CSimpleFrame* parent);

@@ -2,6 +2,7 @@
 #define WOW_SOURCE_UI_CURRENCYTYPES_H
 
 #include <cstdint>
+#include <windows.h>
 
 struct lua_State;
 
@@ -9,29 +10,32 @@ struct CurrencyCategoryInfo {
     /* 0000 */ int32_t m_id;
     /* 0004 */ int32_t m_expanded;
     /* 0008 */ const char* m_name;
-    /* 000C */ int32_t m_flags;
+    /* 000C */ int32_t m_flags; // CURRENCY_CATEGORY_FLAGS
 };
 
 struct CurrencyListEntry {
     /* 0000 */ const char* m_name;
     /* 0004 */ int32_t m_itemID;
     /* 0008 */ int32_t m_categoryID;
-    /* 000C */ int32_t m_isHeader;
-    /* 0010 */ int32_t m_isExpanded;
-    /* 0014 */ int32_t m_isWatched;
+    /* 000C */ BOOL m_isHeader;
+    /* 0010 */ BOOL m_isExpanded;
+    /* 0014 */ BOOL m_isWatched;
 };
 
 class CurrencyTypesRec;
 
 class CGCurrencyTypes {
     public:
+    static constexpr int32_t MAX_TYPES = 63;
+    static constexpr int32_t MAX_CATEGORIES = 32;
+
     static void LeaveWorld();
     static CurrencyTypesRec* GetCurrencyRec(int32_t index);
-    static int32_t IsCurrencyShown(int32_t index);
+    static BOOL IsCurrencyShown(int32_t index);
     static CurrencyListEntry* GetDisplayListInfo(int32_t index);
     static int32_t m_listSize;
     static CurrencyListEntry m_list[95];
-    static CurrencyCategoryInfo m_categories[32];
+    static CurrencyCategoryInfo m_categories[MAX_CATEGORIES];
     static int32_t m_numCategories;
     static void BuildDisplayList();
     static void SetCategoryExpand(int32_t index, int32_t expand);

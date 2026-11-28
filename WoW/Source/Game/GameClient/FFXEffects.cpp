@@ -1,4 +1,5 @@
 #include "FFXEffects.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/FFX/PassBox4.h"
 #include "Engine/Source/FFX/PassGauss4.h"
@@ -59,20 +60,20 @@ PassFogCombine::~PassFogCombine() {
 // VERIFY: 874a5f41 manual
 // OFFSET: 0x007E86A0
 PassDeath::PassDeath(FFX::Tex** inputs, uint32_t count, FFX::Tex* output, EGxBlend blend, bool unk) : FFX::Pass(inputs, count, output, blend, unk) {
-    this->m_useRect = 0;
-    this->m_shaders[0] = nullptr;
-    this->m_shaders[1] = nullptr;
+    this->m_useRect = PassDeath::SHADER_SELECTION::PRIMARY_VARIANT;
+    this->m_shaders[PassDeath::SHADER_SELECTION::PRIMARY_VARIANT] = nullptr;
+    this->m_shaders[PassDeath::SHADER_SELECTION::RECTANGLE_PERMUTATION] = nullptr;
 
-    if (g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == 8 || g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == 9 || g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == 10) {
+    if (g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == GxShPS_nvts || g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == GxShPS_nvts2 || g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == GxShPS_nvts3) {
         g_theGxDevicePtr->ShaderCreate(this->m_shaders, GxSh_Pixel, "Shaders\\Pixel", FFX::s_useRECT ? "FFXDeath_nvts_rect" : "FFXDeath_nvts_2d", 1);
         return;
     }
 
     if (FFX::s_useRECT) {
-        this->m_useRect = 1;
+        this->m_useRect = PassDeath::SHADER_SELECTION::RECTANGLE_PERMUTATION;
     }
 
-    g_theGxDevicePtr->ShaderCreate(this->m_shaders, GxSh_Pixel, "Shaders\\Pixel", "FFXDeath", 2);
+    g_theGxDevicePtr->ShaderCreate(this->m_shaders, GxSh_Pixel, "Shaders\\Pixel", "FFXDeath", PassDeath::SHADER_SELECTION::VARIANT_CAPACITY);
 }
 
 // VERIFY: 5970ea32 manual
@@ -119,7 +120,7 @@ void PassDeathNVRC::Execute() {
     GxPrimVertexPtr(4, FFX::s_gridPos, sizeof(C3Vector), nullptr, 0, &color, 0, FFX::s_gridTex, sizeof(C2Vector), nullptr, 0);
     GxPrimIndexPtr(4, FFX::s_quadIndices);
 
-    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
     g_theGxDevicePtr->RsSet(GxRs_PixelShader, this->m_shader);
     GxRsSet(GxRs_BlendingMode, this->m_blend);
     GxUpdateAlphaRef(GxRs_AlphaRef);
@@ -131,16 +132,16 @@ void PassDeathNVRC::Execute() {
 // VERIFY: 22ef7cce manual
 // OFFSET: 0x007EA260
 EffectDeath::EffectDeath() {
-    this->m_cvar = CVar::Register("ffxDeath", "full screen death effect", 1, this->m_defaultEnabled ? "1" : "0", FFX::CVarCallback, 1, false, nullptr, false);
+    this->m_cvar = CVar::Register("ffxDeath", "full screen death effect", CVAR_FLAGS::CVAR_ARCHIVE, this->m_defaultEnabled ? "1" : "0", FFX::CVarCallback, 1, false, nullptr, false);
 
-    if (g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == 7) {
+    if (g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == GxShPS_nvrc) {
         FFX::Tex* inputs[] = { &FFX::s_full[0] };
         FFX::Pass* pass = new (__FILE__, __LINE__) PassDeathNVRC(inputs, 1, &FFX::s_screen, GxBlend_Opaque, true);
         this->m_passes.New(pass);
         return;
     }
 
-    if (g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] <= 0) {
+    if (g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] <= GxShPS_none) {
         return;
     }
 
@@ -170,9 +171,9 @@ EffectDeath::~EffectDeath() {
 // VERIFY: c9c9b096 manual
 // OFFSET: 0x007EA470
 EffectNetherWorld::EffectNetherWorld() {
-    this->m_cvar = CVar::Register("ffxNetherWorld", "full screen nether world effect (for invisibility)", 1, "1", FFX::CVarCallback, 1, false, nullptr, false);
+    this->m_cvar = CVar::Register("ffxNetherWorld", "full screen nether world effect (for invisibility)", CVAR_FLAGS::CVAR_ARCHIVE, "1", FFX::CVarCallback, 1, false, nullptr, false);
 
-    if (g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == 7 || g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] <= 0) {
+    if (g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] == GxShPS_nvrc || g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Pixel] <= GxShPS_none) {
         return;
     }
 
@@ -233,17 +234,17 @@ PassNetherBlur::PassNetherBlur(FFX::Tex** inputs, uint32_t count, FFX::Tex* outp
     g_theGxDevicePtr->ShaderCreate(&this->m_vertexShader, GxSh_Vertex, "Shaders\\Vertex", "FFXNetherBlur", 1);
     this->m_seed.SetSeed(0xABCDEF01);
 
-    for (uint32_t table = 0; table < 3; table++) {
+    for (uint32_t table = 0; table < NOISE_TABLE_ROLE::ROLE_COUNT; table++) {
         for (uint32_t i = 0; i < 36; i++) {
             float value = CRandom::ufloat_(this->m_seed);
             this->m_noise[table][i] = fmodf(value + value - 1.0f, 1.0f);
         }
     }
 
-    this->m_noiseTables[0] = this->m_noise[0];
+    this->m_noiseTables[NOISE_TABLE_ROLE::BLEND_FROM] = this->m_noise[0];
     this->m_noiseBlend = 0.0f;
-    this->m_noiseTables[1] = this->m_noise[1];
-    this->m_noiseTables[2] = this->m_noise[2];
+    this->m_noiseTables[NOISE_TABLE_ROLE::BLEND_TO] = this->m_noise[1];
+    this->m_noiseTables[NOISE_TABLE_ROLE::REGENERATE] = this->m_noise[2];
 }
 
 // VERIFY: 32e95e2f auto
@@ -331,12 +332,12 @@ static void SeedTextureCallback(EGxTexCommand command, uint32_t width, uint32_t 
 // VERIFY: dc51e0d5 manual
 // OFFSET: 0x007EA5F0
 EffectSwirlingFog::EffectSwirlingFog() {
-    this->m_fogTex.m_texture = nullptr;
+    this->m_fogTex.texture = nullptr;
     this->m_fogTex.m_texSize.x = 0;
     this->m_fogTex.m_texSize.y = 0;
     this->m_fogTex.m_size.x = 0;
     this->m_fogTex.m_size.y = 0;
-    this->m_seedTex.m_texture = nullptr;
+    this->m_seedTex.texture = nullptr;
     this->m_seedTex.m_texSize.x = 0;
     this->m_seedTex.m_texSize.y = 0;
     this->m_seedTex.m_size.x = 0;
@@ -350,16 +351,16 @@ EffectSwirlingFog::EffectSwirlingFog() {
     fogSize.y = 128;
     FFX::CreateTex(this->m_seedTex, seedSize, false, false);
     FFX::CreateTex(this->m_fogTex, fogSize, false, true);
-    TextureSetUserData(this->m_seedTex.m_texture, SeedTextureCallback, nullptr);
+    TextureSetUserData(this->m_seedTex.texture, SeedTextureCallback, nullptr);
 
     CiRect rect;
     rect.minY = 0;
     rect.minX = 0;
     rect.maxY = 0;
     rect.maxX = 0;
-    GxTexUpdate(TextureGetGxTex(this->m_seedTex.m_texture, 1, nullptr), rect, 1);
+    GxTexUpdate(TextureGetGxTex(this->m_seedTex.texture, 1, nullptr), rect, 1);
 
-    this->m_cvar = CVar::Register("ffxSpecial", "full screen test effect", 1, this->m_defaultEnabled ? "1" : "0", FFX::CVarCallback, 1, false, nullptr, false);
+    this->m_cvar = CVar::Register("ffxSpecial", "full screen test effect", CVAR_FLAGS::CVAR_ARCHIVE, this->m_defaultEnabled ? "1" : "0", FFX::CVarCallback, 1, false, nullptr, false);
 
     static C2Vector s_propagateParams[4] = {
         C2Vector(-1.0f, 1.0f),
@@ -400,11 +401,11 @@ EffectSwirlingFog::~EffectSwirlingFog() {
         }
     }
 
-    if (this->m_fogTex.m_texture) {
-        HandleClose(reinterpret_cast<HOBJECT>(this->m_fogTex.m_texture));
+    if (this->m_fogTex.texture) {
+        HandleClose(reinterpret_cast<HOBJECT>(this->m_fogTex.texture));
     }
 
-    this->m_fogTex.m_texture = nullptr;
+    this->m_fogTex.texture = nullptr;
     this->m_fogTex.m_texSize.x = 0;
     this->m_fogTex.m_texSize.y = 0;
     this->m_fogTex.m_size.x = 0;
@@ -412,11 +413,11 @@ EffectSwirlingFog::~EffectSwirlingFog() {
     this->m_fogTex.m_texelSize.x = 0.0f;
     this->m_fogTex.m_texelSize.y = 0.0f;
 
-    if (this->m_seedTex.m_texture) {
-        HandleClose(reinterpret_cast<HOBJECT>(this->m_seedTex.m_texture));
+    if (this->m_seedTex.texture) {
+        HandleClose(reinterpret_cast<HOBJECT>(this->m_seedTex.texture));
     }
 
-    this->m_seedTex.m_texture = nullptr;
+    this->m_seedTex.texture = nullptr;
     this->m_seedTex.m_texSize.x = 0;
     this->m_seedTex.m_texSize.y = 0;
     this->m_seedTex.m_size.x = 0;
@@ -440,7 +441,7 @@ void PassNetherBlur::Execute() {
     float y = (view->c1 + view->b1) * 0.0f + view->a1;
     float z = (view->c2 + view->b2) * 0.0f + view->a2;
 
-    if (fabs(z) > 0.000099999997f) {
+    if (fabs(z) > 0.0001f) {
         float inv = 1.0f / z;
         x *= inv;
         y *= inv;
@@ -453,27 +454,27 @@ void PassNetherBlur::Execute() {
     float angle = static_cast<float>(acos(x));
 
     if (y < 0.0f) {
-        angle = 6.2831855f - angle;
+        angle = TWO_PI - angle;
     }
 
     angle = static_cast<float>(cos(s_netherBlurPhase) * 0.5f + angle);
 
     if (this->m_noiseBlend > 1.0f) {
         this->m_noiseBlend = static_cast<float>(fmod(this->m_noiseBlend, 1.0));
-        float* oldest = this->m_noiseTables[0];
-        this->m_noiseTables[0] = this->m_noiseTables[1];
-        this->m_noiseTables[1] = this->m_noiseTables[2];
-        this->m_noiseTables[2] = oldest;
+        float* oldest = this->m_noiseTables[NOISE_TABLE_ROLE::BLEND_FROM];
+        this->m_noiseTables[NOISE_TABLE_ROLE::BLEND_FROM] = this->m_noiseTables[NOISE_TABLE_ROLE::BLEND_TO];
+        this->m_noiseTables[NOISE_TABLE_ROLE::BLEND_TO] = this->m_noiseTables[NOISE_TABLE_ROLE::REGENERATE];
+        this->m_noiseTables[NOISE_TABLE_ROLE::REGENERATE] = oldest;
 
         for (uint32_t i = 0; i < 36; i++) {
-            uint32_t bits = (CRandom::uint32_(this->m_seed) & 0x7FFFFF) | 0x3F800000;
+            uint32_t bits = (CRandom::uint32_(this->m_seed) & rmant) | rexp;
             float random = *reinterpret_cast<float*>(&bits) - 1.0f;
-            this->m_noiseTables[2][i] = static_cast<float>(fmod(random + random - 1.0f, 1.0));
+            this->m_noiseTables[NOISE_TABLE_ROLE::REGENERATE][i] = static_cast<float>(fmod(random + random - 1.0f, 1.0));
         }
     }
 
     for (uint32_t i = 0; i < 36; i++) {
-        this->m_blendedNoise[i] = (1.0f - this->m_noiseBlend) * this->m_noiseTables[0][i] + this->m_noiseTables[1][i] * this->m_noiseBlend;
+        this->m_blendedNoise[i] = (1.0f - this->m_noiseBlend) * this->m_noiseTables[NOISE_TABLE_ROLE::BLEND_FROM][i] + this->m_noiseTables[NOISE_TABLE_ROLE::BLEND_TO][i] * this->m_noiseBlend;
     }
 
     this->m_noiseBlend = elapsed * 1.5f + this->m_noiseBlend;
@@ -513,16 +514,16 @@ void PassNetherBlur::Execute() {
     float convergence = g_theGxDevicePtr->StereoGetConvergence();
     g_theGxDevicePtr->ShaderConstantsSet(GxSh_Vertex, 2, &convergence, 1);
 
-    CGxTex* target = TextureGetGxTex(FFX::s_quart[1].m_texture, 1, nullptr);
+    CGxTex* target = TextureGetGxTex(FFX::s_quart[1].texture, 1, nullptr);
     GxRsSet(GxRs_ScissorTest, 0);
     g_theGxDevicePtr->DeviceSetRenderTarget(GxBuffers_Color, target, 0);
     GxXformSetViewport(0.0f, static_cast<float>(FFX::s_quart[1].m_size.x) / FFX::s_quart[1].m_texSize.x, 0.0f, static_cast<float>(FFX::s_quart[1].m_size.y) / FFX::s_quart[1].m_texSize.y, 0.0f, 1.0f);
-    GxSceneClear(GxBufferBit_Color, CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+    GxSceneClear(GxBufferBit_Color, CImVector(COLOR_WHITE_BGRA));
 
-    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture2, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture3, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture2, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture3, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
 
     if (FFX::s_useRECT) {
         FFX::SetupGeo_Grid(FFX::s_quart[1].m_size, this->m_inputs[0]->m_size, this->m_inputs[0]->m_texSize, FFX::s_gridPos, FFX::s_gridTex, 6, this->m_flip);
@@ -531,16 +532,16 @@ void PassNetherBlur::Execute() {
 
     g_theGxDevicePtr->Draw(&FFX::s_gridBatch, 1);
 
-    target = TextureGetGxTex(this->m_output->m_texture, 1, nullptr);
+    target = TextureGetGxTex(this->m_output->texture, 1, nullptr);
     GxRsSet(GxRs_ScissorTest, 0);
     g_theGxDevicePtr->DeviceSetRenderTarget(GxBuffers_Color, target, 0);
     GxXformSetViewport(0.0f, static_cast<float>(this->m_output->m_size.x) / this->m_output->m_texSize.x, 0.0f, static_cast<float>(this->m_output->m_size.y) / this->m_output->m_texSize.y, 0.0f, 1.0f);
-    GxSceneClear(GxBufferBit_Color, CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+    GxSceneClear(GxBufferBit_Color, CImVector(COLOR_WHITE_BGRA));
 
-    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(FFX::s_quart[1].m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(FFX::s_quart[1].m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture2, TextureGetGxTex(FFX::s_quart[1].m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture3, TextureGetGxTex(FFX::s_quart[1].m_texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(FFX::s_quart[1].texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(FFX::s_quart[1].texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture2, TextureGetGxTex(FFX::s_quart[1].texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture3, TextureGetGxTex(FFX::s_quart[1].texture, 1, nullptr));
 
     if (FFX::s_useRECT) {
         constants[0] = 0.0f;
@@ -577,7 +578,7 @@ void PassPropagateFog::Execute() {
     FFX::SetupVB_PCT4(FFX::s_gridPos, white, FFX::s_gridTex, this->m_params, this->m_inputs[0]->m_texelSize);
     g_theGxDevicePtr->PrimVertexMask(0x3D1);
     FFX::SetupIB();
-    CGxTex* texture = TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr);
+    CGxTex* texture = TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr);
     g_theGxDevicePtr->RsSet(GxRs_Texture0, texture);
     g_theGxDevicePtr->RsSet(GxRs_Texture1, texture);
     g_theGxDevicePtr->RsSet(GxRs_Texture2, texture);
@@ -602,18 +603,18 @@ void PassPropagateFog::Execute() {
 // VERIFY: 7f8524f4 auto
 // OFFSET: 0x007E9010
 void EffectSwirlingFog::SetParameters(int32_t count, const int32_t* params) {
-    static_cast<PassFogSeed*>(this->m_passes[0])->m_color = params[0];
-    static_cast<PassPropagateFog*>(this->m_passes[1])->unk_005C = params[1] * 0.0039215689f;
-    PassFogCombine* combine = static_cast<PassFogCombine*>(this->m_passes[2]);
-    combine->m_density = params[2] * 0.0099999998f;
+    static_cast<PassFogSeed*>(this->m_passes[PASS_STAGE::SEED_PASS])->m_color = params[0];
+    static_cast<PassPropagateFog*>(this->m_passes[PASS_STAGE::PROPAGATION_PASS])->unk_005C = params[1] * ONE_OVER_255;
+    PassFogCombine* combine = static_cast<PassFogCombine*>(this->m_passes[PASS_STAGE::COMBINE_PASS]);
+    combine->m_density = params[2] * 0.01f;
     combine->m_fadeTime = 3.0f;
 }
 
 // VERIFY: d2fd534c auto
 // OFFSET: 0x007E8E20
 void EffectNetherWorld::End() {
-    if (this->m_passes.Count() >= 2) {
-        static_cast<PassNetherCombine*>(this->m_passes[1])->m_fade = 0.0f;
+    if (this->m_passes.Count() >= PASS_STAGE::PASS_COUNT) {
+        static_cast<PassNetherCombine*>(this->m_passes[PASS_STAGE::COMBINE_PASS])->m_fade = 0.0f;
     }
 }
 
@@ -641,7 +642,7 @@ static C2Vector PolarCoord(float u, float v) {
 // OFFSET: 0x007E8410
 void PassFogCombine::BuildVertices(const C2iVector& size, FFX::Tex* tex0, FFX::Tex* tex1) {
     CImVector color;
-    *reinterpret_cast<uint32_t*>(&color) = 0xFFFFFFFF;
+    *reinterpret_cast<uint32_t*>(&color) = COLOR_WHITE_ARGB;
 
     float halfU0 = 0.5f / tex0->m_size.x;
     float halfV0 = 0.5f / tex0->m_size.y;
@@ -735,8 +736,8 @@ void PassDeath::Execute() {
     FFX::SetupGeo_Quad(this->m_output->m_size, this->m_inputs[0]->m_size, this->m_inputs[0]->m_texSize, FFX::s_gridPos, texCoords0, this->m_flip);
     FFX::SetupGeo_Quad(this->m_output->m_size, this->m_inputs[1]->m_size, this->m_inputs[1]->m_texSize, FFX::s_gridPos, texCoords1, this->m_flip);
 
-    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[1]->m_texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[1]->texture, 1, nullptr));
     g_theGxDevicePtr->RsSet(GxRs_PixelShader, this->m_shaders[this->m_useRect]);
 
     CImVector color;
@@ -769,12 +770,12 @@ void PassNetherCombine::Execute() {
     FFX::SetupGeo_Quad(this->m_output->m_size, this->m_inputs[0]->m_size, this->m_inputs[0]->m_texSize, FFX::s_gridPos, texCoords0, this->m_flip);
     FFX::SetupGeo_Quad(this->m_output->m_size, this->m_inputs[1]->m_size, this->m_inputs[1]->m_texSize, FFX::s_gridPos, texCoords1, this->m_flip);
 
-    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[1]->m_texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[1]->texture, 1, nullptr));
     g_theGxDevicePtr->RsSet(GxRs_PixelShader, this->m_pixelShaders[this->m_useRect]);
 
     CImVector color;
-    *reinterpret_cast<uint32_t*>(&color) = 0xFFFFFFFF;
+    *reinterpret_cast<uint32_t*>(&color) = COLOR_WHITE_ARGB;
 
     if (this->m_fade < 0.75f) {
         float fade = this->m_fade + FrameTime::s_tickTimeSec;
@@ -819,8 +820,8 @@ void PassFogCombine::Execute() {
         this->BuildIndices();
     }
 
-    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->m_texture, 1, nullptr));
-    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[1]->m_texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture0, TextureGetGxTex(this->m_inputs[0]->texture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(this->m_inputs[1]->texture, 1, nullptr));
 
     for (int32_t rs = 23; rs < 37; rs++) {
         GxRsSet(static_cast<EGxRenderState>(rs), 0);

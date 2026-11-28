@@ -1,4 +1,5 @@
 #include "WaterRipple.h"
+#include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
@@ -34,10 +35,10 @@ static const char* s_rippleTextureNames[2] = {
 };
 
 // STATIC: 0x00A3FAC0
-static float s_rippleFadeFraction[2] = { 0.40000001f, 0.40000001f };
+static float s_rippleFadeFraction[2] = { 0.4f, 0.4f };
 
 // STATIC: 0x00ADFB58
-static TSExplicitList<CWaterRipple, offsetof(CWaterRipple, m_link)> s_activeRipples;
+static TSExplicitList<CWaterRipple, offsetof(CWaterRipple, m_link)> water0RippleList;
 
 // STATIC: 0x00CDF7C0
 static CTexture* s_rippleTextures[2];
@@ -72,7 +73,7 @@ CWaterRipple::~CWaterRipple() {
 // VERIFY: 801d27b4 manual
 // OFFSET: 0x0079D5E0
 void CMap::RenderWaterRipples() {
-    CWaterRipple* ripple = s_activeRipples.Head();
+    CWaterRipple* ripple = water0RippleList.Head();
 
     if (!ripple) {
         return;
@@ -82,7 +83,7 @@ void CMap::RenderWaterRipples() {
     TSExplicitList<CWaterRipple, offsetof(CWaterRipple, m_bucketLink)> buckets[2];
 
     while (ripple) {
-        CWaterRipple* next = s_activeRipples.Next(ripple);
+        CWaterRipple* next = water0RippleList.Next(ripple);
 
         if (ripple->m_endTime <= FrameTime::s_curTimeSec) {
             ripple->m_link.Unlink();
@@ -118,14 +119,14 @@ void CMap::RenderWaterRipples() {
         ripple = next;
     }
 
-    if (!vertexCounts[0] && !vertexCounts[1]) {
+    if (!vertexCounts[CWaterRipple::SPLASH] && !vertexCounts[CWaterRipple::WAKE]) {
         return;
     }
 
     float polygonOffset = CWorldParam::cvar_footstepBias->m_floatValue * 0.0009765774f;
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 3);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Add);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_DepthWrite, 0);
@@ -146,14 +147,7 @@ void CMap::RenderWaterRipples() {
         C44Matrix view;
         view = device->m_xforms[GxXform_View].m_mtx[device->m_xforms[GxXform_View].m_level];
         C44Matrix projection;
-        projection = device->m_projNative;
-
-        if (device->DeviceApi() == GxApi_OpenGl) {
-            projection.c0 = projection.c0 * -1.0f;
-            projection.c1 = projection.c1 * -1.0f;
-            projection.c2 = projection.c2 * -1.0f;
-            projection.c3 = -1.0f * projection.c3;
-        }
+        GxXformProjNative(projection);
 
         C44Matrix worldViewProj = world * view * projection;
         g_theGxDevicePtr->ShaderConstantsSet(GxSh_Vertex, 0, &worldViewProj.a0, 4);
@@ -265,6 +259,8 @@ void WaterRipple::Initialize() {
     }
 
     s_ripplePool.SetCount(NUM_RIPPLES);
+    // 12213: "water0RippleList.Head()==__null"
+    STORM_ASSERT(water0RippleList.Head() == nullptr);
     s_ripplesInitialized = 0;
 
     g_theGxDevicePtr->ShaderCreate(&WaterRipple::s_vsWaterRipples, GxSh_Vertex, "Shaders\\Vertex", "WaterRipples", 1);
@@ -288,7 +284,7 @@ void WaterRipple::Destroy() {
         s_ripplePool.Clear();
     }
 
-    s_activeRipples.Clear();
+    water0RippleList.Clear();
 
     if (WaterRipple::s_vsWaterRipples) {
         g_theGxDevicePtr->ShaderDestroy(WaterRipple::s_vsWaterRipples);
@@ -302,7 +298,7 @@ void WaterRipple::Destroy() {
 // VERIFY: 3fca29ac manual
 // OFFSET: 0x0079CF40
 void CWaterRipple::InitRipple(const C3Vector& pos, float rotation, float size, float alpha, float duration, float growth, int32_t type) {
-    int32_t directional = type != 0;
+    TYPE directional = static_cast<TYPE>(type != 0);
     this->m_type = directional;
     this->m_position = pos;
     this->m_rotation = rotation;
@@ -322,28 +318,24 @@ void CWaterRipple::InitRipple(const C3Vector& pos, float rotation, float size, f
     box.t.y = endSize + pos.y;
     box.t.z = pos.z + 1.0f;
     this->m_verts.SetCount(0);
-    World::TriData::statusFlags = 0;
-    World::TriData::nBatches = 0;
-    World::TriData::faceIndexCursor = 0;
-    World::TriData::indexCursor = 0;
-    World::TriData::matrixPoolCount = 0;
+    World::TriData::ResetPools();
     World::TriData triData;
 
-    if (!World::GetTris(box, &triData, 0x20000)) {
+    if (!World::GetTris(box, &triData, WORLD_QUERY_LIQUID)) {
         return;
     }
 
     for (uint32_t i = 0; i < World::TriData::nBatches; i++) {
-        World::TriData::Batch& batch = World::TriData::batches[i];
-        const uint16_t* indices = batch.m_indices;
+        const World::TriData::Batch& batch = World::TriData::GetBatch(i);
+        const uint16_t* indices = batch.vertexIndices;
         uint32_t base = this->m_verts.Count();
         this->m_verts.SetCount(batch.m_faceCount + base + 2 * batch.m_faceCount);
         C3Vector* out = &this->m_verts.m_data[base];
 
         for (uint32_t j = 0; j < batch.m_faceCount; j++) {
-            *out++ = batch.m_vertexList[indices[0]] * *batch.m_matrix;
-            *out++ = batch.m_vertexList[indices[1]] * *batch.m_matrix;
-            *out++ = batch.m_vertexList[indices[2]] * *batch.m_matrix;
+            *out++ = batch.GetVertex(indices[0]) * *batch.m_matrix;
+            *out++ = batch.GetVertex(indices[1]) * *batch.m_matrix;
+            *out++ = batch.GetVertex(indices[2]) * *batch.m_matrix;
             indices += 3;
         }
     }
@@ -370,5 +362,5 @@ void WaterRipple::Create(const C3Vector& pos, float facing, float size, float al
 
     CWaterRipple* ripple = &s_ripplePool.m_data[index];
     ripple->InitRipple(pos, -facing, size, alpha, duration, growth, type);
-    s_activeRipples.LinkToTail(ripple);
+    water0RippleList.LinkToTail(ripple);
 }

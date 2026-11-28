@@ -70,7 +70,7 @@ void CSimpleButton::LockHighlight(int32_t lock) {
 
 // VERIFY: ab04eabe manual
 // OFFSET: 0x00962150
-void CSimpleButton::SetMotionScriptsWhileDisabled(int32_t enabled) {
+void CSimpleButton::SetMotionScriptsWhileDisabled(BOOL enabled) {
     this->m_motionScriptsWhileDisabled = enabled;
 }
 
@@ -546,67 +546,67 @@ void CSimpleButton::UpdateTextState(CSimpleButtonState state) {
 // OFFSET: 0x0096F530
 const char* GetMouseButtonName(uint32_t button) {
     switch (button) {
-        case 0x1:
+        case MOUSEBUTTON::MOUSE_BUTTON_LEFT:
             return "LeftButton";
-        case 0x2:
+        case MOUSEBUTTON::MOUSE_BUTTON_MIDDLE:
             return "MiddleButton";
-        case 0x4:
+        case MOUSEBUTTON::MOUSE_BUTTON_RIGHT:
             return "RightButton";
-        case 0x8:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON1:
             return "Button4";
-        case 0x10:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON2:
             return "Button5";
-        case 0x20:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON3:
             return "Button6";
-        case 0x40:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON4:
             return "Button7";
-        case 0x80:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON5:
             return "Button8";
-        case 0x100:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON6:
             return "Button9";
-        case 0x200:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON7:
             return "Button10";
-        case 0x400:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON8:
             return "Button11";
-        case 0x800:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON9:
             return "Button12";
-        case 0x1000:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON10:
             return "Button13";
-        case 0x2000:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON11:
             return "Button14";
-        case 0x4000:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON12:
             return "Button15";
-        case MOUSE_BUTTON_XBUTTON13:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON13:
             return "Button16";
-        case MOUSE_BUTTON_XBUTTON14:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON14:
             return "Button17";
-        case MOUSE_BUTTON_XBUTTON15:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON15:
             return "Button18";
-        case MOUSE_BUTTON_XBUTTON16:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON16:
             return "Button19";
-        case MOUSE_BUTTON_XBUTTON17:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON17:
             return "Button20";
-        case MOUSE_BUTTON_XBUTTON18:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON18:
             return "Button21";
-        case MOUSE_BUTTON_XBUTTON19:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON19:
             return "Button22";
-        case MOUSE_BUTTON_XBUTTON20:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON20:
             return "Button23";
-        case MOUSE_BUTTON_XBUTTON21:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON21:
             return "Button24";
-        case MOUSE_BUTTON_XBUTTON22:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON22:
             return "Button25";
-        case MOUSE_BUTTON_XBUTTON23:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON23:
             return "Button26";
-        case MOUSE_BUTTON_XBUTTON24:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON24:
             return "Button27";
-        case MOUSE_BUTTON_XBUTTON25:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON25:
             return "Button28";
-        case MOUSE_BUTTON_XBUTTON26:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON26:
             return "Button29";
-        case MOUSE_BUTTON_XBUTTON27:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON27:
             return "Button30";
-        case MOUSE_BUTTON_XBUTTON28:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON28:
             return "Button31";
         default:
             return "UNKNOWN";
@@ -630,9 +630,9 @@ void CSimpleButton::SetFontString(CSimpleFontString* fontString) {
         if (!fontString->HasAnyFramepoints()) {
             uint32_t styleFlags = this->m_normalFont ? this->m_normalFont->m_attributes.m_styleFlags : 0;
 
-            if (styleFlags & 0x1) {
+            if (styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_LEFT) {
                 fontString->SetPoint(FRAMEPOINT_LEFT, this, FRAMEPOINT_LEFT, 0.0f, 0.0f, 1);
-            } else if (styleFlags & 0x4) {
+            } else if (styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_RIGHT) {
                 fontString->SetPoint(FRAMEPOINT_RIGHT, this, FRAMEPOINT_RIGHT, 0.0f, 0.0f, 1);
             } else {
                 fontString->SetPoint(FRAMEPOINT_CENTER, this, FRAMEPOINT_CENTER, 0.0f, 0.0f, 1);
@@ -652,7 +652,7 @@ void CSimpleButton::SetText(const char* text) {
     }
 
     if (!this->m_fontString) {
-        void* data = CSimpleFontString::s_allocator.GetData(0, typeid(CSimpleFontString).raw_name(), SLOG_OBJECT);
+        void* data = CSimpleFontString::Allocate(sizeof(CSimpleFontString));
         this->SetFontString(data ? new (data) CSimpleFontString(this, 2, true) : nullptr);
     }
 
@@ -668,12 +668,12 @@ void CSimpleButton::SetNormalFontColor(const CImVector& color) {
         return;
     }
 
-    if (*reinterpret_cast<const uint32_t*>(&color) != *reinterpret_cast<uint32_t*>(&font->m_attributes.m_color) || !(font->m_attributes.m_flags & 0x400)) {
+    if (*reinterpret_cast<const uint32_t*>(&color) != *reinterpret_cast<uint32_t*>(&font->m_attributes.m_color) || !(font->m_attributes.m_flags & FONT_ATTRIBUTE_PRESENT_FLAGS::FLAG_COLOR_PRESENT)) {
         font->m_attributes.m_color = color;
-        font->m_attributes.m_flags |= 0x404;
+        font->m_attributes.m_flags |= FONT_ATTRIBUTE_PRESENT_FLAGS::FLAG_COLOR_PRESENT | FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_COLOR_UPDATE;
     }
 
-    this->m_normalFont->m_fontableFlags &= ~0x4u;
+    this->m_normalFont->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_COLOR_UPDATE;
     this->m_normalFont->UpdateObjects();
 }
 
@@ -716,7 +716,7 @@ int32_t CSimpleButton::SetHighlight(const char* fileName, EGxBlend blend) {
         return 1;
     }
 
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     texture = data ? new (data) CSimpleTexture(this, 4, 1) : nullptr;
 
     if (!texture->SetTexture(fileName, 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal)) {
@@ -821,6 +821,9 @@ int32_t CSimpleButton::OnLayerMouseUp(const CMouseEvent& evt, const char* btn) {
         this->m_simpleTop->unused_1250 = 0;
     }
 
+    STORM_ASSERT(m_initialized_state != STATE_DELETED);
+    STORM_ASSERT(m_initialized_state != 0xDDDDDDDD);
+
     if (!this->m_stateLocked && this->m_state != BUTTONSTATE_DISABLED) {
         this->SetButtonState(BUTTONSTATE_NORMAL, 0);
     }
@@ -848,9 +851,9 @@ void CSimpleButton::OnLayerCursorEnter(int32_t motion) {
 
 // VERIFY: f683541a auto
 // OFFSET: 0x0096FD00
-void CSimpleButton::OnLayerCursorExit(int32_t motion, int32_t a3) {
+void CSimpleButton::OnLayerCursorExit(int32_t motion, BOOL releaseMouse) {
     if (this->m_state != BUTTONSTATE_DISABLED) {
-        CSimpleFrame::OnLayerCursorExit(motion, a3);
+        CSimpleFrame::OnLayerCursorExit(motion, releaseMouse);
         this->UpdateTextState(this->m_state);
         return;
     }
@@ -897,6 +900,8 @@ void CSimpleButton::OnDoubleClick(const char* btn) {
 // VERIFY: d16dc184 manual
 // OFFSET: 0x0096FE30
 void CSimpleButton::SetButtonState(CSimpleButtonState state, int32_t stateLocked) {
+    STORM_ASSERT(state < NUM_BUTTONSTATES);
+
     this->m_stateLocked = stateLocked;
 
     if (state == this->m_state) {
@@ -1040,7 +1045,7 @@ int32_t CSimpleButton::SetStateTexture(CSimpleButtonState state, const char* fil
         return 1;
     }
 
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     CSimpleTexture* texture = data ? new (data) CSimpleTexture(nullptr, 2, 1) : nullptr;
 
     if (!texture->SetTexture(fileName, 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal)) {
@@ -1058,7 +1063,7 @@ int32_t CSimpleButton::SetStateTexture(CSimpleButtonState state, const char* fil
 
 // VERIFY: 3f2ae434 manual
 // OFFSET: 0x00970440
-void CSimpleButton::Enable(int32_t enabled) {
+void CSimpleButton::Enable(BOOL enabled) {
     if (enabled) {
         if (this->m_state != BUTTONSTATE_DISABLED) {
             return;
@@ -1087,11 +1092,11 @@ void CSimpleButton::Enable(int32_t enabled) {
     }
 
     int32_t disabled = enabled == 0;
-    this->SetFrameFlag(0x400, disabled);
+    this->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_DISABLED, disabled);
 
     FrameScript_Object::ScriptIx& script = disabled ? this->m_onDisable : this->m_onEnable;
 
-    if (script.m_luaRef && !this->m_isLoading) {
+    if (script.m_luaRef && !this->IsLoading()) {
         this->RunScript(script, 0, nullptr);
     }
 }
@@ -1120,5 +1125,5 @@ CSimpleButton::CSimpleButton(CSimpleFrame* parent) : CSimpleFrame(parent) {
 
     this->Enable(1);
     this->EnableEvent(SIMPLE_EVENT_MOUSE, -1);
-    this->SetFrameFlag(0x10000, 1);
+    this->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_BUTTON_CONSTRUCTION_TAG, 1);
 }

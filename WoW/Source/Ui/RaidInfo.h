@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Net/Types.h"
 #include "WoW/Source/Object/WGUID.h"
 #include "WoW/Source/Ui/PartyFrame.h"
@@ -15,12 +16,18 @@ struct lua_State;
 
 class CGRaidMember {
     public:
+    enum RANK : int32_t {
+        MEMBER = 0,
+        ASSISTANT = 1,
+        LEADER = 2,
+    };
+
     /* 0000 */ WOWGUID m_guid;
     /* 0008 */ uint32_t m_subgroup;
-    /* 000C */ int32_t m_rank;
+    /* 000C */ RANK m_rank;
     /* 0010 */ CGPartyMemberState m_stats;
-    /* 0320 */ int32_t m_readyCheckPending;
-    /* 0324 */ int32_t m_readyCheckReady;
+    /* 0320 */ BOOL m_readyCheckPending;
+    /* 0324 */ BOOL m_readyCheckReady;
     /* 0328 */ uint8_t m_assignments;
     /* 0329 */ uint8_t unused_0329[3];
     /* 032C */ uint32_t m_groupRole;
@@ -28,35 +35,41 @@ class CGRaidMember {
 
 class CGRaidInfo {
     public:
+    // Raid member slots (FrameXML MAX_RAID_MEMBERS).
+    static const int32_t MAX_RAID_MEMBERS = 40;
+    // Raid subgroups (FrameXML NUM_RAID_GROUPS).
+    static const int32_t NUM_RAID_GROUPS = 8;
+    // Raid target icons (FrameXML NUM_RAID_ICONS); this value also means no icon.
+    static const int32_t NUM_RAID_ICONS = 8;
     static void LeaveWorld();
-    static CGRaidMember* m_members[40];
+    static CGRaidMember* m_members[MAX_RAID_MEMBERS];
     static uint32_t m_numMembers;
-    static WOWGUID m_raidTargets[8];
+    static WOWGUID m_raidTargets[NUM_RAID_ICONS];
     static uint32_t m_realNumMembers;
     static WOWGUID m_selectedMember;
 
-    static int32_t IsPlayerOrPetInRaid(const WOWGUID& guid);
+    static BOOL IsPlayerOrPetInRaid(const WOWGUID& guid);
     static uint32_t m_readyCheckTime;
     static WOWGUID m_readyCheckInitiator;
     static uint32_t m_readyCheckTimer;
     static uint8_t m_rosterCounter;
-    static int32_t m_partyReadyCheckReady[4];
-    static int32_t m_partyReadyCheckPending[4];
+    static int32_t m_partyReadyCheckReady[CGPartyInfo::MAX_PARTY_MEMBERS];
+    static int32_t m_partyReadyCheckPending[CGPartyInfo::MAX_PARTY_MEMBERS];
 
     static void EnterWorld();
     static void InitializeGame();
     static void ShutdownGame();
     static int32_t ProcessReadyCheckTimer(const void* data, void* param);
     static int32_t GetPartyMemberIndex(WOWGUID guid);
-    static int32_t IsPartyMemberReadyCheckPending(uint32_t index);
-    static int32_t IsPartyMemberReadyCheckReady(uint32_t index);
+    static BOOL IsPartyMemberReadyCheckPending(uint32_t index);
+    static BOOL IsPartyMemberReadyCheckReady(uint32_t index);
     static CGPartyMemberState* GetRemoteStats(const WOWGUID& guid);
     static void ClearRecruitAFriend(WOWGUID guid);
     static CGPartyMemberState* GetRemoteStatsFromPet(const WOWGUID& petGuid);
     static CGRaidMember* FindMemberByGuid(WOWGUID guid);
     static CGPartyPetState* GetRemotePetStats(const WOWGUID& guid);
 
-    static void EnableMember(CGPlayer_C* player, int32_t enable);
+    static void EnableMember(CGPlayer_C* player, BOOL enable);
     static void UpdateRealStats(uint32_t count, WOWGUID leader);
     static void ClearRoster();
     static void CheckReadyCheckTime();
@@ -64,9 +77,9 @@ class CGRaidInfo {
     static void SetRaidTarget(uint32_t index, const WOWGUID& guid);
     static void RosterUpdateRefreshReadyCheck(uint32_t removed, WOWGUID leader);
     static void UpdateRoster(const WOWGUID* guids, const uint32_t* subgroups, const uint8_t* flags, const uint32_t* roles, const uint8_t* online, uint32_t count, uint8_t battleground);
-    static int32_t IsPetInRaid(const WOWGUID& guid, int32_t* index);
-    static int32_t IsPlayerRaidOfficer(const WOWGUID& guid);
-    static int32_t IsPVPRaid();
+    static BOOL IsPetInRaid(const WOWGUID& guid, int32_t* index);
+    static BOOL IsPlayerRaidOfficer(const WOWGUID& guid);
+    static BOOL IsPVPRaid();
     static int32_t GetMemberIndexByGuid(WOWGUID guid);
     static CGRaidMember* GetMember(uint32_t index);
     static int32_t GetSelectedMemberIndex();

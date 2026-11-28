@@ -7,6 +7,7 @@
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/Gx/CGxTexFlags.h"
 #include "Engine/Source/Gxu/GxuFont.h"
+#include "Engine/Source/Gxu/GxuFontFont.h"
 #include "Engine/Source/Services/Texture.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Model2/M2Model.h"
@@ -31,7 +32,6 @@
 #include "Engine/Source/Tempest/CWFrustum.h"
 #include "WoW/Source/WorldClient/World.h"
 #include "Engine/Source/Os/TimeManager.h"
-
 // STATIC: 0x00D380A0
 uint32_t s_nameMask;
 
@@ -96,7 +96,7 @@ void PlayerNameInitialize() {
     const char* fontName;
 
     if (FrameScript_GetVariable("UNIT_NAME_FONT", fontName)) {
-        GxuFontCreateFont(fontName, 0.99f, s_playerNameFont, 4);
+        GxuFontCreateFont(fontName, 0.99f, s_playerNameFont, CGxFont::FONT_FLAGS::FONT_LINEAR_FILTER);
     }
 
     s_playerNameBatch = GxuFontCreateBatch(true, true);
@@ -109,7 +109,7 @@ void PlayerNameInitialize() {
 // OFFSET: 0x007E50F0
 void PlayerNameTriggerColorUpdate(PLAYERNAMEDESC* desc) {
     if (desc) {
-        desc->m_flags |= 0x2;
+        desc->m_flags |= PLAYERNAMEDESC::NAME_FLAGS::COLOR_UPDATE;
     }
 }
 
@@ -136,21 +136,21 @@ void PlayerNameUpdateDrawCallback(PLAYERNAMEDESC* desc) {
     uint32_t raidTarget = GetRaidTargetIndexFromGuid(desc->m_guid);
 
     if (object->ShouldRenderObjectName(s_nameMask) || PLAYERNAMEDESC::ShouldRender(object, raidTarget)) {
-        if (!(desc->m_flags & 0x8)) {
-            desc->m_flags |= 0x8;
+        if (!(desc->m_flags & PLAYERNAMEDESC::NAME_FLAGS::SHOWING)) {
+            desc->m_flags |= PLAYERNAMEDESC::NAME_FLAGS::SHOWING;
             object->ObjectNameVisibilityChanged();
         }
 
-        model->m_fFlags &= ~0x20;
+        model->m_runtimeFlags &= ~M2_FLAGS::M2_UNKNOWN_20;
         model->m_drawCallback = &PLAYERNAMEDESC::RenderIfVisible;
         model->m_drawArg = desc;
     } else {
-        model->m_fFlags |= 0x20;
+        model->m_runtimeFlags |= M2_FLAGS::M2_UNKNOWN_20;
         model->m_drawCallback = nullptr;
         model->m_drawArg = nullptr;
 
-        if (desc->m_flags & 0x8) {
-            desc->m_flags &= ~0x8;
+        if (desc->m_flags & PLAYERNAMEDESC::NAME_FLAGS::SHOWING) {
+            desc->m_flags &= ~PLAYERNAMEDESC::NAME_FLAGS::SHOWING;
             object->ObjectNameVisibilityChanged();
         }
     }
@@ -166,21 +166,21 @@ void PlayerNameUpdateEarly() {
 // OFFSET: 0x007E5130
 void PlayerNameTriggerNameRegenerate(PLAYERNAMEDESC* desc) {
     if (desc) {
-        desc->m_flags |= 0x1;
+        desc->m_flags |= PLAYERNAMEDESC::NAME_FLAGS::NAME_REGENERATE;
     }
 }
 
 // VERIFY: 04249170 auto
 // OFFSET: 0x007E5150
 bool PlayerNameShowing(PLAYERNAMEDESC* desc) {
-    return desc && (desc->m_flags & 0x8);
+    return desc && (desc->m_flags & PLAYERNAMEDESC::NAME_FLAGS::SHOWING);
 }
 
 // VERIFY: d71173c9 manual
 // OFFSET: 0x007E5580
 void PlayerNameUpdateLate() {
     for (PLAYERNAMEDESC* desc = s_playerNames.Head(); desc; desc = s_playerNames.Next(desc)) {
-        if (desc->m_renderFrame == s_lastRenderFrame || (desc->m_flags & 4)) {
+        if (desc->m_renderFrame == s_lastRenderFrame || (desc->m_flags & PLAYERNAMEDESC::NAME_FLAGS::OBJECT_NAME)) {
             continue;
         }
 
@@ -198,7 +198,7 @@ inline PLAYERNAMEDESC::PLAYERNAMEDESC() {
     this->m_string = nullptr;
     this->m_zOffset = 0.0f;
     this->m_guid.m_guid = 0;
-    this->m_flags = 3;
+    this->m_flags = PLAYERNAMEDESC::NAME_FLAGS::INITIAL_DIRTY;
     this->m_renderFrame = s_lastRenderFrame;
     this->m_worldText[0] = nullptr;
     this->m_worldText[1] = nullptr;
@@ -253,7 +253,7 @@ void PlayerNameDelete(PLAYERNAMEDESC* desc) {
         CM2Model* model = object->m_worldModel;
 
         if (model) {
-            model->m_fFlags |= 0x20;
+            model->m_runtimeFlags |= M2_FLAGS::M2_UNKNOWN_20;
             model->m_drawCallback = nullptr;
             model->m_drawArg = nullptr;
         }
@@ -265,7 +265,7 @@ void PlayerNameDelete(PLAYERNAMEDESC* desc) {
 
 // VERIFY: f8567035 manual
 // OFFSET: 0x007E5340
-int32_t PLAYERNAMEDESC::ShouldRender(CGObject_C* object, uint32_t raidTarget) {
+BOOL PLAYERNAMEDESC::ShouldRender(CGObject_C* object, uint32_t raidTarget) {
     int32_t show = 1;
 
     if (object && (object->m_obj->m_type & TYPE_UNIT)) {
@@ -273,22 +273,24 @@ int32_t PLAYERNAMEDESC::ShouldRender(CGObject_C* object, uint32_t raidTarget) {
         show = !unit->IsDeadOrGhost() && !unit->m_namePlateFrame;
     }
 
-    return CGGameUI::m_visible && raidTarget < 8 && show;
+    return CGGameUI::m_visible && raidTarget < CGRaidInfo::NUM_RAID_ICONS && show;
 }
 
 // VERIFY: 64e128ac manual
 // OFFSET: 0x007E5420
-float PlayerNameComputeScale(CGObject_C* object) {
+float PlayerNameComputeScale(CGObject_C* objPtr) {
+    STORM_ASSERT(objPtr);
+
     float height;
 
-    if (object->m_obj->m_type & TYPE_UNIT) {
-        height = static_cast<CGUnit_C*>(object)->GetStandHeight();
-    } else if (object->m_worldModel && object->m_worldModel->IsLoaded(0, 0) && object->m_worldModel->HasAttachment(18)) {
-        CM2Model* model = object->m_worldModel;
-        float attachZ = model->GetAttachmentPosition(18).z;
+    if (objPtr->m_obj->m_type & TYPE_UNIT) {
+        height = static_cast<CGUnit_C*>(objPtr)->GetStandHeight();
+    } else if (objPtr->m_worldModel && objPtr->m_worldModel->IsLoaded(0, 0) && objPtr->m_worldModel->HasAttachment(MODEL_ATTACHMENT_ID::ATTACH_PLAYERNAME)) {
+        CM2Model* model = objPtr->m_worldModel;
+        float attachZ = model->GetAttachmentPosition(MODEL_ATTACHMENT_ID::ATTACH_PLAYERNAME).z;
         height = attachZ - model->GetWorldPosition().z;
     } else {
-        height = object->m_height * object->m_scale * 1.25f;
+        height = objPtr->m_height * objPtr->m_scale * 1.25f;
     }
 
     if (height <= 4.0f) {
@@ -298,13 +300,21 @@ float PlayerNameComputeScale(CGObject_C* object) {
     return height * 0.25f * 1.5f;
 }
 
+// Name icons fade from ICON_ALPHA_MIN at ICON_FADE_NEAR_DIST to opaque at ICON_FADE_FAR_DIST
+// from the camera. Names inferred.
+static const float ICON_FADE_NEAR_DIST = 4.0f;
+static const float ICON_FADE_FAR_DIST = 8.0f;
+static const uint8_t ICON_ALPHA_MIN = 34;
+static const uint8_t ICON_ALPHA_MAX = 0xFF;
+static const float ICON_FADE_ALPHA_PER_YARD = 55.25f; // (ICON_ALPHA_MAX - ICON_ALPHA_MIN) / (far - near)
+
 // VERIFY: 90af9757 manual
 // OFFSET: 0x007E52A0
 static uint8_t PlayerNameIconAlpha(const C3Vector& position) {
-    CGCamera* camera = CGWorldFrame::s_currentWorldFrame->m_camera;
+    CGCamera* camera = CGWorldFrame::GetActive()->m_camera;
 
     if (!camera) {
-        return 0xFF;
+        return ICON_ALPHA_MAX;
     }
 
     float dy = position.y - camera->m_position.y;
@@ -312,15 +322,15 @@ static uint8_t PlayerNameIconAlpha(const C3Vector& position) {
     float dx = position.x - camera->m_position.x;
     float distance = sqrtf(dx * dx + dz * dz + dy * dy);
 
-    if (distance >= 8.0f) {
-        return 0xFF;
+    if (distance >= ICON_FADE_FAR_DIST) {
+        return ICON_ALPHA_MAX;
     }
 
-    if (distance > 4.0f) {
-        return static_cast<uint8_t>((distance - 4.0f) * 55.25f + 34.0f);
+    if (distance > ICON_FADE_NEAR_DIST) {
+        return static_cast<uint8_t>((distance - ICON_FADE_NEAR_DIST) * ICON_FADE_ALPHA_PER_YARD + ICON_ALPHA_MIN);
     }
 
-    return 34;
+    return ICON_ALPHA_MIN;
 }
 
 // VERIFY: 64e7e257 manual
@@ -336,21 +346,21 @@ void PLAYERNAMEDESC::Render() {
         return;
     }
 
-    int32_t showName = object->ShouldRenderObjectName(s_nameMask);
+    BOOL showName = object->ShouldRenderObjectName(s_nameMask);
     float lineHeight = PlayerNameComputeScale(object) * 0.2f;
     C3Vector position = object->GetNamePosition();
 
     if (showName) {
-        if (this->m_flags & 0x2) {
-            this->m_flags &= ~0x2;
+        if (this->m_flags & PLAYERNAMEDESC::NAME_FLAGS::COLOR_UPDATE) {
+            this->m_flags &= ~PLAYERNAMEDESC::NAME_FLAGS::COLOR_UPDATE;
             object->GetSelectionHighlightColor(&this->m_color);
 
-            if (this->m_string && !(this->m_flags & 0x1)) {
+            if (this->m_string && !(this->m_flags & PLAYERNAMEDESC::NAME_FLAGS::NAME_REGENERATE)) {
                 GxuFontSetStringColor(this->m_string, this->m_color);
             }
         }
 
-        if (this->m_string && (this->m_flags & 0x1)) {
+        if (this->m_string && (this->m_flags & PLAYERNAMEDESC::NAME_FLAGS::NAME_REGENERATE)) {
             GxuFontDestroyString(this->m_string);
             this->m_zOffset = 0.0f;
             this->m_string = nullptr;
@@ -366,7 +376,7 @@ void PLAYERNAMEDESC::Render() {
                 GxuFontCreateString(s_playerNameFont, LanguageProcess(text), lineHeight, origin, 100000.0f, 100000.0f, 0.0f, this->m_string, GxVJ_Bottom, GxHJ_Center, 200, this->m_color, 0.0f, 1.0f);
             }
 
-            this->m_flags &= ~0x1;
+            this->m_flags &= ~PLAYERNAMEDESC::NAME_FLAGS::NAME_REGENERATE;
         }
 
         if (this->m_string) {
@@ -401,7 +411,7 @@ void PLAYERNAMEDESC::Render() {
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_Culling, 0);
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_DepthTest, 0);
     GxRsSet(GxRs_DepthWrite, 0);
@@ -453,10 +463,7 @@ void PLAYERNAMEDESC::Render() {
     world.Translate(position * view);
     world *= view.Inverse(view.Determinant());
 
-    CGxMatrixStack& worldStack = g_theGxDevicePtr->m_xforms[GxXform_World];
-    worldStack.m_dirty = 1;
-    worldStack.m_flags[worldStack.m_level] &= ~CGxMatrixStack::F_Identity;
-    worldStack.m_mtx[worldStack.m_level] = world;
+    GxXformSet(GxXform_World, world);
 
     CGxBatch batch;
     batch.m_primType = GxPrim_Triangles;
@@ -520,7 +527,7 @@ void PLAYERNAMEDESC::UpdateWorldText(uint32_t time) {
         return;
     }
 
-    if (!(this->m_flags & 0x4) && !object->m_worldModel->IsDrawable(0, 0)) {
+    if (!(this->m_flags & PLAYERNAMEDESC::NAME_FLAGS::OBJECT_NAME) && !object->m_worldModel->IsDrawable(0, 0)) {
         return;
     }
 
@@ -529,7 +536,7 @@ void PLAYERNAMEDESC::UpdateWorldText(uint32_t time) {
             continue;
         }
 
-        CGCamera* camera = CGWorldFrame::s_currentWorldFrame->m_camera;
+        CGCamera* camera = CGWorldFrame::GetActive()->m_camera;
 
         if ((this->m_guid == camera->m_targetGUID && camera->IsFirstPersonView()) || !WorldTextUpdate(this->m_worldText[i], time)) {
             WorldTextDelete(this->m_worldText[i]);
@@ -547,7 +554,7 @@ void PLAYERNAMEDESC::UpdateWorldTextIcons() {
         return;
     }
 
-    if (!(this->m_flags & 0x4) && !object->m_worldModel->IsDrawable(0, 0)) {
+    if (!(this->m_flags & PLAYERNAMEDESC::NAME_FLAGS::OBJECT_NAME) && !object->m_worldModel->IsDrawable(0, 0)) {
         return;
     }
 
@@ -562,7 +569,7 @@ void PLAYERNAMEDESC::UpdateWorldTextIcons() {
 // OFFSET: 0x007E5550
 void PlayerNameTriggerColorUpdateAll() {
     for (PLAYERNAMEDESC* desc = s_playerNames.Head(); desc; desc = s_playerNames.Next(desc)) {
-        desc->m_flags |= 0x2;
+        desc->m_flags |= PLAYERNAMEDESC::NAME_FLAGS::COLOR_UPDATE;
     }
 }
 
@@ -647,7 +654,7 @@ PLAYERNAMEDESC* ObjectNameCreate(const WOWGUID& guid) {
 
     PLAYERNAMEDESC* desc = s_freePlayerNames.New<PLAYERNAMEDESC>(0);
     desc->m_guid = guid;
-    desc->m_flags |= 0x4;
+    desc->m_flags |= PLAYERNAMEDESC::NAME_FLAGS::OBJECT_NAME;
     s_playerNames.LinkToTail(desc);
 
     return desc;
@@ -660,7 +667,7 @@ void PlayerNameCreateText(PLAYERNAMEDESC* desc, uint32_t type, const char* text,
         return;
     }
 
-    CGCamera* camera = CGWorldFrame::s_currentWorldFrame->m_camera;
+    CGCamera* camera = CGWorldFrame::GetActive()->m_camera;
 
     if ((desc->m_guid != camera->m_targetGUID || !camera->IsFirstPersonView()) && !ClntObjMgrGetPlayerType()) {
         desc->CreateWorldText(type, text, color, pvpRank);

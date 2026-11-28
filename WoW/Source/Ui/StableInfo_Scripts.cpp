@@ -126,7 +126,7 @@ static int32_t Script_GetStablePetInfo(lua_State* L) {
         return 4;
     }
 
-    for (int32_t i = 0; i < g_talentTabDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_talentTabDB.GetNumRecords(); i++) {
         TalentTabRec* tab = g_talentTabDB.GetRecordByIndex(i);
 
         if ((1 << family->m_petTalentType) & tab->m_categoryEnumID) {
@@ -169,13 +169,13 @@ static int32_t Script_SetPetStablePaperdoll(lua_State* L) {
     }
 
     int32_t selected = CGStableInfo::GetSelectedPetIndex();
-    CreatureStats_C* stats;
+    const CreatureStats_C* stats;
 
     if (selected == -1) {
         CGUnit_C* pet = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(CGPetInfo::GetPet(0), TYPE_UNIT, __FILE__, __LINE__));
 
-        if (pet && pet->CanGainXP() && pet->m_creatureCacheEntry) {
-            stats = pet->m_creatureCacheEntry;
+        if (pet && pet->CanGainXP() && pet->m_stats) {
+            stats = pet->m_stats;
         } else {
             WOWGUID requester = ClntObjMgrGetActivePlayer();
             stats = g_creatureDBCache.GetRecord(CGStableInfo::m_pets[0].m_entry, requester, &CreatureStatsSelectCallback, nullptr, false);
@@ -240,7 +240,7 @@ static int32_t Script_GetStablePetFoodTypes(lua_State* L) {
         return count;
     }
 
-    for (int32_t i = 0; i < g_itemPetFoodDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_itemPetFoodDB.GetNumRecords(); i++) {
         ItemPetFoodRec* food = g_itemPetFoodDB.GetRecordByIndex(i);
 
         if (food && ((1 << (food->m_id - 1)) & family->m_petFoodMask)) {

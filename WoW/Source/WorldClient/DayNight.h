@@ -3,13 +3,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/Handle.h"
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CMath.h"
+#include "Engine/Source/Tempest/CRange.h"
 #include "Engine/Source/Tempest/CImVector.h"
-#include "Engine/Source/Tempest/CMemBlock.h"
+#include "Engine/Source/Tempest/cpriorityq.h"
 #include "Engine/Source/Storm/H/stpl.h"
 
 class LightFloatBandRec;
@@ -35,6 +37,11 @@ struct DNKeyframe {
 namespace DayNight {
 class CurrentLight {
     public:
+    // Interpolated color slot counts (inferred names).
+    static const uint32_t NUM_SKY_COLORS = 6;
+    static const uint32_t NUM_SUN_CLOUD_COLORS = 5;
+    static const uint32_t NUM_WATER_COLORS = 4;
+
     struct SkyboxBlend {
         /* 0000 */ uint32_t m_id;
         /* 0004 */ float m_weight;
@@ -43,9 +50,9 @@ class CurrentLight {
     /* 0000 */ CImVector m_ambient;
     /* 0004 */ CImVector m_diffuse;
     /* 0008 */ CImVector m_shadowOpacity;
-    /* 000C */ CImVector m_skyColors [6];
-    /* 0024 */ CImVector m_sunCloudColors [5];
-    /* 0038 */ CImVector m_waterColors [4];
+    /* 000C */ CImVector m_skyColors [NUM_SKY_COLORS];
+    /* 0024 */ CImVector m_sunCloudColors [NUM_SUN_CLOUD_COLORS];
+    /* 0038 */ CImVector m_waterColors [NUM_WATER_COLORS];
     /* 0048 */ float m_fogEnd;
     /* 004C */ float m_fogStartMul;
     /* 0050 */ float m_fogRate;
@@ -73,7 +80,7 @@ struct DNOverrideSky : public TSHashObject<DNOverrideSky, HASHKEY_STRI> {
     /* 0018 */ CM2Model* m_model;
     /* 001C */ uint32_t m_animLengthMs;
     /* 0020 */ uint32_t m_lastTimeOfDay;
-    /* 0024 */ uint32_t m_flags;
+    /* 0024 */ uint32_t m_flags; // LIGHT_SKYBOX_FLAGS
 
     DNOverrideSky();
 };
@@ -110,7 +117,7 @@ struct DNClouds {
     /* 008C */ float m_animTime;
     /* 0090 */ CTexture* m_textures [2];
 
-    static void __stdcall Collide(const C3Vector* origin, const C3Vector* dir, C3Vector* out);
+    static void __stdcall Collide(const C3Vector& origin, const C3Vector* dir, C3Vector* out);
     static void Callback_GxTex(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     static void Update();
 
@@ -144,11 +151,9 @@ struct DNGlare {
     /* 005C */ uint32_t unused_005C[4];
     /* 006C */ uint32_t m_occlusionPixels;
     /* 0070 */ DNKeyframe m_alphaCurve [4];
-    /* 0090 */ float m_scaleMin;
-    /* 0094 */ float m_scaleMax;
+    /* 0090 */ CRange m_scaleRange;
     /* 0098 */ float m_minDot;
-    /* 009C */ float m_alphaMin;
-    /* 00A0 */ float m_alphaMax;
+    /* 009C */ CRange m_alphaRange;
     /* 00A4 */ float m_screenGlow;
     /* 00A8 */ DayNight::DNPlanet* m_planet;
 
@@ -262,13 +267,13 @@ namespace DayNight {
     void SetPlanets();
     CImVector DarkenColor(CImVector color, float scale);
     float InterpTable(const C2Vector* table, uint32_t count, float t);
-    void SetOverrideFog(float startScalar, float end, CImVector color, int32_t showSky);
+    void SetOverrideFog(float startScalar, float end, CImVector color, BOOL showSky);
     void ClearOverrideFog();
     void SetOverrideLightParamsID(uint32_t id);
     void ClearOverrideLightParamsID();
     void SetFogMode(int32_t mode);
     void UnloadMap();
-    void ClearLightFlag(int32_t bit);
+    void ClearLightFlag(int32_t bit); // LIGHT_FLAG_BIT
     void ResetFogAccumulators(bool updateClouds);
     void InitSunGlare();
     void InitMoonGlare();
@@ -277,7 +282,7 @@ namespace DayNight {
     void DrawSky(DNOverrideSky* sky, float weight);
     int32_t GetFogOverride();
     void RenderGlares();
-    void SetBlendSky(uint32_t index, const char* sky, int32_t a3, float blend);
+    void SetBlendSky(uint32_t index, const char* sky, int32_t flags, float alpha);
     void UpdateStars();
     void AddLightOverride(int32_t lightId, int32_t overrideId, uint32_t duration);
     void RemoveLightOverride(int32_t lightId, uint32_t duration);
@@ -285,18 +290,38 @@ namespace DayNight {
 }
 
 struct SMOFog {
+    // 0.5.3 symbol names; the two-entry layout and blend flag match 3.3.5.
+    enum EFogs : int32_t {
+        FOG = 0,
+        UWFOG = 1, // underwater fog
+        NUM_FOGS = 2,
+    };
+
+    enum EFlags : int32_t {
+        F_IEBLEND = 0x1,
+        // The next two are 3.3.5 additions, named after the LiquidType flags they answer.
+        F_ALLOW_SLIME_FOG = 0x10, // Required for LIQUID_TYPE_FLAG_WMO_FOG_CONTROL_SLIME liquids to apply fog.
+        F_ALLOW_UNDERWATER_FOG = 0x100, // Required for LIQUID_TYPE_FLAG_WMO_FOG_CONTROL liquids to use UWFOG.
+    };
+
     struct Fog {
         /* 0000 */ float m_end;
         /* 0004 */ float m_startScalar;
         /* 0008 */ CImVector m_color;
     };
 
+    class Fogs {
+        public:
+        /* 0000 */ Fog m_fog[NUM_FOGS];
+
+        void Blend(const Fogs& fogs, float t);
+    };
+
     /* 0000 */ uint32_t m_flags;
     /* 0004 */ C3Vector m_position;
     /* 0010 */ float m_smallerRadius;
     /* 0014 */ float m_largerRadius;
-    /* 0018 */ Fog m_fog;
-    /* 0024 */ Fog m_underwaterFog;
+    /* 0018 */ Fogs m_fogs;
 };
 
 namespace DayNight {
@@ -305,10 +330,15 @@ namespace DayNight {
 
 namespace DayNight {
 struct AreaLightOverride {
+    enum STATE : int32_t {
+        FADE_IN = 1,
+        FADE_OUT = 2,
+    };
+
     /* 0000 */ uint32_t m_id;
     /* 0004 */ LightRec* m_light;
     /* 0008 */ float m_fade;
-    /* 000C */ int32_t m_state;
+    /* 000C */ STATE m_state;
     /* 0010 */ uint32_t m_lastTime;
     /* 0014 */ uint32_t m_duration;
 };
@@ -323,14 +353,9 @@ class LightQE {
     /* 0004 */ const LightRec** m_light;
 };
 
-class LightQueue : public CMemBlock {
+class LightQueue : public CPriorityQ<LightQE> {
     public:
-    /* 0014 */ uint32_t m_chunk;
-    /* 0018 */ uint32_t m_capacity;
-    /* 001C */ uint32_t m_count;
-
     LightQueue(const uint32_t* params);
-    void Erase(uint32_t index, uint32_t count);
     LightQE Pop();
     void Push(LightQE entry);
 };
@@ -342,7 +367,18 @@ class GlareBase {
 
 extern int32_t s_mapId;
 extern int32_t g_forceFullUpdate;
-extern int32_t s_lightFlags;
+// s_lightFlags bits; names inferred from the effect each bit drives.
+enum LIGHT_FLAG_BIT : int32_t {
+    LIGHT_FLAG_BIT_GLOW = 0, // Blends sky and fog toward the glow color by s_glowBlend.
+    LIGHT_FLAG_BIT_ECLIPSE = 1, // Applies ApplyFogEclipse to both fogs.
+};
+
+enum LIGHT_FLAGS : int32_t {
+    LIGHT_FLAG_GLOW = 1 << LIGHT_FLAG_BIT_GLOW,
+    LIGHT_FLAG_ECLIPSE = 1 << LIGHT_FLAG_BIT_ECLIPSE,
+};
+
+extern int32_t s_lightFlags; // LIGHT_FLAGS
 extern float s_glowBlend;
 extern DNStars g_stars;
 extern DNSky g_sky;

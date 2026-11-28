@@ -1,12 +1,13 @@
 #ifndef WOW_SOURCE_UI_MATHSTATE_H
 #define WOW_SOURCE_UI_MATHSTATE_H
 
+#include "Engine/Source/Storm/H/storm.h"
 #include <cstddef>
 #include <cstdint>
 
 class SpellRec;
 
-enum MATHOP {
+enum MATHOP : uint8_t {
     MATHOP_CONSTANT = 0,
     MATHOP_SPELL = 1,
     MATHOP_SPELL_VARIABLE = 2,
@@ -171,21 +172,48 @@ enum MATHOP {
     MATHOP_BONUS_COEFFICIENT_3_UPPER = 161,
 };
 
-struct MathStack {
+struct CFloatStack {
+    private:
     /* 0000 */ float m_values[32];
-    /* 0080 */ int32_t m_top;
+    /* 0080 */ int32_t m_top = 32; // Grows downward: 32 is empty, 0 is full.
+
+    public:
+    bool IsEmpty() const {
+        return this->m_top == 32;
+    }
+
+    bool IsFull() const {
+        return this->m_top == 0;
+    }
+
+    float Pop() {
+        STORM_ASSERT(!IsEmpty());
+        return this->m_values[this->m_top++];
+    }
+
+    void Push(float value) {
+        STORM_ASSERT(!IsFull());
+        this->m_values[--this->m_top] = value;
+    }
 };
 
-class MathState {
-    public:
-    /* 0000 */ uint32_t m_status;
+class CFormula {
+    private:
+    // m_status: compiling, failed (compile or evaluate), or ready to evaluate, as QuestTextParser drives it.
+    enum STATUS : uint32_t {
+        STATUS_COMPILING = 0, // (inferred)
+        STATUS_ERROR = 1, // (inferred)
+        STATUS_OK = 2,
+    };
+
+    /* 0000 */ STATUS m_status;
     /* 0004 */ uint32_t m_numOps;
-    /* 0008 */ uint8_t m_ops[128];
-    /* 0088 */ uint32_t m_numConstants;
+    /* 0008 */ MATHOP m_ops[128]; // Packed opcodes; integer operands are stored separately.
+    /* 0088 */ uint32_t m_constantsCount;
     /* 008C */ float m_constants[64];
-    /* 018C */ uint32_t m_numIntArgs;
-    /* 0190 */ int32_t m_intArgs[64];
-    /* 0290 */ uint32_t m_numVariables;
+    /* 018C */ uint32_t m_otherSpellIDCount;
+    /* 0190 */ int32_t m_otherSpellIDs[64]; // (inferred)
+    /* 0290 */ uint32_t m_spellVariablesCount;
     /* 0294 */ float m_variables[32];
     /* 0314 */ const char* m_name;
     /* 0318 */ const char* m_text;
@@ -197,9 +225,29 @@ class MathState {
     int32_t CompilePower(int32_t pos);
     int32_t CompileProduct(int32_t pos);
     int32_t CompileSum(int32_t pos);
-    void ExecuteFunction(uint32_t op, MathStack* stack);
-    void ExecuteOperator(uint32_t op, MathStack* stack);
-    void GetVariableValue(uint32_t op, MathStack* stack, const SpellRec* spell, int32_t spellLevel, int32_t scale, int32_t parseUnit, int32_t parsePet, int32_t noModifiers);
+    void ExecuteFunction(uint32_t op, CFloatStack* stack);
+    void ExecuteOperator(uint32_t op, CFloatStack* stack);
+    void GetVariableValue(uint32_t op, CFloatStack* stack, const SpellRec* spell, int32_t spellLevel, int32_t scale, int32_t parseUnit, int32_t parsePet, int32_t noModifiers);
+    public:
+    bool Compile(const char* name, const char* text) { // (inferred)
+        this->m_text = text;
+        this->m_numOps = 0;
+        this->m_constantsCount = 0;
+        this->m_otherSpellIDCount = 0;
+        this->m_spellVariablesCount = 0;
+        this->m_name = name;
+        this->m_status = STATUS_COMPILING;
+        this->CompileSum(0);
+
+        if (this->m_status == STATUS_ERROR) {
+            return false;
+        }
+
+        this->m_status = STATUS_OK;
+        return true;
+    }
+
+    bool IsValid() const { return this->m_status == STATUS_OK; } // (inferred)
     float Evaluate(const SpellRec* spell, int32_t spellLevel, int32_t scale, int32_t parseUnit, int32_t parsePet, int32_t noModifiers);
 };
 

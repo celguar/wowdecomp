@@ -43,7 +43,7 @@ void CSimpleRegion::SetParent(CSimpleFrame* parent) {
 
 // VERIFY: bb364772 auto
 // OFFSET: 0x004879B0
-int32_t CSimpleRegion::CanBeAnchorFor(CLayoutFrame* frame) {
+BOOL CSimpleRegion::CanBeAnchorFor(CLayoutFrame* frame) {
     return frame->IsProtected() == 0;
 }
 
@@ -145,7 +145,7 @@ void CSimpleRegion::HideThis() {
         return;
     }
 
-    if (!this->m_parent->m_isLoading) {
+    if (!this->m_parent->IsLoading()) {
         this->SetDeferredResize(1);
     }
 
@@ -156,11 +156,11 @@ void CSimpleRegion::HideThis() {
 // VERIFY: b0e6ff7b auto
 // OFFSET: 0x00487C40
 void CSimpleRegion::ShowThis() {
-    if (!this->m_shown || !this->m_parent || !this->m_parent->m_isVisible || this->m_visible) {
+    if (!this->m_shown || !this->m_parent || !this->m_parent->IsVisible() || this->m_visible) {
         return;
     }
 
-    if (!this->m_parent->m_isLoading) {
+    if (!this->m_parent->IsLoading()) {
         this->SetDeferredResize(0);
     }
 
@@ -246,7 +246,7 @@ void CSimpleRegion::OnColorChanged(bool changed) {
 
 // VERIFY: b519be3d manual
 // OFFSET: 0x00487ED0
-void CSimpleRegion::SetFrame(CSimpleFrame* frame, uint32_t drawLayer, int32_t show) {
+void CSimpleRegion::SetFrame(CSimpleFrame* frame, uint32_t drawLayer, BOOL show) {
     if (this->m_parent == frame) {
         if (this->m_drawLayer == drawLayer) {
             if (show == this->m_shown) {
@@ -290,7 +290,7 @@ void CSimpleRegion::SetFrame(CSimpleFrame* frame, uint32_t drawLayer, int32_t sh
     }
 
     frame->RegisterRegion(this);
-    this->SetDeferredResize((this->m_parent->m_layoutFlags >> 8) & 2);
+    this->SetDeferredResize((this->m_parent->m_layoutFlags >> 8) & (CLayoutFrame::LayoutFlags::LAYOUT_DEFERRED_RESIZE >> 8));
     this->OnColorChanged(false);
 
     if (show) {
@@ -303,7 +303,7 @@ void CSimpleRegion::SetFrame(CSimpleFrame* frame, uint32_t drawLayer, int32_t sh
 
 // VERIFY: 3115eee5 manual
 // OFFSET: 0x00488000
-void CSimpleRegion::AnimActivated(CSimpleAnimGroup* group, int32_t first, int32_t hasAlpha) {
+void CSimpleRegion::AnimActivated(CSimpleAnimGroup* group, int32_t first, BOOL hasAlpha) {
     if (first && (!this->m_playingAnimGroups || !this->m_playingAnimGroups->Head())) {
         this->StoreAnimPosition();
     }
@@ -332,7 +332,7 @@ void CSimpleRegion::AnimDeactivated(CSimpleAnimGroup* group, int32_t last) {
 
 // VERIFY: 48ca4759 manual
 // OFFSET: 0x004880E0
-CSimpleRegion::CSimpleRegion(CSimpleFrame* frame, uint32_t drawLayer, int32_t show) {
+CSimpleRegion::CSimpleRegion(CSimpleFrame* frame, uint32_t drawLayer, BOOL show) {
     this->m_alphaCount = 4;
     this->m_colorCount = 4;
     this->m_drawLayer = DRAWLAYER_BACKGROUND;

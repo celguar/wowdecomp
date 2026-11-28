@@ -3,12 +3,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include <limits>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Frame/CSimpleFrame.h"
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C3Vector.h"
+#include "Engine/Source/Tempest/C3Segment.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Event/Types.h"
@@ -94,8 +96,7 @@ struct HITTESTRESULT {
     /* 0000 */ WOWGUID m_guid;
     /* 0008 */ C3Vector m_point;
     /* 0014 */ float m_distance;
-    /* 0018 */ C3Vector m_segStart;
-    /* 0024 */ C3Vector m_segEnd;
+    /* 0018 */ C3Segment m_segment; // Original picking segment; m_point stores the resulting hit location.
 };
 
 struct KEYDOWNSTATE {
@@ -105,6 +106,47 @@ struct KEYDOWNSTATE {
 
 class CGWorldFrame : public CSimpleFrame {
     public:
+    // Bit 1 is initialized but its independent meaning is unresolved.
+    enum WORLD_FLAGS : int32_t {
+        WORLD_UNKNOWN_0001 = 0x1,
+        WORLD_RELATIVE_MOUSE = 0x2,
+        WORLD_INITIAL_MODE_MASK = 0x3,
+    };
+
+    // Pending nameplate work;separate from world interaction and name-display flags.
+    enum NAME_PLATE_FLAGS : uint32_t {
+        NAME_PLATE_NONE = 0,
+        NAME_PLATE_REPOSITION_PENDING = 0x1,
+        NAME_PLATE_RESORT_PENDING = 0x2,
+    };
+
+    // Hit-test selection filter (0.5.3 HIT_FILTER, re-laid out for 3.3.5).
+    enum HIT_FILTER : uint32_t {
+        HIT_TEST_NOTHING = 0x0,
+        HIT_TEST_GROUND = 0x1,
+        HIT_TEST_LIQUID = 0x2,
+        HIT_TEST_OBJECTS = 0x4,
+        HIT_TEST_UNITS = 0x8,
+        HIT_TEST_PLAYERS = 0x10,
+        HIT_TEST_ME = 0x20,
+        HIT_TEST_CORPSES = 0x40,
+        HIT_TEST_PARTY = 0x10000,
+        HIT_TEST_RAID = 0x20000,
+        HIT_TEST_FRIENDS = 0x40000,
+        HIT_TEST_ENEMIES = 0x80000,
+        HIT_TEST_LIVE = 0x100000,
+        HIT_TEST_DEAD = 0x200000,
+        HIT_TEST_NON_COMBAT_PET = 0x400000,
+        // Possessed units remain selectable when a friend-only filter rejects them.
+        HIT_TEST_POSSESSED_FRIENDS = 0x800000,
+        // Passed to model hit tests as mode 4; no producer in GetHitTestFilterFlags.
+        HIT_TEST_UNKNOWN_8000000 = 0x8000000,
+        HIT_TEST_TERRAIN = HIT_TEST_GROUND | HIT_TEST_LIQUID,
+        HIT_TEST_ALL_OBJS = HIT_TEST_OBJECTS | HIT_TEST_UNITS | HIT_TEST_PLAYERS | HIT_TEST_ME | HIT_TEST_CORPSES,
+        HIT_TEST_RELATION_MASK = HIT_TEST_PARTY | HIT_TEST_RAID | HIT_TEST_FRIENDS | HIT_TEST_ENEMIES,
+        HIT_TEST_LIFE_STATE_MASK = HIT_TEST_LIVE | HIT_TEST_DEAD,
+    };
+
     enum HIT_TYPE : int32_t {
         HIT_NONE = 0,
         HIT_GROUND = 1,
@@ -118,9 +160,9 @@ class CGWorldFrame : public CSimpleFrame {
     static FFX::Effect* ffxEffectNetherWorld;
     static FFX::Effect* ffxEffectGlow;
     static FFX::Effect* ffxEffectDeath;
-    static CGWorldFrame* s_currentWorldFrame;
 
     static CSimpleFrame* Create(CSimpleFrame* parent);
+    static CGWorldFrame* GetActive() { return s_currentWorldFrame; }
     static CGCamera* GetActiveCamera();
     static void GetCameraFacing(C3Vector* facing);
     static void GetCameraPosition(C3Vector* position);
@@ -166,7 +208,7 @@ class CGWorldFrame : public CSimpleFrame {
     int32_t OnLayerTrackUpdate(const CMouseEvent& evt) override;
     void OnFrameRender(CRenderBatch* batch, uint32_t layer) override;
     void OnFrameSizeChanged(const CRect& rect) override;
-    void OnLayerCursorExit(int32_t motion, int32_t a3) override;
+    void OnLayerCursorExit(int32_t motion, BOOL releaseMouse) override;
     int32_t OnLayerKeyDown(const CKeyEvent& evt) override;
     int32_t OnLayerKeyUp(const CKeyEvent& evt) override;
     int32_t OnLayerMouseDown(const CMouseEvent& evt, const char* btn) override;
@@ -177,6 +219,15 @@ class CGWorldFrame : public CSimpleFrame {
     void UpdateObject(CGObject_C* object, uint32_t flags);
     void ClearTrackedObjects();
     int32_t GetLineSegment(float mouseX, float mouseY, C3Vector* start, C3Vector* end);
+    // GetScreenCoordinates result bits: which frame edges the point is inside of (names inferred).
+    enum SCREEN_BOUNDS : uint32_t {
+        SCREEN_BOUNDS_LEFT = 0x1,
+        SCREEN_BOUNDS_BOTTOM = 0x2,
+        SCREEN_BOUNDS_RIGHT = 0x4,
+        SCREEN_BOUNDS_TOP = 0x8,
+        SCREEN_BOUNDS_ALL = SCREEN_BOUNDS_LEFT | SCREEN_BOUNDS_BOTTOM | SCREEN_BOUNDS_RIGHT | SCREEN_BOUNDS_TOP,
+    };
+
     bool GetScreenCoordinates(const C3Vector& world, C3Vector* screen, uint32_t* result);
     bool HitTestModelList(const C3Vector& start, const C3Vector& end);
     void MoveToFreeList(TSList<CModelRecord, TSGetLink<CModelRecord> >* list);
@@ -187,14 +238,14 @@ class CGWorldFrame : public CSimpleFrame {
     void OnWorldUpdate();
     void UpdateDayNight(float deltaSec);
     int32_t HandleSpriteTrack(WOWGUID guid);
-    int32_t HitTestPoint(float x, float y, int32_t a3, HITTESTRESULT* result);
-    int32_t CanTargetCorpseSelection(const CGCorpse_C* corpse, uint32_t flags);
+    int32_t HitTestPoint(float x, float y, int32_t unknown3, HITTESTRESULT* result);
+    BOOL CanTargetCorpseSelection(const CGCorpse_C* corpse, uint32_t flags);
     static void __stdcall CursorTrackObject(CGGameObject_C* object);
     static void __stdcall CursorTrackUnit(CGUnit_C* unit);
     static void __stdcall CursorTrackCorpse(CGCorpse_C* corpse);
-    int32_t IsUnitLegalSelection(CGUnit_C* unit, uint32_t flags);
-    int32_t IsLegalSelection(CGObject_C* object, uint32_t flags);
-    uint32_t GetHitTestFilterFlags(int32_t a1);
+    BOOL IsUnitLegalSelection(CGUnit_C* unit, uint32_t flags);
+    BOOL IsLegalSelection(CGObject_C* object, uint32_t flags);
+    uint32_t GetHitTestFilterFlags(int32_t unknown1) const;
     uint64_t FindClosestModel(const C3Vector& start, const C3Vector& end, uint32_t flags, float* distance);
     int32_t HitTest(const C3Vector& start, const C3Vector& end, uint32_t flags, HITTESTRESULT* result);
     void OnLayerTrackObject(const HITTESTRESULT& result);
@@ -203,12 +254,18 @@ class CGWorldFrame : public CSimpleFrame {
     void SetPlayerFadeCameraValue(uint8_t value);
     void UnitClear();
     void SetCameraTarget(CGObject_C* target, int32_t freeLook);
+
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug feature (WorldFrame_Debug.cpp), stripped from the 3.3.5 release build.
+    int32_t TogglePlayerRender();
+#endif
+    private:
+    static CGWorldFrame* s_currentWorldFrame;
 };
 
 class CWorldClickEvent {
     public:
-    /* 0000 */ C3Vector m_segStart;
-    /* 000C */ C3Vector m_segEnd;
+    /* 0000 */ C3Segment m_segment; // Picking segment carried into world-click handling.
     /* 0018 */ MOUSEBUTTON m_button;
 };
 

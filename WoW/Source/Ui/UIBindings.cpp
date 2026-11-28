@@ -104,7 +104,7 @@ static char s_bindKey[2];
 
 // VERIFY: ba836cb5 manual
 // OFFSET: 0x0055DAB0
-static int32_t IsValidKeyName(const char* key) {
+static BOOL IsValidKeyName(const char* key) {
     bool found;
 
     do {
@@ -275,6 +275,18 @@ void CGUIBindingsStatus::Add(STATUS_TYPE severity, const char* format, ...) {
     DebugLog(buffer);
 }
 
+// INLINED
+KEYCOMMAND::KEYCOMMAND() {
+    this->m_function = -1;
+}
+
+// INLINED
+KEYCOMMAND::~KEYCOMMAND() {
+    if (this->m_function != -1) {
+        FrameScript_ReleaseFunction(this->m_function);
+    }
+}
+
 // VERIFY: 5ba4a2e0 manual
 // OFFSET: 0x00560300
 OVERRIDEKEYBINDING::~OVERRIDEKEYBINDING() {
@@ -317,7 +329,7 @@ void OVERRIDEKEYBINDING::SetOverrideBinding(void* owner, int32_t priority, const
         if (entry) {
             this->m_lists[priority].LinkToHead(entry);
         } else {
-            entry = this->m_lists[priority].NewNode(1, 0, 0);
+            entry = this->m_lists[priority].NewNode(TSLIST_LINK_AFTER, 0, 0);
         }
 
         entry->m_owner = owner;
@@ -328,15 +340,15 @@ void OVERRIDEKEYBINDING::SetOverrideBinding(void* owner, int32_t priority, const
 // VERIFY: 124eeff1 manual
 // OFFSET: 0x0055D990
 int32_t CGUIBindings::AddMetaPrefix(uint32_t modifiers, char*& binding, int32_t& maxLength) {
-    if ((modifiers & 0x30) == 0x30) {
+    if ((modifiers & META_KEY_ALT) == META_KEY_ALT) {
         SStrCopy(binding, "ALT-", maxLength);
         binding += 4;
         maxLength -= 4;
-    } else if (modifiers & 0x10) {
+    } else if (modifiers & META_KEY_LALT) {
         SStrCopy(binding, "LALT-", maxLength);
         binding += 5;
         maxLength -= 5;
-    } else if (modifiers & 0x20) {
+    } else if (modifiers & META_KEY_RALT) {
         SStrCopy(binding, "RALT-", maxLength);
         binding += 5;
         maxLength -= 5;
@@ -346,15 +358,15 @@ int32_t CGUIBindings::AddMetaPrefix(uint32_t modifiers, char*& binding, int32_t&
         return 0;
     }
 
-    if ((modifiers & 0xC) == 0xC) {
+    if ((modifiers & META_KEY_CONTROL) == META_KEY_CONTROL) {
         SStrCopy(binding, "CTRL-", maxLength);
         binding += 5;
         maxLength -= 5;
-    } else if (modifiers & 0x4) {
+    } else if (modifiers & META_KEY_LCONTROL) {
         SStrCopy(binding, "LCTRL-", maxLength);
         binding += 6;
         maxLength -= 6;
-    } else if (modifiers & 0x8) {
+    } else if (modifiers & META_KEY_RCONTROL) {
         SStrCopy(binding, "RCTRL-", maxLength);
         binding += 6;
         maxLength -= 6;
@@ -364,15 +376,15 @@ int32_t CGUIBindings::AddMetaPrefix(uint32_t modifiers, char*& binding, int32_t&
         return 0;
     }
 
-    if ((modifiers & 0x3) == 0x3) {
+    if ((modifiers & META_KEY_SHIFT) == META_KEY_SHIFT) {
         SStrCopy(binding, "SHIFT-", maxLength);
         binding += 6;
         maxLength -= 6;
-    } else if (modifiers & 0x1) {
+    } else if (modifiers & META_KEY_LSHIFT) {
         SStrCopy(binding, "LSHIFT-", maxLength);
         binding += 7;
         maxLength -= 7;
-    } else if (modifiers & 0x2) {
+    } else if (modifiers & META_KEY_RSHIFT) {
         SStrCopy(binding, "RSHIFT-", maxLength);
         binding += 7;
         maxLength -= 7;
@@ -386,31 +398,31 @@ int32_t CGUIBindings::AddMetaPrefix(uint32_t modifiers, char*& binding, int32_t&
 void CGUIBindings::AddModifiers(uint32_t& modifiers, const char*& binding) {
     while (*binding) {
         if (!SStrCmpI(binding, "LSHIFT", 6)) {
-            modifiers |= 0x1;
+            modifiers |= META_KEY_LSHIFT;
             binding += 6;
         } else if (!SStrCmpI(binding, "RSHIFT", 6)) {
-            modifiers |= 0x2;
+            modifiers |= META_KEY_RSHIFT;
             binding += 6;
         } else if (!SStrCmpI(binding, "SHIFT", 5)) {
-            modifiers |= 0x3;
+            modifiers |= META_KEY_SHIFT;
             binding += 5;
         } else if (!SStrCmpI(binding, "LCTRL", 5)) {
-            modifiers |= 0x4;
+            modifiers |= META_KEY_LCONTROL;
             binding += 5;
         } else if (!SStrCmpI(binding, "RCTRL", 5)) {
-            modifiers |= 0x8;
+            modifiers |= META_KEY_RCONTROL;
             binding += 5;
         } else if (!SStrCmpI(binding, "CTRL", 4)) {
-            modifiers |= 0xC;
+            modifiers |= META_KEY_CONTROL;
             binding += 4;
         } else if (!SStrCmpI(binding, "LALT", 4)) {
-            modifiers |= 0x10;
+            modifiers |= META_KEY_LALT;
             binding += 4;
         } else if (!SStrCmpI(binding, "RALT", 4)) {
-            modifiers |= 0x20;
+            modifiers |= META_KEY_RALT;
             binding += 4;
         } else if (!SStrCmpI(binding, "ALT", 3)) {
-            modifiers |= 0x30;
+            modifiers |= META_KEY_ALT;
             binding += 3;
         } else {
             return;
@@ -425,7 +437,10 @@ void CGUIBindings::AddModifiers(uint32_t& modifiers, const char*& binding) {
 // VERIFY: 47da3e12 manual
 // OFFSET: 0x005620F0
 void CGUIBindings::Initialize() {
+    STORM_ASSERT(!s_bindings);
+
     CGUIBindings::s_bindings = new (SMemAlloc(sizeof(CGUIBindings), __FILE__, __LINE__, 0)) CGUIBindings();
+    STORM_ASSERT(s_bindings);
 
     do {
         s_initRound++;
@@ -486,14 +501,15 @@ void CGUIBindings::LoadBindings() {
     }
 
     s_loadPendingMask = 6;
-    LoadAccountData(2, CGUIBindings::LoadBindingsCallback, reinterpret_cast<void*>(static_cast<uintptr_t>((s_initRound << 16) | BINDING_SET_ACCOUNT)));
-    LoadAccountData(3, CGUIBindings::LoadBindingsCallback, reinterpret_cast<void*>(static_cast<uintptr_t>((s_initRound << 16) | BINDING_SET_CHARACTER)));
+    LoadAccountData(ACCOUNT_DATA_TYPE::ACCOUNT_DATA_GLOBAL_BINDINGS, CGUIBindings::LoadBindingsCallback, reinterpret_cast<void*>(static_cast<uintptr_t>((s_initRound << 16) | BINDING_SET_ACCOUNT)));
+    LoadAccountData(ACCOUNT_DATA_TYPE::ACCOUNT_DATA_CHARACTER_BINDINGS, CGUIBindings::LoadBindingsCallback, reinterpret_cast<void*>(static_cast<uintptr_t>((s_initRound << 16) | BINDING_SET_CHARACTER)));
 }
 
 // VERIFY: f3c499e6 auto
 // OFFSET: 0x005641C0
 void CGUIBindings::LoadBindings(BINDING_SET set, const char* data) {
     CGUIBindings* bindings = CGUIBindings::s_bindings;
+    STORM_ASSERT(bindings);
 
     if (!bindings) {
         return;
@@ -568,53 +584,60 @@ void CGUIBindings::LoadBindingsCallback(HOSFILE localFile, HOSFILE file, void* p
 
     s_loadPendingMask &= ~(1 << set);
 
-    if (!s_loadPendingMask && CGUIBindings::s_bindings) {
-        CGUIBindings::s_bindings->FinishLoadBindings();
+    if (!s_loadPendingMask) {
+        CGUIBindings* bindings = CGUIBindings::s_bindings;
+        STORM_ASSERT(bindings);
+
+        if (bindings) {
+            bindings->FinishLoadBindings();
+        }
     }
 }
 
 // VERIFY: 05b9e548 auto
 // OFFSET: 0x0055E340
-char* CGUIBindings::MouseEventToString(const CMouseEvent& evt, char* binding, int32_t maxLength) {
-    char* result = binding;
+char* CGUIBindings::MouseEventToString(const CMouseEvent& evt, char* string, int32_t maxLength) {
+    char* result = string;
 
-    if (!CGUIBindings::AddMetaPrefix(evt.m_data.m_metaKeyState, binding, maxLength)) {
+    if (!CGUIBindings::AddMetaPrefix(evt.m_data.m_metaKeyState, string, maxLength)) {
         return nullptr;
     }
 
-    if (evt.m_id == 0x400500C8 || evt.m_id == 0x400500C9) {
+    if (evt.m_id == EVENT_MOUSE_DOWN || evt.m_id == EVENT_MOUSE_UP) {
         switch (evt.m_data.m_button) {
             case MOUSE_BUTTON_LEFT:
-                SStrCopy(binding, "BUTTON1", maxLength);
+                SStrCopy(string, "BUTTON1", maxLength);
                 return result;
 
             case MOUSE_BUTTON_MIDDLE:
-                SStrCopy(binding, "BUTTON3", maxLength);
+                SStrCopy(string, "BUTTON3", maxLength);
                 return result;
 
             case MOUSE_BUTTON_RIGHT:
-                SStrCopy(binding, "BUTTON2", maxLength);
+                SStrCopy(string, "BUTTON2", maxLength);
                 return result;
 
             default:
-                *binding = '\0';
+                STORM_ASSERT(evt.m_data.m_button > MOUSE_BUTTON_RIGHT);  // 12213: "evt.button > MOUSE_BUTTON_RIGHT"
+                *string = '\0';
 
                 for (int32_t i = 4; i < 32; i++) {
                     if (evt.m_data.m_button == (1u << (i - 1))) {
-                        SStrPrintf(binding, maxLength, "BUTTON%d", i);
+                        SStrPrintf(string, maxLength, "BUTTON%d", i);
                         break;
                     }
                 }
 
+                STORM_ASSERT(*string);
                 return result;
         }
     }
 
-    if (evt.m_id == 0x400500CD) {
+    if (evt.m_id == EVENT_MOUSE_WHEEL) {
         if (static_cast<int32_t>(evt.m_data.m_wheelAmount) < 0) {
-            SStrCopy(binding, "MOUSEWHEELDOWN", maxLength);
+            SStrCopy(string, "MOUSEWHEELDOWN", maxLength);
         } else {
-            SStrCopy(binding, "MOUSEWHEELUP", maxLength);
+            SStrCopy(string, "MOUSEWHEELUP", maxLength);
         }
 
         return result;
@@ -630,11 +653,14 @@ void CGUIBindings::SaveBindings() {
         return;
     }
 
-    if (CGUIBindings::s_bindings->m_dirtySets & (1 << BINDING_SET_ACCOUNT)) {
-        SaveAccountData(2, CGUIBindings::SaveBindingsCallback, reinterpret_cast<void*>(BINDING_SET_ACCOUNT));
-        SaveAccountData(3, CGUIBindings::SaveBindingsCallback, reinterpret_cast<void*>(BINDING_SET_CHARACTER));
-    } else if (CGUIBindings::s_bindings->m_dirtySets & (1 << BINDING_SET_CHARACTER)) {
-        SaveAccountData(3, CGUIBindings::SaveBindingsCallback, reinterpret_cast<void*>(BINDING_SET_CHARACTER));
+    CGUIBindings* bindings = CGUIBindings::s_bindings;
+    STORM_ASSERT(bindings);
+
+    if (bindings->m_dirtySets & (1 << BINDING_SET_ACCOUNT)) {
+        SaveAccountData(ACCOUNT_DATA_TYPE::ACCOUNT_DATA_GLOBAL_BINDINGS, CGUIBindings::SaveBindingsCallback, reinterpret_cast<void*>(BINDING_SET_ACCOUNT));
+        SaveAccountData(ACCOUNT_DATA_TYPE::ACCOUNT_DATA_CHARACTER_BINDINGS, CGUIBindings::SaveBindingsCallback, reinterpret_cast<void*>(BINDING_SET_CHARACTER));
+    } else if (bindings->m_dirtySets & (1 << BINDING_SET_CHARACTER)) {
+        SaveAccountData(ACCOUNT_DATA_TYPE::ACCOUNT_DATA_CHARACTER_BINDINGS, CGUIBindings::SaveBindingsCallback, reinterpret_cast<void*>(BINDING_SET_CHARACTER));
     }
 }
 
@@ -643,8 +669,13 @@ void CGUIBindings::SaveBindings() {
 void CGUIBindings::SaveBindingsCallback(HOSFILE localFile, HOSFILE file, void* param) {
     BINDING_SET set = static_cast<BINDING_SET>(reinterpret_cast<uintptr_t>(param));
 
-    if (file != OS_INVALID_FILE && (set == BINDING_SET_ACCOUNT || set == CGUIBindings::s_bindings->m_saveSet)) {
-        CGUIBindings::s_bindings->SaveBindings(set, file);
+    if (file != OS_INVALID_FILE) {
+        CGUIBindings* bindings = CGUIBindings::s_bindings;
+        STORM_ASSERT(bindings);
+
+        if (set == BINDING_SET_ACCOUNT || set == bindings->m_saveSet) {
+            bindings->SaveBindings(set, file);
+        }
     }
 }
 
@@ -665,31 +696,31 @@ void CGUIBindings::Shutdown() {
 void CGUIBindings::StripModifiers(uint32_t& modifiers, const char* binding) {
     while (*binding) {
         if (!SStrCmpI(binding, "LSHIFT", 6)) {
-            modifiers &= ~0x1u;
+            modifiers &= ~META_KEY_LSHIFT;
             binding += 6;
         } else if (!SStrCmpI(binding, "RSHIFT", 6)) {
-            modifiers &= ~0x2u;
+            modifiers &= ~META_KEY_RSHIFT;
             binding += 6;
         } else if (!SStrCmpI(binding, "SHIFT", 5)) {
-            modifiers &= ~0x3u;
+            modifiers &= ~META_KEY_SHIFT;
             binding += 5;
         } else if (!SStrCmpI(binding, "LCTRL", 5)) {
-            modifiers &= ~0x4u;
+            modifiers &= ~META_KEY_LCONTROL;
             binding += 5;
         } else if (!SStrCmpI(binding, "RCTRL", 5)) {
-            modifiers &= ~0x8u;
+            modifiers &= ~META_KEY_RCONTROL;
             binding += 5;
         } else if (!SStrCmpI(binding, "CTRL", 4)) {
-            modifiers &= ~0xCu;
+            modifiers &= ~META_KEY_CONTROL;
             binding += 4;
         } else if (!SStrCmpI(binding, "LALT", 4)) {
-            modifiers &= ~0x10u;
+            modifiers &= ~META_KEY_LALT;
             binding += 4;
         } else if (!SStrCmpI(binding, "RALT", 4)) {
-            modifiers &= ~0x20u;
+            modifiers &= ~META_KEY_RALT;
             binding += 4;
         } else if (!SStrCmpI(binding, "ALT", 3)) {
-            modifiers &= ~0x30u;
+            modifiers &= ~META_KEY_ALT;
             binding += 3;
         } else {
             return;
@@ -739,7 +770,7 @@ void CGUIBindings::AdjustCommandKeyIndices(BINDING_SET set, BINDING_MODE mode, c
 // VERIFY: db6813cd manual
 // OFFSET: 0x00562ED0
 int32_t CGUIBindings::Bind(BINDING_SET set, BINDING_MODE mode, const char* key, const char* command) {
-    if (!CGGameUI::CanPerformAction(13)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_BINDING)) {
         return 0;
     }
 
@@ -796,10 +827,10 @@ int32_t CGUIBindings::Bind(BINDING_SET set, BINDING_MODE mode, const char* key, 
         binding = this->m_bindings[set].New(key, 0, 0);
     }
 
-    if (set) {
-        binding->m_flags &= ~1u;
+    if (set != BINDING_SET_DEFAULT) {
+        binding->m_flags &= ~KEYBINDING::FLAGS::DEFAULT;
     } else {
-        binding->m_flags |= 1u;
+        binding->m_flags |= KEYBINDING::FLAGS::DEFAULT;
     }
 
     if (!this->GetBindingCommand(binding, mode) || !command || SStrCmp(this->GetBindingCommand(binding, mode), command, STORM_MAX_STR)) {
@@ -818,7 +849,7 @@ int32_t CGUIBindings::Bind(BINDING_SET set, BINDING_MODE mode, const char* key, 
 // VERIFY: ede45eb3 auto
 // OFFSET: 0x005604F0
 void CGUIBindings::ClearOverrideBindings(void* owner, bool checkPermission) {
-    if (checkPermission && !CGGameUI::CanPerformAction(13)) {
+    if (checkPermission && !CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_BINDING)) {
         return;
     }
 
@@ -888,7 +919,7 @@ CSimpleFrame* GetClickFrame(lua_State* L, const char* name, uint32_t length) {
 // VERIFY: d1b98282 manual
 // OFFSET: 0x00562B80
 void CGUIBindings::CopyBindings(BINDING_SET source, BINDING_SET dest) {
-    if (!CGGameUI::CanPerformAction(13)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_BINDING)) {
         return;
     }
 
@@ -921,7 +952,7 @@ void CGUIBindings::CopyBindings(BINDING_SET source, BINDING_SET dest) {
 
 // VERIFY: 9ac6f481 auto
 // OFFSET: 0x0055E550
-void CGUIBindings::EnableBindingMode(BINDING_MODE mode, int32_t enable) {
+void CGUIBindings::EnableBindingMode(BINDING_MODE mode, BOOL enable) {
     if (!mode) {
         return;
     }
@@ -932,7 +963,7 @@ void CGUIBindings::EnableBindingMode(BINDING_MODE mode, int32_t enable) {
         return;
     }
 
-    if (!CGGameUI::CanPerformAction(13)) {
+    if (!CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_BINDING)) {
         return;
     }
 
@@ -953,7 +984,7 @@ void CGUIBindings::EnableBindingMode(BINDING_MODE mode, int32_t enable) {
 
 // VERIFY: 3bf1ffd2 manual
 // OFFSET: 0x0055F860
-int32_t CGUIBindings::ExecCommand(const char* command, int32_t isDown, float pressure, int32_t allowPressure, int32_t isPressure, int32_t isAngle, float angle, float precision, const char* taint) {
+int32_t CGUIBindings::ExecCommand(const char* command, BOOL isDown, float pressure, BOOL allowPressure, BOOL isPressure, BOOL isAngle, float angle, float precision, const char* taint) {
     if (!command || !*command) {
         return 0;
     }
@@ -994,7 +1025,7 @@ int32_t CGUIBindings::ExecCommand(const char* command, int32_t isDown, float pre
 
 // VERIFY: 9242eb88 manual
 // OFFSET: 0x00563150
-int32_t CGUIBindings::ExecKey(uint32_t modifiers, const char* key, int32_t isDown, int32_t allowPressure, BINDING_MODE mode) {
+int32_t CGUIBindings::ExecKey(uint32_t modifiers, const char* key, BOOL isDown, BOOL allowPressure, BINDING_MODE mode) {
     char reducedKey[128];
     KEYBINDING* binding = this->GetReducedKeyBinding(mode, key, reducedKey, sizeof(reducedKey));
 
@@ -1007,10 +1038,12 @@ int32_t CGUIBindings::ExecKey(uint32_t modifiers, const char* key, int32_t isDow
     CGUIBindings::StripModifiers(this->m_heldModifiers, reducedKey);
 
     CSimpleTop* top = CSimpleTop::s_instance;
+    STORM_ASSERT(top);
     top->unused_1250 = 1;
 
     int32_t result = 0;
     const char* command = this->GetBindingCommand(binding, mode);
+    STORM_ASSERT(command);
 
     if (!SStrCmpI(command, "SPELL ", 6)) {
         if (!isDown) {
@@ -1072,7 +1105,7 @@ int32_t CGUIBindings::ExecKey(uint32_t modifiers, const char* key, int32_t isDow
         if (name && separator) {
             CSimpleFrame* frame = GetClickFrame(FrameScript_GetContext(), name, separator - name);
 
-            if (frame && frame != CGWorldFrame::s_currentWorldFrame) {
+            if (frame && frame != CGWorldFrame::GetActive()) {
                 const char* button = separator + 1;
                 const char* macroRunning = CGUIMacros::m_macroRunning;
 
@@ -1112,9 +1145,10 @@ void CGUIBindings::FinishLoadBindings() {
     this->CopyBindings(static_cast<BINDING_SET>(this->m_saveSet), BINDING_SET_CURRENT);
 
     if (this->GetCommandKey(BINDING_MODE_0, "TOGGLEMOUSE", 0)) {
-        CGInputControl* inputControl = CGInputControl::GetActive();
-        inputControl->m_mouseModeFlags &= ~0x2u;
-        inputControl->UpdateMouseMode(0);
+        CGInputControl* control = CGInputControl::GetActive();
+        STORM_ASSERT(control);
+        control->m_mouseModeFlags &= ~INPUT_MOUSE_MODE_FLAGS::INPUT_MOUSE_MODE_DEFAULT_CURSOR_ON;
+        control->UpdateMouseMode(0);
     }
 }
 
@@ -1153,6 +1187,8 @@ int32_t CGUIBindings::GetBindingIndex(KEYBINDING* binding, BINDING_MODE mode) {
 // VERIFY: c27df5c9 manual
 // OFFSET: 0x0055E700
 void CGUIBindings::GetCommand(int32_t index, const char** command) {
+    STORM_ASSERT(index >= 0 && index < this->m_numCommands);  // 12213: "index >= 0 && index < GetNumCommands()"
+
     for (KEYCOMMAND* keyCommand = this->m_commands.m_fulllist.Head(); keyCommand; keyCommand = this->m_commands.m_fulllist.Next(keyCommand)) {
         if (keyCommand->m_index == index) {
             *command = keyCommand->m_key.m_str;
@@ -1236,16 +1272,16 @@ KEYBINDING* CGUIBindings::GetKeyBinding(BINDING_MODE mode, const char* key) {
             uint32_t modifiers = 0;
             CGUIBindings::AddModifiers(modifiers, key);
 
-            if (modifiers & 0x3) {
-                modifiers |= 0x3;
+            if (modifiers & META_KEY_SHIFT) {
+                modifiers |= META_KEY_SHIFT;
             }
 
-            if (modifiers & 0xC) {
-                modifiers |= 0xC;
+            if (modifiers & META_KEY_CONTROL) {
+                modifiers |= META_KEY_CONTROL;
             }
 
-            if (modifiers & 0x30) {
-                modifiers |= 0x30;
+            if (modifiers & META_KEY_ALT) {
+                modifiers |= META_KEY_ALT;
             }
 
             char genericKey[128];
@@ -1362,7 +1398,7 @@ KEYBINDING* CGUIBindings::GetReducedKeyBinding(BINDING_MODE mode, const char* ke
 
 // VERIFY: ced91a43 manual
 // OFFSET: 0x0055F940
-int32_t CGUIBindings::IsModifiedClick(const char* action) {
+BOOL CGUIBindings::IsModifiedClick(const char* action) {
     int32_t result = 0;
 
     if (!action) {
@@ -1396,31 +1432,31 @@ int32_t CGUIBindings::IsModifiedClick(const char* action) {
 
     result = 1;
 
-    if ((modifiers & 0x3) == 0x1) {
+    if ((modifiers & META_KEY_SHIFT) == META_KEY_LSHIFT) {
         if (!CGGameUI::IsKeyDown(KEY_LSHIFT)) {
             result = 0;
         }
-    } else if ((modifiers & 0x3) == 0x2 || ((modifiers & 0x3) == 0x3 && !CGGameUI::IsKeyDown(KEY_LSHIFT))) {
+    } else if ((modifiers & META_KEY_SHIFT) == META_KEY_RSHIFT || ((modifiers & META_KEY_SHIFT) == META_KEY_SHIFT && !CGGameUI::IsKeyDown(KEY_LSHIFT))) {
         if (!CGGameUI::IsKeyDown(KEY_RSHIFT)) {
             result = 0;
         }
     }
 
-    if ((modifiers & 0xC) == 0x4) {
+    if ((modifiers & META_KEY_CONTROL) == META_KEY_LCONTROL) {
         if (!CGGameUI::IsKeyDown(KEY_LCONTROL)) {
             result = 0;
         }
-    } else if ((modifiers & 0xC) == 0x8 || ((modifiers & 0xC) == 0xC && !CGGameUI::IsKeyDown(KEY_LCONTROL))) {
+    } else if ((modifiers & META_KEY_CONTROL) == META_KEY_RCONTROL || ((modifiers & META_KEY_CONTROL) == META_KEY_CONTROL && !CGGameUI::IsKeyDown(KEY_LCONTROL))) {
         if (!CGGameUI::IsKeyDown(KEY_RCONTROL)) {
             result = 0;
         }
     }
 
-    if ((modifiers & 0x30) == 0x10) {
+    if ((modifiers & META_KEY_ALT) == META_KEY_LALT) {
         if (!CGGameUI::IsKeyDown(KEY_LALT)) {
             result = 0;
         }
-    } else if ((modifiers & 0x30) == 0x20 || ((modifiers & 0x30) == 0x30 && !CGGameUI::IsKeyDown(KEY_LALT))) {
+    } else if ((modifiers & META_KEY_ALT) == META_KEY_RALT || ((modifiers & META_KEY_ALT) == META_KEY_ALT && !CGGameUI::IsKeyDown(KEY_LALT))) {
         if (!CGGameUI::IsKeyDown(KEY_RALT)) {
             result = 0;
         }
@@ -1577,10 +1613,10 @@ void CGUIBindings::SaveBindings(BINDING_SET set, HOSFILE file) {
     uint32_t written;
 
     for (int32_t mode = 0; mode < NUM_BINDING_MODES; mode++) {
-        int32_t first = 1;
+        BOOL first = 1;
 
         for (KEYBINDING* binding = this->m_bindings[set].m_fulllist.Head(); binding; binding = this->m_bindings[set].m_fulllist.Next(binding)) {
-            if (binding->m_flags & 1) {
+            if (binding->m_flags & KEYBINDING::FLAGS::DEFAULT) {
                 continue;
             }
 
@@ -1606,7 +1642,7 @@ void CGUIBindings::SaveBindings(BINDING_SET set, HOSFILE file) {
         uint32_t flags;
         click->GetBinding(set, binding, sizeof(binding), &flags);
 
-        if (!(flags & 1)) {
+        if (!(flags & MODIFIEDCLICK_DATA::FLAGS::DEFAULT)) {
             SStrPrintf(buffer, sizeof(buffer), "modifiedclick %s %s\r\n", binding, click->m_key.m_str);
             OsWriteFile(file, buffer, SStrLen(buffer), &written);
         }
@@ -1616,7 +1652,7 @@ void CGUIBindings::SaveBindings(BINDING_SET set, HOSFILE file) {
 // VERIFY: 39c35a34 manual
 // OFFSET: 0x00563480
 void CGUIBindings::SetOverrideBinding(void* owner, int32_t priority, const char* key, const char* command, bool checkPermission) {
-    if (checkPermission && !CGGameUI::CanPerformAction(13)) {
+    if (checkPermission && !CGGameUI::CanPerformAction(UI_ACTION::UI_ACTION_BINDING)) {
         return;
     }
 
@@ -1633,67 +1669,67 @@ void CGUIBindings::SetOverrideBinding(void* owner, int32_t priority, const char*
 // OFFSET: 0x0055DF30
 int32_t MouseButtonToIndex(uint32_t button) {
     switch (button) {
-        case 0x1:
+        case MOUSEBUTTON::MOUSE_BUTTON_LEFT:
             return 1;
-        case 0x2:
+        case MOUSEBUTTON::MOUSE_BUTTON_MIDDLE:
             return 3;
-        case 0x4:
+        case MOUSEBUTTON::MOUSE_BUTTON_RIGHT:
             return 2;
-        case 0x8:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON1:
             return 4;
-        case 0x10:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON2:
             return 5;
-        case 0x20:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON3:
             return 6;
-        case 0x40:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON4:
             return 7;
-        case 0x80:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON5:
             return 8;
-        case 0x100:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON6:
             return 9;
-        case 0x200:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON7:
             return 10;
-        case 0x400:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON8:
             return 11;
-        case 0x800:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON9:
             return 12;
-        case 0x1000:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON10:
             return 13;
-        case 0x2000:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON11:
             return 14;
-        case 0x4000:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON12:
             return 15;
-        case MOUSE_BUTTON_XBUTTON13:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON13:
             return 16;
-        case MOUSE_BUTTON_XBUTTON14:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON14:
             return 17;
-        case MOUSE_BUTTON_XBUTTON15:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON15:
             return 18;
-        case MOUSE_BUTTON_XBUTTON16:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON16:
             return 19;
-        case MOUSE_BUTTON_XBUTTON17:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON17:
             return 20;
-        case MOUSE_BUTTON_XBUTTON18:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON18:
             return 21;
-        case MOUSE_BUTTON_XBUTTON19:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON19:
             return 22;
-        case MOUSE_BUTTON_XBUTTON20:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON20:
             return 23;
-        case MOUSE_BUTTON_XBUTTON21:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON21:
             return 24;
-        case MOUSE_BUTTON_XBUTTON22:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON22:
             return 25;
-        case MOUSE_BUTTON_XBUTTON23:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON23:
             return 26;
-        case MOUSE_BUTTON_XBUTTON24:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON24:
             return 27;
-        case MOUSE_BUTTON_XBUTTON25:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON25:
             return 28;
-        case MOUSE_BUTTON_XBUTTON26:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON26:
             return 29;
-        case MOUSE_BUTTON_XBUTTON27:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON27:
             return 30;
-        case MOUSE_BUTTON_XBUTTON28:
+        case MOUSEBUTTON::MOUSE_BUTTON_XBUTTON28:
             return 31;
         default:
             return 0;
@@ -1839,49 +1875,49 @@ MOUSEBUTTON StringToMouseButton(const char* string) {
 MOUSEBUTTON IndexToMouseButton(uint32_t index) {
     switch (index) {
         case 1:
-            return static_cast<MOUSEBUTTON>(0x1);
+            return MOUSE_BUTTON_LEFT;
 
         case 2:
-            return static_cast<MOUSEBUTTON>(0x4);
+            return MOUSE_BUTTON_RIGHT;
 
         case 3:
-            return static_cast<MOUSEBUTTON>(0x2);
+            return MOUSE_BUTTON_MIDDLE;
 
         case 4:
-            return static_cast<MOUSEBUTTON>(0x8);
+            return MOUSE_BUTTON_XBUTTON1;
 
         case 5:
-            return static_cast<MOUSEBUTTON>(0x10);
+            return MOUSE_BUTTON_XBUTTON2;
 
         case 6:
-            return static_cast<MOUSEBUTTON>(0x20);
+            return MOUSE_BUTTON_XBUTTON3;
 
         case 7:
-            return static_cast<MOUSEBUTTON>(0x40);
+            return MOUSE_BUTTON_XBUTTON4;
 
         case 8:
-            return static_cast<MOUSEBUTTON>(0x80);
+            return MOUSE_BUTTON_XBUTTON5;
 
         case 9:
-            return static_cast<MOUSEBUTTON>(0x100);
+            return MOUSE_BUTTON_XBUTTON6;
 
         case 10:
-            return static_cast<MOUSEBUTTON>(0x200);
+            return MOUSE_BUTTON_XBUTTON7;
 
         case 11:
-            return static_cast<MOUSEBUTTON>(0x400);
+            return MOUSE_BUTTON_XBUTTON8;
 
         case 12:
-            return static_cast<MOUSEBUTTON>(0x800);
+            return MOUSE_BUTTON_XBUTTON9;
 
         case 13:
-            return static_cast<MOUSEBUTTON>(0x1000);
+            return MOUSE_BUTTON_XBUTTON10;
 
         case 14:
-            return static_cast<MOUSEBUTTON>(0x2000);
+            return MOUSE_BUTTON_XBUTTON11;
 
         case 15:
-            return static_cast<MOUSEBUTTON>(0x4000);
+            return MOUSE_BUTTON_XBUTTON12;
 
         case 16:
             return static_cast<MOUSEBUTTON>(MOUSE_BUTTON_XBUTTON13);

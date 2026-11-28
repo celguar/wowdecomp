@@ -216,7 +216,7 @@ static int32_t Script_GetTradeSkillSubClasses(lua_State* L) {
     for (uint32_t i = 0; i < count; i++) {
         TradeSkillSubClassInfo* subClass = i < CGTradeSkillInfo::m_numSubClasses ? CGTradeSkillInfo::m_subClassList.m_data[i] : nullptr;
 
-        if (subClass->m_itemClass == -1 && subClass->m_itemSubClass == -1) {
+        if (subClass->m_itemClass == ITEM_CLASS::ITEM_CLASS_NONE && subClass->m_itemSubClass == -1) {
             SkillLineRec* skillLine = g_skillLineDB.GetRecord(CGTradeSkillInfo::m_skillLineID);
 
             if (skillLine) {
@@ -228,7 +228,7 @@ static int32_t Script_GetTradeSkillSubClasses(lua_State* L) {
             continue;
         }
 
-        for (int32_t j = 0; j < g_itemSubClassDB.m_numRecords; j++) {
+        for (int32_t j = 0; j < g_itemSubClassDB.GetNumRecords(); j++) {
             ItemSubClassRec* rec = g_itemSubClassDB.GetRecordByIndex(j);
 
             if (rec->m_classID == subClass->m_itemClass && rec->m_subClassID == subClass->m_itemSubClass) {
@@ -309,11 +309,11 @@ static int32_t Script_GetTradeSkillInfo(lua_State* L) {
 
     if (index < CGTradeSkillInfo::m_numDisplayEntries && (info = CGTradeSkillInfo::m_displayList.m_data[index])) {
         if (info->m_spellId == -1) {
-            bool skillHeader = info->m_itemClass == -1 && info->m_itemSubClass == -1;
+            bool skillHeader = info->m_itemClass == ITEM_CLASS::ITEM_CLASS_NONE && info->m_itemSubClass == -1;
             ItemSubClassRec* rec = nullptr;
 
             if (!skillHeader) {
-                for (int32_t i = 0; i < g_itemSubClassDB.m_numRecords; i++) {
+                for (int32_t i = 0; i < g_itemSubClassDB.GetNumRecords(); i++) {
                     ItemSubClassRec* subClass = g_itemSubClassDB.GetRecordByIndex(i);
 
                     if (subClass->m_classID == info->m_itemClass && subClass->m_subClassID == info->m_itemSubClass) {
@@ -397,10 +397,8 @@ static int32_t Script_GetTradeSkillIcon(lua_State* L) {
                 ItemRec* item = g_itemDB.GetRecord(spell.m_effectItemType[0]);
 
                 if (item) {
-                    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
-                    const char* separator = *path ? "\\" : "";
                     char texture[260];
-                    SStrPrintf(texture, sizeof(texture), "%s%s%s", path, separator, CGItem_C::GetInventoryArt(item->m_displayInfoID));
+                    CGItem_C::GetInventoryArtPath(texture, sizeof(texture), item->m_displayInfoID);
                     lua_pushstring(L, texture);
                     return 1;
                 }
@@ -506,7 +504,7 @@ static int32_t Script_GetTradeSkillRecipeLink(lua_State* L) {
 
     SpellRec spell;
 
-    if (!g_spellDB.GetRecord(info->m_spellId, &spell) || !(spell.m_attributes & 0x20)) {
+    if (!g_spellDB.GetRecord(info->m_spellId, &spell) || !(spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL)) {
         return 0;
     }
 
@@ -589,7 +587,7 @@ static int32_t Script_GetTradeSkillNumReagents(lua_State* L) {
             SpellRec spell;
 
             if (g_spellDB.GetRecord(info->m_spellId, &spell)) {
-                for (uint32_t i = 0; i < 8; i++) {
+                for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
                     if (spell.m_reagent[i]) {
                         count++;
                     }
@@ -620,7 +618,7 @@ static int32_t Script_GetTradeSkillReagentItemLink(lua_State* L) {
         if (g_spellDB.GetRecord(info->m_spellId, &spell)) {
             int32_t count = 0;
 
-            for (uint32_t i = 0; i < 8; i++) {
+            for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
                 int32_t itemId = spell.m_reagent[i];
 
                 if (!itemId || ++count != reagentIndex) {
@@ -998,22 +996,20 @@ static int32_t Script_GetTradeSkillReagentInfo(lua_State* L) {
         if (g_spellDB.GetRecord(info->m_spellId, &spell)) {
             int32_t count = 0;
 
-            for (uint32_t i = 0; i < 8; i++) {
+            for (uint32_t i = 0; i < NUM_SPELL_REAGENTS; i++) {
                 if (!spell.m_reagent[i] || ++count != reagentIndex) {
                     continue;
                 }
 
                 int32_t itemId = spell.m_reagent[i];
                 WOWGUID requester;
-                requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(info->m_spellId)) | 0x1FE0000000000000ULL;
+                requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(info->m_spellId)) | WOWGUID_SPELL_QUERY_TAG;
                 ItemStats_C* stats = g_itemDBCache.GetRecord(itemId, requester, TradeSkillItemCallback, nullptr, false);
 
                 if (stats) {
                     lua_pushstring(L, stats->GetName(0));
-                    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
-                    const char* separator = *path ? "\\" : "";
                     char texture[260];
-                    SStrPrintf(texture, sizeof(texture), "%s%s%s", path, separator, CGItem_C::GetInventoryArt(stats->m_displayId));
+                    CGItem_C::GetInventoryArtPath(texture, sizeof(texture), stats->m_displayId);
                     lua_pushstring(L, texture);
                 } else {
                     lua_pushnil(L);
@@ -1022,7 +1018,7 @@ static int32_t Script_GetTradeSkillReagentInfo(lua_State* L) {
 
                 lua_pushnumber(L, spell.m_reagentCount[i]);
                 CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
-                lua_pushnumber(L, player ? player->m_bag.GetItemTypeCount(itemId, 0) : 0.0);
+                lua_pushnumber(L, player ? player->m_bag.GetItemTypeCount(itemId, BAG_SEARCH_NONE) : 0.0);
                 return 4;
             }
         }
@@ -1087,14 +1083,14 @@ static int32_t Script_GetTradeSkillTools(lua_State* L) {
             }
 
             WOWGUID requester;
-            requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(info->m_spellId)) | 0x1FE0000000000000ULL;
+            requester.m_guid = static_cast<uint64_t>(static_cast<int64_t>(info->m_spellId)) | WOWGUID_SPELL_QUERY_TAG;
             ItemStats_C* stats = g_itemDBCache.GetRecord(spell.m_totem[i], requester, TradeSkillItemCallback, nullptr, false);
 
             if (stats) {
                 lua_checkstack(L, 2);
                 lua_pushstring(L, stats->m_name[0]);
 
-                if (player->m_bag.FindItemOfType(spell.m_totem[i], 0)) {
+                if (player->m_bag.FindItemOfType(spell.m_totem[i], BAG_SEARCH_NONE)) {
                     lua_pushnumber(L, 1.0);
                 } else {
                     lua_pushnil(L);
@@ -1111,7 +1107,7 @@ static int32_t Script_GetTradeSkillTools(lua_State* L) {
                 lua_checkstack(L, 2);
                 lua_pushstring(L, category->m_name);
 
-                if (player->m_bag.FindTotemCategory(spell.m_requiredTotemCategoryID[i], 0)) {
+                if (player->m_bag.FindTotemCategory(spell.m_requiredTotemCategoryID[i], BAG_SEARCH_NONE)) {
                     lua_pushnumber(L, 1.0);
                 } else {
                     lua_pushnil(L);

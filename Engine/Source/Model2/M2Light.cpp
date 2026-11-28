@@ -25,7 +25,7 @@ void CM2Light::Initialize(CM2Scene* scene) {
 void CM2Lighting::Initialize(CM2Scene* scene, const CAaSphere& sphere) {
     memset(this, 0, sizeof(*this));
     this->m_scene = scene;
-    this->m_flags |= 0x20;
+    this->m_flags |= CM2Lighting::ABOVE_LIQUID;
     this->m_sphere4 = sphere;
 }
 
@@ -111,15 +111,15 @@ void CM2Light::SetDirection(const C3Vector& dir) {
 // OFFSET: 0x00834B50
 void CM2Light::GxLightSet(uint32_t index) {
     CGxLight light;
-    light.m_flags = (light.m_flags & ~1u) | (this->m_visible & 1);
+    light.m_flags = (light.m_flags & ~CGxLight::FLAGS::F_ENABLED) | (this->m_visible & CGxLight::FLAGS::F_ENABLED);
 
     if (this->m_type == M2LIGHT_DIRECT) {
-        light.m_flags &= ~2u;
+        light.m_flags &= ~CGxLight::FLAGS::F_OMNI;
         light.m_dir = this->m_dir;
         light.m_ambientColor = this->m_ambColor;
         light.m_specularColor = this->m_specColor;
     } else {
-        light.m_flags |= 2;
+        light.m_flags |= CGxLight::FLAGS::F_OMNI;
         light.m_dir = this->m_pos;
         light.m_ambientColor = C3Vector();
         light.m_specularColor = C3Vector();
@@ -137,6 +137,8 @@ void CM2Light::GxLightSet(uint32_t index) {
 // VERIFY: a73679ed manual
 // OFFSET: 0x00834C70
 void CM2Light::Link() {
+    STORM_ASSERT(!m_lightPrev && !m_lightNext);
+
     if (!this->m_visible || !this->m_scene) {
         return;
     }
@@ -158,15 +160,19 @@ void CM2Light::Link() {
         if (this->m_lightNext) {
             this->m_lightNext->m_lightPrev = &this->m_lightNext;
         }
-    } else if (!(this->m_scene->m_flags & 1)) {
-        CM2Light** head = &this->m_scene->m_lightList;
+    } else {
+        STORM_ASSERT(m_scene->AllowDirectionalLights());
 
-        this->m_lightPrev = head;
-        this->m_lightNext = *head;
-        *head = this;
+        if (this->m_scene->AllowDirectionalLights()) {
+            CM2Light** head = &this->m_scene->m_lightList;
 
-        if (this->m_lightNext) {
-            this->m_lightNext->m_lightPrev = &this->m_lightNext;
+            this->m_lightPrev = head;
+            this->m_lightNext = *head;
+            *head = this;
+
+            if (this->m_lightNext) {
+                this->m_lightNext->m_lightPrev = &this->m_lightNext;
+            }
         }
     }
 }
@@ -189,24 +195,24 @@ void CM2Lighting::AddDiffuse(const C3Vector& color, const C3Vector& dir) {
         viewDir.z = view.b2 * dir.y + view.a2 * dir.x + view.c2 * dir.z;
     }
 
-    this->m_vector18.x = viewDir.x * color.x + this->m_vector18.x;
-    this->m_vector18.y = viewDir.y * color.x + this->m_vector18.y;
-    this->m_vector18.z = color.x * viewDir.z + this->m_vector18.z;
+    this->m_redDirectionSum.x = viewDir.x * color.x + this->m_redDirectionSum.x;
+    this->m_redDirectionSum.y = viewDir.y * color.x + this->m_redDirectionSum.y;
+    this->m_redDirectionSum.z = color.x * viewDir.z + this->m_redDirectionSum.z;
 
-    this->m_vector24.x = viewDir.x * color.y + this->m_vector24.x;
-    this->m_vector24.y = viewDir.y * color.y + this->m_vector24.y;
-    this->m_vector24.z = color.y * viewDir.z + this->m_vector24.z;
+    this->m_greenDirectionSum.x = viewDir.x * color.y + this->m_greenDirectionSum.x;
+    this->m_greenDirectionSum.y = viewDir.y * color.y + this->m_greenDirectionSum.y;
+    this->m_greenDirectionSum.z = color.y * viewDir.z + this->m_greenDirectionSum.z;
 
-    this->m_vector30.x = color.z * viewDir.x + this->m_vector30.x;
-    this->m_vector30.y = viewDir.y * color.z + this->m_vector30.y;
-    this->m_vector30.z = color.z * viewDir.z + this->m_vector30.z;
+    this->m_blueDirectionSum.x = color.z * viewDir.x + this->m_blueDirectionSum.x;
+    this->m_blueDirectionSum.y = viewDir.y * color.z + this->m_blueDirectionSum.y;
+    this->m_blueDirectionSum.z = color.z * viewDir.z + this->m_blueDirectionSum.z;
 
     float luminance = color.y * 0.71516f + color.x * 0.212671f + color.z * 0.072169f;
-    this->m_vector3C.x = viewDir.x * luminance + this->m_vector3C.x;
-    this->m_vector3C.y = viewDir.y * luminance + this->m_vector3C.y;
-    this->m_vector3C.z = viewDir.z * luminance + this->m_vector3C.z;
+    this->m_luminanceDirectionSum.x = viewDir.x * luminance + this->m_luminanceDirectionSum.x;
+    this->m_luminanceDirectionSum.y = viewDir.y * luminance + this->m_luminanceDirectionSum.y;
+    this->m_luminanceDirectionSum.z = viewDir.z * luminance + this->m_luminanceDirectionSum.z;
 
-    this->m_vector48 += color;
+    this->m_diffuseColorSum += color;
     this->m_sunDir = dir;
     this->m_sunDiffuse = color;
 }
@@ -257,7 +263,7 @@ void CM2Lighting::AddLight(CM2Light* light) {
 // VERIFY: 58f9ffa3 manual
 // OFFSET: 0x008350A0
 void CM2Lighting::CameraSpace() {
-    if (this->m_flags & 1) {
+    if (this->m_flags & CM2Lighting::CAMERA_SPACE_READY) {
         return;
     }
 
@@ -266,7 +272,7 @@ void CM2Lighting::CameraSpace() {
             this->m_lights[i]->m_viewPos = this->m_lights[i]->m_pos * this->m_scene->m_view;
         }
 
-        if ((this->m_flags & 0x60) == 0x60) {
+        if ((this->m_flags & CM2Lighting::LIQUID_SIDES_MASK) == CM2Lighting::LIQUID_SIDES_MASK) {
             float d = -this->m_liquidPlane.d;
             C3Vector point(d * this->m_liquidPlane.n.x, this->m_liquidPlane.n.y * d, d * this->m_liquidPlane.n.z);
 
@@ -283,17 +289,17 @@ void CM2Lighting::CameraSpace() {
         }
     }
 
-    this->m_flags |= 1;
+    this->m_flags |= CM2Lighting::CAMERA_SPACE_READY;
 }
 
 // VERIFY: 0203843d manual
 // OFFSET: 0x00835280
 void CM2Lighting::SetupSunlight() {
-    if (this->m_flags & 2) {
+    if (this->m_flags & CM2Lighting::SUNLIGHT_READY) {
         return;
     }
 
-    this->m_sunDir = this->m_vector3C;
+    this->m_sunDir = this->m_luminanceDirectionSum;
 
     if (this->m_sunDir.z * this->m_sunDir.z + this->m_sunDir.y * this->m_sunDir.y + this->m_sunDir.x * this->m_sunDir.x <= 0.00001f) {
         this->m_sunDir = C3Vector(0.0f, 0.0f, -1.0f);
@@ -301,25 +307,25 @@ void CM2Lighting::SetupSunlight() {
         this->m_sunDir.NormalizeSafe();
     }
 
-    float red = this->m_sunDir.z * this->m_vector18.z + this->m_sunDir.y * this->m_vector18.y + this->m_sunDir.x * this->m_vector18.x;
-    float green = this->m_sunDir.z * this->m_vector24.z + this->m_sunDir.y * this->m_vector24.y + this->m_sunDir.x * this->m_vector24.x;
-    float blue = this->m_vector30.z * this->m_sunDir.z + this->m_vector30.y * this->m_sunDir.y + this->m_vector30.x * this->m_sunDir.x;
+    float red = this->m_sunDir.z * this->m_redDirectionSum.z + this->m_sunDir.y * this->m_redDirectionSum.y + this->m_sunDir.x * this->m_redDirectionSum.x;
+    float green = this->m_sunDir.z * this->m_greenDirectionSum.z + this->m_sunDir.y * this->m_greenDirectionSum.y + this->m_sunDir.x * this->m_greenDirectionSum.x;
+    float blue = this->m_blueDirectionSum.z * this->m_sunDir.z + this->m_blueDirectionSum.y * this->m_sunDir.y + this->m_blueDirectionSum.x * this->m_sunDir.x;
 
-    this->m_sunDiffuse = C3Vector(red * 1.25f - this->m_vector48.x * 0.25f, green * 1.25f - this->m_vector48.y * 0.25f, 1.25f * blue - this->m_vector48.z * 0.25f);
-    this->m_sunAmbient += C3Vector((this->m_vector48.x - red) * 0.25f, (this->m_vector48.y - green) * 0.25f, (this->m_vector48.z - blue) * 0.25f);
+    this->m_sunDiffuse = C3Vector(red * 1.25f - this->m_diffuseColorSum.x * 0.25f, green * 1.25f - this->m_diffuseColorSum.y * 0.25f, 1.25f * blue - this->m_diffuseColorSum.z * 0.25f);
+    this->m_sunAmbient += C3Vector((this->m_diffuseColorSum.x - red) * 0.25f, (this->m_diffuseColorSum.y - green) * 0.25f, (this->m_diffuseColorSum.z - blue) * 0.25f);
 
-    this->m_flags |= 2;
+    this->m_flags |= CM2Lighting::SUNLIGHT_READY;
 }
 
 // VERIFY: 52fc9b8b manual
 // OFFSET: 0x008353D0
 void CM2Lighting::SetupGxLights(const C3Vector* origin) {
     CGxLight light;
-    light.m_flags |= 1;
+    light.m_flags |= CGxLight::FLAGS::F_ENABLED;
 
     this->SetupSunlight();
 
-    light.m_flags &= ~2u;
+    light.m_flags &= ~CGxLight::FLAGS::F_OMNI;
     light.m_dir = this->m_sunDir;
     light.m_ambientColor = this->m_sunAmbient;
     light.m_dirColor = this->m_sunDiffuse;
@@ -328,7 +334,7 @@ void CM2Lighting::SetupGxLights(const C3Vector* origin) {
     g_theGxDevicePtr->LightSet(0, light, C3Vector());
     g_theGxDevicePtr->LightEnable(0, 1);
 
-    light.m_flags |= 2;
+    light.m_flags |= CGxLight::FLAGS::F_OMNI;
     light.m_ambientColor = C3Vector();
     light.m_specularColor = C3Vector();
 
@@ -399,7 +405,7 @@ void CM2Light::SetPosition(const C3Vector& pos) {
 
 // VERIFY: 33e205ca auto
 // OFFSET: 0x008356F0
-void CM2Light::SetVisible(int32_t visible) {
+void CM2Light::SetVisible(BOOL visible) {
     if (!this->m_visible == !visible) {
         return;
     }
@@ -425,7 +431,7 @@ void CM2Lighting::SetupGxFog() {
         return;
     }
 
-    if (!g_theGxDevicePtr->Caps().m_shaderTargets[0]) {
+    if (!g_theGxDevicePtr->Caps().m_shaderTargets[GxSh_Vertex]) {
         GxRsSet(GxRs_FogStart, this->m_fogStart);
         GxRsSet(GxRs_FogEnd, this->m_fogEnd);
     }

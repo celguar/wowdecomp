@@ -1,4 +1,6 @@
 #include "MapDoodadDef.h"
+#include "Engine/Source/Storm/H/storm.h"
+#include "WoW/Source/Object/ObjectClient/Types.h"
 #include "WoW/Source/WorldClient/WorldLightingConstants.h"
 #include "Engine/Source/Model2/M2Data.h"
 #include "Engine/Source/Model2/M2Light.h"
@@ -25,15 +27,16 @@
 // VERIFY: 4012bf37 manual
 // OFFSET: 0x007B4FA0
 void CMapDoodadDef::ExtendBounds(CMapDoodadDef* doodadDef, CMapBaseObj* parent) {
-    if (parent->m_type & CMapBaseObj::Type_Chunk) {
+    if (parent->GetType() & CMapBaseObj::Type_Chunk) {
         CMapChunk* chunk = static_cast<CMapChunk*>(parent);
         chunk->m_bbox.t.z = doodadDef->m_bbox.t.z < chunk->m_bbox.t.z ? chunk->m_bbox.t.z : doodadDef->m_bbox.t.z;
-    } else if (parent->m_type & CMapBaseObj::Type_MapObjDefGroup) {
-        CMapObjDefGroup* group = static_cast<CMapObjDefGroup*>(parent);
-        group->m_bbox |= doodadDef->m_bbox;
+    } else if (parent->GetType() & CMapBaseObj::Type_MapObjDefGroup) {
+        CMapObjDefGroup* mapObjDefGroup = static_cast<CMapObjDefGroup*>(parent);
+        mapObjDefGroup->aaBox |= doodadDef->m_bbox;
 
-        CMapBaseObjLink* link = group->m_parentLinkList.Head();
-        static_cast<CMapObjDef*>(link->m_ref)->m_bbox |= doodadDef->m_bbox;
+        STORM_ASSERT(mapObjDefGroup->m_parentLinkList.Head()->ref->GetType() & CMapBaseObj::Type_MapObjDef);
+        CMapBaseObjLink* link = mapObjDefGroup->m_parentLinkList.Head();
+        static_cast<CMapObjDef*>(link->ref)->m_bbox |= doodadDef->m_bbox;
     }
 }
 
@@ -41,7 +44,7 @@ void CMapDoodadDef::ExtendBounds(CMapDoodadDef* doodadDef, CMapBaseObj* parent) 
 // OFFSET: 0x007B55E0
 void CMapDoodadDef::ExtendChunkBounds() {
     for (CMapBaseObjLink* link = this->m_parentLinkList.Head(); link; link = this->m_parentLinkList.Next(link)) {
-        CMapDoodadDef::ExtendBounds(this, link->m_ref);
+        CMapDoodadDef::ExtendBounds(this, link->ref);
     }
 }
 
@@ -53,13 +56,13 @@ void CMapDoodadDef::UpdateBounds() {
     sphere.r = 0.0f;
     CAaBox collisionBox;
 
-    if (this->m_model) {
-        box = this->m_model->GetBoundingBox();
-        sphere = this->m_model->GetBoundingSphere();
+    if (this->model) {
+        box = this->model->GetBoundingBox();
+        sphere = this->model->GetBoundingSphere();
 
-        CM2Model* model = this->m_model;
+        CM2Model* model = this->model;
 
-        if (!(model->m_shared->m_flags & 0x1)) {
+        if (!(model->m_shared->m_flags & CM2Shared::SHARED_FLAGS::FLAG_MODEL_LOADED)) {
             model->WaitForLoad(nullptr);
         }
 
@@ -76,13 +79,13 @@ void CMapDoodadDef::UpdateBounds() {
         this->m_bbox.t = this->m_position;
     }
 
-    CWorldMath::TransformAABox(this->m_mat, collisionBox, this->m_bboxDoodadDef);
+    CWorldMath::TransformAABox(this->m_mat, collisionBox, this->m_collideExt);
 
     C3Vector center;
     center.x = (collisionBox.t.x + collisionBox.b.x) * 0.5f;
     center.y = (collisionBox.t.y + collisionBox.b.y) * 0.5f;
     center.z = 0.5f * (collisionBox.t.z + collisionBox.b.z);
-    this->m_vec2 = center * this->m_mat;
+    this->visCenter = center * this->m_mat;
 
     float size = this->m_bbox.t.x - this->m_bbox.b.x;
 
@@ -104,15 +107,15 @@ void CMapDoodadDef::UpdateBounds() {
 
     this->m_fadeLevel = fadeLevel;
 
-    if (!(CWorld::enables & Enable_NoAnimation) && fadeLevel < 3) {
-        this->m_model->m_fFlags &= ~0x40u;
+    if (!(CWorld::enables & Enables::Enable_ObjectFadeZFill) && fadeLevel < 3) {
+        this->model->m_runtimeFlags &= ~M2_FLAGS::M2_DEPTH_SORT_ALLOWED;
     }
 }
 
 // VERIFY: f560b093 manual
 // OFFSET: 0x007C1150
 void CMapDoodadDef::SelectLights(CM2Lighting* lighting) {
-    if (this->m_flags & 0x2) {
+    if (this->m_flags & MAPOBJ_FLAG_INTERIOR) {
         lighting->AddAmbient(C3Vector(this->m_m2AmbientColor));
         lighting->AddDiffuse(C3Vector(this->m_m2DiffuseColor), CMapStaticEntity::s_interiorSunDir);
     } else {
@@ -126,50 +129,50 @@ void CMapDoodadDef::SelectLights(CM2Lighting* lighting) {
 
     DayNight::DNInfo* dayNight = DayNight::GetInfo();
 
-    if (this->m_flags & 0x8000) {
+    if (this->m_flags & MAPOBJ_FLAG_INT_FOG) {
         lighting->SetFog(C3Vector(dayNight->m_fogInterior.m_color), dayNight->m_fogInterior.m_start, dayNight->m_fogInterior.m_end, dayNight->m_fogInterior.m_density);
     } else {
         lighting->SetFog(C3Vector(dayNight->m_fog.m_color), dayNight->m_fog.m_start, dayNight->m_fog.m_end, dayNight->m_fog.m_density);
     }
 
-    if (this->m_flags & 0x2) {
-        lighting->m_flags |= 0x8;
+    if (this->m_flags & MAPOBJ_FLAG_INTERIOR) {
+        lighting->m_flags |= CM2Lighting::INTERIOR;
     } else {
-        lighting->m_flags &= ~0x8;
+        lighting->m_flags &= ~CM2Lighting::INTERIOR;
     }
 }
 
 // VERIFY: fc0f43f4 manual
 // OFFSET: 0x007C21E0
 CMapDoodadDef::CMapDoodadDef() {
-    this->m_type |= CMapBaseObj::Type_DoodadDef;
-    this->m_model = nullptr;
+    this->AddType(CMapBaseObj::Type_DoodadDef);
+    this->model = nullptr;
     this->m_collisionGuid = WOWGUID();
-    this->m_doodadSet = 0;
+    this->wmoSpecialDoodadSet = 0;
 }
 
 // VERIFY: cf40d12f manual
 // OFFSET: 0x007C23F0
 void CMapDoodadDef::SelectUnderwater(CM2Lighting* lighting) {
-    if (!(this->m_staticFlags & 0x80)) {
-        this->m_staticFlags = (this->m_staticFlags & ~0xE0u) | 0x80;
+    if (!(this->m_staticFlags & MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_QUERY_CACHED)) {
+        this->m_staticFlags = (this->m_staticFlags & ~MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_CACHE_MASK) | MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_QUERY_CACHED;
 
         for (CMapBaseObjLink* link = this->m_parentLinkList.Head(); link; link = this->m_parentLinkList.Next(link)) {
-            CMapBaseObj* parent = link->m_ref;
+            CMapBaseObj* parent = link->ref;
 
-            if (!(parent->m_type & CMapBaseObj::Type_MapObjDefGroup)) {
-                this->m_staticFlags |= 0x80;
+            if (!(parent->GetType() & CMapBaseObj::Type_MapObjDefGroup)) {
+                this->m_staticFlags |= MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_QUERY_CACHED;
                 C3Vector pos(this->m_position.x, this->m_position.y, this->m_bbox.b.z);
                 int32_t liquidType;
 
                 if (CMap::QueryLiquidTerrain(&pos, &liquidType, &this->m_liquidHeight, 0)) {
                     this->m_diffuseLightScale = 1.0f;
-                    this->m_staticFlags = (this->m_staticFlags & ~0x28u) | 0x20;
+                    this->m_staticFlags = (this->m_staticFlags & ~(MAP_STATIC_FLAGS::MAP_STATIC_FLAG_SHADOWED | MAP_STATIC_FLAGS::MAP_STATIC_FLAG_IN_LIQUID)) | MAP_STATIC_FLAGS::MAP_STATIC_FLAG_IN_LIQUID;
 
                     if (this->m_liquidHeight <= this->m_bbox.t.z) {
-                        this->m_staticFlags |= 0x40;
+                        this->m_staticFlags |= MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_SURFACE_CLIP;
                     } else {
-                        this->m_staticFlags &= ~0x40u;
+                        this->m_staticFlags &= ~MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_SURFACE_CLIP;
                     }
                 }
 
@@ -177,11 +180,11 @@ void CMapDoodadDef::SelectUnderwater(CM2Lighting* lighting) {
             }
 
             CMapObjDefGroup* defGroup = static_cast<CMapObjDefGroup*>(parent);
-            CMapObjDef* mapObjDef = static_cast<CMapObjDef*>(defGroup->m_parentLinkList.Head()->m_ref);
-            CMapObjGroup* group = mapObjDef->m_owner->GetGroup(defGroup->m_groupNum, 0);
+            CMapObjDef* mapObjDef = static_cast<CMapObjDef*>(defGroup->m_parentLinkList.Head()->ref);
+            CMapObjGroup* group = mapObjDef->mapObj->GetGroup(defGroup->groupNum, 0);
 
             if (!group) {
-                this->m_staticFlags &= ~0x80u;
+                this->m_staticFlags &= ~MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_QUERY_CACHED;
                 continue;
             }
 
@@ -190,17 +193,17 @@ void CMapDoodadDef::SelectUnderwater(CM2Lighting* lighting) {
             float level;
 
             if (group->QueryLiquid(localPos, &liquidType, &level)) {
-                this->m_staticFlags |= 0x20;
+                this->m_staticFlags |= MAP_STATIC_FLAGS::MAP_STATIC_FLAG_IN_LIQUID;
                 C3Vector surface = C3Vector(localPos.x, localPos.y, level) * mapObjDef->m_mat;
                 this->m_liquidHeight = surface.z;
 
                 if (this->m_liquidHeight <= this->m_bbox.t.z) {
-                    this->m_staticFlags |= 0x40;
+                    this->m_staticFlags |= MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_SURFACE_CLIP;
                 } else {
-                    this->m_staticFlags &= ~0x40u;
+                    this->m_staticFlags &= ~MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_SURFACE_CLIP;
                 }
 
-                this->m_staticFlags |= 0x80;
+                this->m_staticFlags |= MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LIQUID_QUERY_CACHED;
                 break;
             }
         }
@@ -216,13 +219,13 @@ void CMapDoodadDef::Purge(CMapDoodadDef* doodadDef) {
         return;
     }
 
-    if (doodadDef->m_model) {
-        doodadDef->m_model->SetSequenceCallback(nullptr, 0);
-        doodadDef->m_model->SetEventCallback(nullptr, 0);
-        doodadDef->m_model->m_lightingCallback = nullptr;
-        doodadDef->m_model->m_lightingArg = nullptr;
-        doodadDef->m_model->Release();
-        doodadDef->m_model = nullptr;
+    if (doodadDef->model) {
+        doodadDef->model->SetSequenceCallback(nullptr, 0);
+        doodadDef->model->SetEventCallback(nullptr, 0);
+        doodadDef->model->m_lightingCallback = nullptr;
+        doodadDef->model->m_lightingArg = nullptr;
+        doodadDef->model->Release();
+        doodadDef->model = nullptr;
     }
 
     doodadDef->m_doodadDefLink.Unlink();
@@ -231,39 +234,38 @@ void CMapDoodadDef::Purge(CMapDoodadDef* doodadDef) {
 
 // VERIFY: 9bd1ba20 manual
 // OFFSET: 0x007BDA70
-void CMapDoodadDef::CreateModel(const char* fileName, CMapDoodadDef* doodadDef, int32_t waitForLoad, int32_t a4) {
-    CM2Model* model = World::s_m2Scene->CreateModel(fileName, a4 ? 0x20 : 0);
-    doodadDef->m_model = model;
+void CMapDoodadDef::CreateModel(const char* fileName, CMapDoodadDef* doodadDef, BOOL waitForLoad, BOOL initializeOnDemand) {
+    CM2Model* model = World::s_m2Scene->CreateModel(fileName, initializeOnDemand ? CM2Model::INSTANCE_INITIALIZE_ON_DEMAND : 0);
+    doodadDef->model = model;
 
     if (!model) {
         return;
     }
 
-    model->m_fFlags |= 0x8000;
-    model->m_worldTransform = doodadDef->m_mat;
-    doodadDef->m_model->SetEventCallback(reinterpret_cast<void*>(CMapStaticEntity::ModelEventCallback), reinterpret_cast<uintptr_t>(doodadDef));
-    doodadDef->m_model->m_lightingCallback = CMapStaticEntity::ModelLightingCallback;
-    doodadDef->m_model->m_lightingArg = doodadDef;
-    doodadDef->m_model->SetBoneSequence(0xFFFFFFFF, 0, 0xFFFFFFFF, 0, 1.0f, 1, 1);
+    model->SetWorldTransform(doodadDef->m_mat);
+    doodadDef->model->SetEventCallback(CMapStaticEntity::ModelEventCallback, reinterpret_cast<uintptr_t>(doodadDef));
+    doodadDef->model->m_lightingCallback = CMapStaticEntity::ModelLightingCallback;
+    doodadDef->model->m_lightingArg = doodadDef;
+    doodadDef->model->SetBoneSequence(M2_KEY_BONE_NONE, ANIM_STAND, M2_RANDOM_VARIATION, 0, 1.0f, 1, 1);
 
     if (waitForLoad) {
-        doodadDef->m_model->IsLoaded(1, 0);
+        doodadDef->model->IsLoaded(1, 0);
     }
 }
 
 // VERIFY: 5cc39abd manual
 // OFFSET: 0x007C1380
-void CMapDoodadDef::UpdateMatrixOnly(const C44Matrix& matrix) {
-    if (!this->m_model) {
+void CMapDoodadDef::Update(const C44Matrix& matrix) {
+    if (!this->model) {
         return;
     }
 
     this->m_flags = static_cast<MapObjFlag>(this->m_flags | MAPOBJ_FLAG_UNPLACED);
-    this->m_position.x = this->m_identity.d0;
-    this->m_position.y = this->m_identity.d1;
-    this->m_position.z = this->m_identity.d2;
+    this->m_position.x = this->m_lMat.d0;
+    this->m_position.y = this->m_lMat.d1;
+    this->m_position.z = this->m_lMat.d2;
     this->m_position *= matrix;
-    this->m_mat = this->m_identity * matrix;
+    this->m_mat = this->m_lMat * matrix;
     CAaBox box;
     box.b = C3Vector(0.0f, 0.0f, 0.0f);
     box.t = C3Vector(0.0f, 0.0f, 0.0f);
@@ -274,27 +276,26 @@ void CMapDoodadDef::UpdateMatrixOnly(const C44Matrix& matrix) {
     sphere.c = C3Vector(0.0f, 0.0f, 0.0f);
     sphere.r = 0.0f;
 
-    if (this->m_model->IsLoaded(0, 0)) {
-        box = this->m_model->GetBoundingBox();
-        CM2Model* model = this->m_model;
+    if (this->model->IsLoaded(0, 0)) {
+        box = this->model->GetBoundingBox();
+        CM2Model* model = this->model;
 
-        if (!(model->m_shared->m_flags & 0x1)) {
+        if (!(model->m_shared->m_flags & CM2Shared::SHARED_FLAGS::FLAG_MODEL_LOADED)) {
             model->WaitForLoad(nullptr);
         }
 
         collisionBox = model->m_shared->m_data->m_collisionBounds.m_extent;
-        sphere = this->m_model->GetBoundingSphere();
+        sphere = this->model->GetBoundingSphere();
     } else {
-        collisionBox = this->m_model->m_shared->m_boundingBox;
+        collisionBox = this->model->m_shared->m_boundingBox;
     }
 
     this->m_sphere.c = sphere.c * this->m_mat;
     this->m_sphere.r = this->m_scale * sphere.r;
     CWorldMath::TransformAABox(this->m_mat, box, this->m_bbox);
-    CWorldMath::TransformAABox(this->m_mat, collisionBox, this->m_bboxDoodadDef);
-    CM2Model* model = this->m_model;
-    model->m_fFlags |= 0x8000;
-    model->m_worldTransform = this->m_mat;
+    CWorldMath::TransformAABox(this->m_mat, collisionBox, this->m_collideExt);
+    CM2Model* model = this->model;
+    model->SetWorldTransform(this->m_mat);
     SI2::Set3DPosition(&this->m_soundKitObject, &this->m_position);
 }
 
@@ -308,16 +309,16 @@ bool CMapDoodadDef::QueryInteriorLighting(CMapObjDef* mapObjDef, int32_t groupNu
 
     if (faceIndex) {
         C3Vector local = *pos * mapObjDef->m_invMat;
-        result = mapObjDef->m_owner->QueryLighting(groupNum, local, *faceIndex, &color, &flag);
+        result = mapObjDef->mapObj->QueryLighting(groupNum, local, *faceIndex, &color, &flag);
     } else {
         C3Vector top(this->m_position.x, this->m_position.y, this->m_position.z + 1.5f);
         C3Vector start = top * mapObjDef->m_invMat;
         C3Vector bottom(this->m_position.x, this->m_position.y, this->m_position.z - 1760.0f);
         C3Vector end = bottom * mapObjDef->m_invMat;
         C3Segment seg;
-        seg.b = start;
-        seg.t = end;
-        result = mapObjDef->m_owner->QueryLighting(groupNum, seg, &color, &flag);
+        seg.start = start;
+        seg.end = end;
+        result = mapObjDef->mapObj->QueryLighting(groupNum, seg, &color, &flag);
     }
 
     if (!result) {
@@ -329,7 +330,7 @@ bool CMapDoodadDef::QueryInteriorLighting(CMapObjDef* mapObjDef, int32_t groupNu
     this->AdjustLightmap(&color, &this->m_m2DiffuseColor, limit, &this->m_m2AmbientColor, MAX_AMBIENT);
 
     if (!flag) {
-        this->m_staticFlags &= ~0x1000;
+        this->m_staticFlags &= ~MAP_STATIC_FLAGS::MAP_STATIC_FLAG_BLEND_OUTDOOR_LIGHT;
         return result;
     }
 
@@ -341,7 +342,7 @@ bool CMapDoodadDef::QueryInteriorLighting(CMapObjDef* mapObjDef, int32_t groupNu
         this->m_m2AmbientColor.InterpColor(alpha, &info->m_light1.m_ambient);
     }
 
-    this->m_staticFlags |= 0x1000;
+    this->m_staticFlags |= MAP_STATIC_FLAGS::MAP_STATIC_FLAG_BLEND_OUTDOOR_LIGHT;
     this->m_m2DiffuseColor.a = color.a;
     return result;
 }

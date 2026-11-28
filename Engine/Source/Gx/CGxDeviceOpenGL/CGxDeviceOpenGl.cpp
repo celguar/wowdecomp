@@ -25,7 +25,7 @@ static const GLenum s_glBufferTarget[GxPoolTargets_Last] = { GL_ARRAY_BUFFER_ARB
 static const CGxDeviceOpenGl::EDeviceState s_bufferState[GxPoolTargets_Last] = { CGxDeviceOpenGl::Ds_ArrayBuffer, CGxDeviceOpenGl::Ds_ElementArrayBuffer };
 
 // STATIC: 0x00A2E010
-static const GLenum s_glBufferUsage[3] = { GL_STATIC_DRAW_ARB, GL_DYNAMIC_DRAW_ARB, GL_STREAM_DRAW_ARB };
+static const GLenum s_glBufferUsage[GxPoolUsages_Last] = { GL_STATIC_DRAW_ARB, GL_DYNAMIC_DRAW_ARB, GL_STREAM_DRAW_ARB };
 
 // STATIC: 0x00A2E05C
 static const GLenum s_glTexTarget[4] = { GL_TEXTURE_2D, GL_TEXTURE_CUBE_MAP_ARB, GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_2D };
@@ -77,13 +77,13 @@ static GlTexEnvOp s_texEnvOps[GxTexOps_Last] = {
 static GLfloat s_texEnvColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
 // STATIC: 0x00A2E01C
-static const GLint s_glAttribSize[7] = { 4, 4, 4, 2, 3, 2, 1 };
+static const GLint s_glAttribSize[GxVertexAttribTypes_Last] = { 4, 4, 4, 2, 3, 2, 1 };
 
 // STATIC: 0x00A2E038
-static const GLenum s_glAttribType[7] = { GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE, GL_FLOAT, GL_FLOAT, GL_SHORT, GL_FLOAT };
+static const GLenum s_glAttribType[GxVertexAttribTypes_Last] = { GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE, GL_FLOAT, GL_FLOAT, GL_SHORT, GL_FLOAT };
 
 // STATIC: 0x00A2E054
-static const GLboolean s_glAttribNormalized[7] = { GL_TRUE, GL_FALSE, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+static const GLboolean s_glAttribNormalized[GxVertexAttribTypes_Last] = { GL_TRUE, GL_FALSE, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
 
 // STATIC: 0x00AD8D90
 static GLenum s_glBlendSrc[12] = { GL_ONE, GL_ONE, GL_SRC_ALPHA, GL_SRC_ALPHA, GL_DST_COLOR, GL_DST_COLOR, GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE, GL_CONSTANT_ALPHA_EXT };
@@ -139,16 +139,16 @@ CGxDeviceOpenGl::CGxDeviceOpenGl() {
     this->unused_3B50 = 0;
     this->m_viewDirty = 0;
     this->m_caps.m_colorFormat = GxCF_rgba;
-    this->m_caps.unk_0018 = 0;
-    this->m_renderTargetMode = 0;
+    this->m_caps.m_buffering = 0;
+    this->m_renderTargetMode = RENDER_TARGET_MODE_COPY;
     this->m_ambientOnlyMode = 0;
     this->DsInit();
     this->unused_3AD0 = 0;
-    this->m_materialDirty = 7;
+    this->m_materialDirty = CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_ALL;
     this->m_sphereMapMode = GL_SPHERE_MAP;
 
     for (uint32_t target = 0; target < GxPoolTargets_Last; target++) {
-        for (uint32_t usage = 0; usage < 3; usage++) {
+        for (uint32_t usage = 0; usage < GxPoolUsages_Last; usage++) {
             this->m_useVbo[target][usage] = 1;
             this->m_useVboBroker[target][usage] = 0;
         }
@@ -180,7 +180,7 @@ void CGxDeviceOpenGl::DsInit() {
 
 // VERIFY: e94dcc5a manual
 // OFFSET: 0x006918F0
-void CGxDeviceOpenGl::DsSet(EDeviceState state, uint32_t value, int32_t force) {
+void CGxDeviceOpenGl::DsSet(EDeviceState state, uint32_t value, BOOL force) {
     uint32_t current = this->m_deviceStates[state];
 
     if (current == value && !force) {
@@ -533,50 +533,50 @@ void CGxDeviceOpenGl::DeviceOverride(EGxOverride override, uint32_t value) {
     CGxDevice::DeviceOverride(override, value);
 
     switch (override) {
-        case 0:
+        case GxOverride_PixelShader:
             this->m_caps.m_shaderTargets[GxSh_Pixel] = value;
             break;
 
-        case 1:
+        case GxOverride_VertexBufferObject:
             if (!value) {
                 glARBVertexBufferObject = 0;
             }
 
             break;
 
-        case 2:
+        case GxOverride_StreamVertexBufferObject:
             if (!value) {
                 this->m_useVbo[0][2] = 0;
             }
 
             break;
 
-        case 3:
+        case GxOverride_StreamIndexBufferObject:
             if (!value) {
                 this->m_useVbo[1][2] = 0;
             }
 
             break;
 
-        case 4:
+        case GxOverride_StreamVertexBufferBroker:
             if (value) {
                 this->m_useVboBroker[0][2] = 1;
             }
 
             break;
 
-        case 5:
+        case GxOverride_StreamIndexBufferBroker:
             if (value) {
                 this->m_useVboBroker[1][2] = 1;
             }
 
             break;
 
-        case 6:
+        case GxOverride_SphereMapReflection:
             this->m_sphereMapMode = value != 0 ? GL_REFLECTION_MAP_ARB : GL_SPHERE_MAP;
             break;
 
-        case 7:
+        case GxOverride_TexNonPow2:
             this->m_caps.m_texNonPow2 = value != 0;
             break;
 
@@ -736,15 +736,15 @@ void CGxDeviceOpenGl::ISetCaps(const CGxFormat& format) {
 
     if (pixelTarget == -1 || !pixelTargets[pixelTarget]) {
         if (pixelTargets[12]) {
-            this->m_caps.m_shaderTargets[GxSh_Pixel] = 12;
+            this->m_caps.m_shaderTargets[GxSh_Pixel] = GxShPS_arbfp1;
         } else if (pixelTargets[10]) {
-            this->m_caps.m_shaderTargets[GxSh_Pixel] = 10;
+            this->m_caps.m_shaderTargets[GxSh_Pixel] = GxShPS_nvts3;
         } else if (pixelTargets[9]) {
-            this->m_caps.m_shaderTargets[GxSh_Pixel] = 9;
+            this->m_caps.m_shaderTargets[GxSh_Pixel] = GxShPS_nvts2;
         } else if (pixelTargets[8]) {
-            this->m_caps.m_shaderTargets[GxSh_Pixel] = 8;
+            this->m_caps.m_shaderTargets[GxSh_Pixel] = GxShPS_nvts;
         } else if (pixelTargets[7]) {
-            this->m_caps.m_shaderTargets[GxSh_Pixel] = 7;
+            this->m_caps.m_shaderTargets[GxSh_Pixel] = GxShPS_nvrc;
         }
     } else {
         this->m_caps.m_shaderTargets[GxSh_Pixel] = pixelTarget;
@@ -755,13 +755,13 @@ void CGxDeviceOpenGl::ISetCaps(const CGxFormat& format) {
     if (vertexTarget == -1 || !vertexTargets[vertexTarget]) {
         if (this->m_caps.m_shaderTargets[GxSh_Pixel]) {
             if (vertexTargets[6]) {
-                this->m_caps.m_shaderTargets[GxSh_Vertex] = 6;
+                this->m_caps.m_shaderTargets[GxSh_Vertex] = GxShVS_arbvp1;
             } else if (vertexTargets[7]) {
-                this->m_caps.m_shaderTargets[GxSh_Vertex] = 7;
+                this->m_caps.m_shaderTargets[GxSh_Vertex] = GxShVS_arbvp1_cg12;
             } else if (vertexTargets[9]) {
-                this->m_caps.m_shaderTargets[GxSh_Vertex] = 9;
+                this->m_caps.m_shaderTargets[GxSh_Vertex] = GxShVS_nvvp2;
             } else if (vertexTargets[8]) {
-                this->m_caps.m_shaderTargets[GxSh_Vertex] = 8;
+                this->m_caps.m_shaderTargets[GxSh_Vertex] = GxShVS_nvvp;
             }
         }
     } else {
@@ -769,8 +769,8 @@ void CGxDeviceOpenGl::ISetCaps(const CGxFormat& format) {
     }
 
     switch (this->m_caps.m_shaderTargets[GxSh_Vertex]) {
-        case 6:
-        case 7: {
+        case GxShVS_arbvp1:
+        case GxShVS_arbvp1_cg12: {
             GLint envParameters;
             GLint nativeParameters;
             glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_ENV_PARAMETERS_ARB, &envParameters);
@@ -779,11 +779,11 @@ void CGxDeviceOpenGl::ISetCaps(const CGxFormat& format) {
             break;
         }
 
-        case 8:
+        case GxShVS_nvvp:
             this->m_caps.m_shaderConstants[GxSh_Vertex] = 96;
             break;
 
-        case 9:
+        case GxShVS_nvvp2:
             this->m_caps.m_shaderConstants[GxSh_Vertex] = 256;
             break;
 
@@ -804,7 +804,7 @@ void CGxDeviceOpenGl::ISetCaps(const CGxFormat& format) {
     this->m_caps.m_colorWrite = 1;
     glGetIntegerv(GL_MAX_CLIP_PLANES, reinterpret_cast<GLint*>(&this->m_caps.m_maxClipPlanes));
 
-    if (this->m_caps.m_shaderTargets[GxSh_Vertex] == 6 || this->m_caps.m_shaderTargets[GxSh_Vertex] == 7) {
+    if (this->m_caps.m_shaderTargets[GxSh_Vertex] == GxShVS_arbvp1 || this->m_caps.m_shaderTargets[GxSh_Vertex] == GxShVS_arbvp1_cg12) {
         this->m_caps.m_maxClipPlanes = 0;
     }
 
@@ -834,7 +834,7 @@ void CGxDeviceOpenGl::ISetCaps(const CGxFormat& format) {
     this->m_caps.unused_0114[3] = 0;
     this->m_caps.unused_0114[4] = 0;
     this->m_caps.m_stereoAvailable = 0;
-    this->m_caps.unk_0138 = this->m_caps.m_shaderTargets[GxSh_Pixel] != 12;
+    this->m_caps.unk_0138 = this->m_caps.m_shaderTargets[GxSh_Pixel] != GxShPS_arbfp1;
     this->Log(this->m_caps);
 }
 
@@ -962,7 +962,7 @@ bool CGxDeviceOpenGl::QueryGetParam(CGxQuery* query, EGxQueryParam param, uint32
 
     GLenum error = GL_INVALID_OPERATION;
 
-    if (param == 0) {
+    if (param == GxQueryParam_DataSize) {
         GLint bits;
         glGetQueryivARB(s_glQueryTarget[query->m_type], GL_QUERY_COUNTER_BITS_ARB, &bits);
         error = glGetError();
@@ -970,7 +970,7 @@ bool CGxDeviceOpenGl::QueryGetParam(CGxQuery* query, EGxQueryParam param, uint32
         if (!error) {
             data = bits / 8;
         }
-    } else if (param == 1) {
+    } else if (param == GxQueryParam_ResultAvailable) {
         GLuint available;
         glGetQueryObjectuivARB(static_cast<GLuint>(reinterpret_cast<uintptr_t>(query->m_apiSpecific)), GL_QUERY_RESULT_AVAILABLE_ARB, &available);
         error = glGetError();
@@ -1282,9 +1282,9 @@ void CGxDeviceOpenGl::IDeviceSetRenderTargetFBO(EGxBuffer buffer, CGxTex* textur
 // VERIFY: 57fb30e2 manual
 // OFFSET: 0x0068BB90
 void CGxDeviceOpenGl::DeviceSetRenderTarget(EGxBuffer buffer, CGxTex* texture, uint32_t plane) {
-    if (this->m_renderTargetMode == 0) {
+    if (this->m_renderTargetMode == RENDER_TARGET_MODE_COPY) {
         this->IDeviceSetRenderTargetCopy(buffer, texture, plane);
-    } else if (this->m_renderTargetMode == 1) {
+    } else if (this->m_renderTargetMode == RENDER_TARGET_MODE_FBO) {
         this->IDeviceSetRenderTargetFBO(buffer, texture, plane);
     }
 }
@@ -1485,7 +1485,7 @@ void CGxDeviceOpenGl::DeviceDestroyPbuffer() {
 void CGxDeviceOpenGl::IDevSetFocus(int32_t focus, const CGxFormat& format) {
     this->m_windowFocus = focus;
 
-    if (!format.m_window || format.m_maximize == 2) {
+    if (!format.m_window || format.m_maximize == CGxFormat::Maximize_Unknown_2) {
         if (focus) {
             DISPLAY_DEVICEA device;
             memset(&device, 0, sizeof(device));
@@ -1645,9 +1645,9 @@ static HWND CreateGameWindow(CGxFormat& format, void* param) {
 
     if (!format.m_window) {
         style = WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_MAXIMIZE;
-    } else if (format.m_maximize == 1) {
+    } else if (format.m_maximize == CGxFormat::Maximize_Screen) {
         style = WS_POPUP | WS_VISIBLE;
-    } else if (format.m_maximize == 2) {
+    } else if (format.m_maximize == CGxFormat::Maximize_Unknown_2) {
         style = WS_POPUP;
     } else {
         style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_OVERLAPPEDWINDOW;
@@ -1670,7 +1670,7 @@ static HWND CreateGameWindow(CGxFormat& format, void* param) {
     CGxDevice::s_clientAdjust.y = rect.bottom - format.m_size.y - rect.top;
 
     if (format.m_window) {
-        if (format.m_maximize == 1) {
+        if (format.m_maximize == CGxFormat::Maximize_Screen) {
             format.m_pos.x = 0;
             format.m_pos.y = 0;
             format.m_size.x = GetSystemMetrics(SM_CXSCREEN);
@@ -1705,7 +1705,7 @@ static HWND CreateGameWindow(CGxFormat& format, void* param) {
         height = CW_USEDEFAULT;
     }
 
-    if (format.m_window && format.m_maximize != 1 && format.m_size.x && format.m_size.y) {
+    if (format.m_window && format.m_maximize != CGxFormat::Maximize_Screen && format.m_size.x && format.m_size.y) {
         width += CGxDevice::s_clientAdjust.x;
         height += CGxDevice::s_clientAdjust.y;
     }
@@ -2344,7 +2344,7 @@ int32_t CGxDeviceOpenGl::DeviceWM(EGxWM wm, uintptr_t param1, uintptr_t param2) 
             this->IDevRemoveGlContext();
             this->m_windowFocus = 0;
 
-            if (!this->m_format.m_window || this->m_format.m_maximize == 2) {
+            if (!this->m_format.m_window || this->m_format.m_maximize == CGxFormat::Maximize_Unknown_2) {
                 ChangeDisplaySettingsExA(nullptr, nullptr, nullptr, 0, nullptr);
                 ShowWindow(this->m_hwnd, SW_MINIMIZE);
             }
@@ -2362,7 +2362,7 @@ int32_t CGxDeviceOpenGl::DeviceWM(EGxWM wm, uintptr_t param1, uintptr_t param2) 
             if (!s_deviceChanging) {
                 this->m_windowFocus = 0;
 
-                if (!this->m_format.m_window || this->m_format.m_maximize == 2) {
+                if (!this->m_format.m_window || this->m_format.m_maximize == CGxFormat::Maximize_Unknown_2) {
                     ChangeDisplaySettingsExA(nullptr, nullptr, nullptr, 0, nullptr);
                     ShowWindow(this->m_hwnd, SW_MINIMIZE);
                 }
@@ -3052,12 +3052,12 @@ void CGxDeviceOpenGl::IStateSyncVertexPtrs() {
 
         if (!(bit & this->m_primVertexMask)) {
             switch (attrib) {
-                case 0:
-                case 1:
-                case 2:
-                case 3:
-                case 4:
-                case 5:
+                case GxVA_Position:
+                case GxVA_BlendWeight:
+                case GxVA_BlendIndices:
+                case GxVA_Normal:
+                case GxVA_Color0:
+                case GxVA_Color1:
                     this->DsSet(static_cast<EDeviceState>(Ds_VertexArray0 + attrib), 0, 0);
                     break;
 
@@ -3109,29 +3109,29 @@ void CGxDeviceOpenGl::IStateSyncVertexPtrs() {
 
         if (!this->m_deviceStates[Ds_VertexProgram]) {
             switch (attrib) {
-                case 0:
+                case GxVA_Position:
                     this->DsSet(Ds_VertexArray0, 1, 0);
                     glVertexPointer(s_glAttribSize[vertexAttrib.m_type], s_glAttribType[vertexAttrib.m_type], vertexAttrib.m_bufSize, pointer);
                     break;
 
-                case 3:
+                case GxVA_Normal:
                     glNormalPointer(s_glAttribType[vertexAttrib.m_type], vertexAttrib.m_bufSize, pointer);
-                    this->DsSet(static_cast<EDeviceState>(Ds_VertexArray0 + 3), 1, 0);
+                    this->DsSet(static_cast<EDeviceState>(Ds_VertexArray0 + GxVA_Normal), 1, 0);
                     break;
 
-                case 4:
+                case GxVA_Color0:
                     glColorPointer(s_glAttribSize[vertexAttrib.m_type], s_glAttribType[vertexAttrib.m_type], vertexAttrib.m_bufSize, pointer);
-                    this->DsSet(static_cast<EDeviceState>(Ds_VertexArray0 + 4), 1, 0);
+                    this->DsSet(static_cast<EDeviceState>(Ds_VertexArray0 + GxVA_Color0), 1, 0);
                     break;
 
-                case 6:
-                case 7:
-                case 8:
-                case 9:
-                case 10:
-                case 11:
-                case 12:
-                case 13: {
+                case GxVA_TexCoord0:
+                case GxVA_TexCoord1:
+                case GxVA_TexCoord2:
+                case GxVA_TexCoord3:
+                case GxVA_TexCoord4:
+                case GxVA_TexCoord5:
+                case GxVA_TexCoord6:
+                case GxVA_TexCoord7: {
                     uint32_t tmu = 0;
 
                     while (tmu < 8 && this->m_appRenderStates[GxRs_TextureCoord0 + tmu].m_value.m_data.u[0] != attrib - 6) {
@@ -3152,12 +3152,12 @@ void CGxDeviceOpenGl::IStateSyncVertexPtrs() {
             }
         } else {
             switch (attrib) {
-                case 0:
-                case 1:
-                case 2:
-                case 3:
-                case 4:
-                case 5:
+                case GxVA_Position:
+                case GxVA_BlendWeight:
+                case GxVA_BlendIndices:
+                case GxVA_Normal:
+                case GxVA_Color0:
+                case GxVA_Color1:
                     glVertexAttribPointerARB(attrib, s_glAttribSize[vertexAttrib.m_type], s_glAttribType[vertexAttrib.m_type], s_glAttribNormalized[vertexAttrib.m_type], vertexAttrib.m_bufSize, pointer);
                     this->DsSet(static_cast<EDeviceState>(Ds_VertexArray0 + attrib), 1, 0);
                     break;
@@ -3192,7 +3192,7 @@ void CGxDeviceOpenGl::IStateSyncLights() {
             this->m_ambientOnlyMode = 0;
         }
 
-        if (this->m_appMasterEnables & 0x1) {
+        if (this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_Lighting)) {
             glEnable(GL_LIGHTING);
         } else {
             glDisable(GL_LIGHTING);
@@ -3203,20 +3203,20 @@ void CGxDeviceOpenGl::IStateSyncLights() {
 
         int32_t modelViewSet = 0;
         uint16_t mask = this->m_appRenderStates[GxRs_MatSpecularExp].m_value.m_data.f[0] == 0.0f ? 0xFFEF : 0xFFFF;
-        uint16_t force = this->m_viewDirty ? 2 : 0;
+        uint16_t force = this->m_viewDirty ? CGxApiLight::FIELD_MASK::FIELD_DIRECTION_OR_POSITION : 0;
         GLenum glLight = GL_LIGHT0;
 
         for (uint32_t i = 0; i < 4; i++, glLight++) {
             CGxApiLight& light = this->m_lights[i];
-            uint16_t flags = force | (mask & light.m_flags & light.unk_0046);
+            uint16_t flags = force | (mask & light.m_flags & light.m_updateMask);
 
             if (!flags) {
                 continue;
             }
 
-            if (flags & 0x1) {
+            if (flags & CGxApiLight::FIELD_MASK::FIELD_ENABLE) {
                 if (!light.m_enable) {
-                    light.m_flags &= ~0x1;
+                    light.m_flags &= ~CGxApiLight::FIELD_MASK::FIELD_ENABLE;
                     glDisable(glLight);
                     continue;
                 }
@@ -3226,7 +3226,7 @@ void CGxDeviceOpenGl::IStateSyncLights() {
                 continue;
             }
 
-            if (flags & 0x2) {
+            if (flags & CGxApiLight::FIELD_MASK::FIELD_DIRECTION_OR_POSITION) {
                 if (!modelViewSet) {
                     CGxMatrixStack& view = this->m_xforms[GxXform_View];
                     this->IXformSetModelView(view.m_mtx[view.m_level]);
@@ -3245,19 +3245,19 @@ void CGxDeviceOpenGl::IStateSyncLights() {
                 }
             }
 
-            if (flags & 0x20) {
+            if (flags & CGxApiLight::FIELD_MASK::FIELD_CONSTANT_ATTENUATION) {
                 glLightf(glLight, GL_CONSTANT_ATTENUATION, light.m_constantAttenuation);
             }
 
-            if (flags & 0x40) {
+            if (flags & CGxApiLight::FIELD_MASK::FIELD_LINEAR_ATTENUATION) {
                 glLightf(glLight, GL_LINEAR_ATTENUATION, light.m_linearAttenuation);
             }
 
-            if (flags & 0x80) {
+            if (flags & CGxApiLight::FIELD_MASK::FIELD_QUADRATIC_ATTENUATION) {
                 glLightf(glLight, GL_QUADRATIC_ATTENUATION, light.m_quadraticAttenuation);
             }
 
-            if (flags & 0x4) {
+            if (flags & CGxApiLight::FIELD_MASK::FIELD_AMBIENT) {
                 GLfloat color[4];
                 color[0] = light.m_ambColor.x;
                 color[1] = light.m_ambColor.y;
@@ -3266,7 +3266,7 @@ void CGxDeviceOpenGl::IStateSyncLights() {
                 glLightfv(glLight, GL_AMBIENT, color);
             }
 
-            if (flags & 0x8) {
+            if (flags & CGxApiLight::FIELD_MASK::FIELD_DIFFUSE) {
                 GLfloat color[4];
                 color[0] = light.m_dirColor.x;
                 color[1] = light.m_dirColor.y;
@@ -3275,7 +3275,7 @@ void CGxDeviceOpenGl::IStateSyncLights() {
                 glLightfv(glLight, GL_DIFFUSE, color);
             }
 
-            if (flags & 0x10) {
+            if (flags & CGxApiLight::FIELD_MASK::FIELD_SPECULAR) {
                 GLfloat color[4];
                 color[0] = light.m_specColor.x;
                 color[1] = light.m_specColor.y;
@@ -3308,9 +3308,9 @@ void CGxDeviceOpenGl::IStateSyncLights() {
                 glDisable(GL_LIGHT0 + i);
 
                 if (this->m_lights[i].m_enable) {
-                    this->m_lights[i].m_flags |= 0x1;
+                    this->m_lights[i].m_flags |= CGxApiLight::FIELD_MASK::FIELD_ENABLE;
                 } else {
-                    this->m_lights[i].m_flags &= ~0x1;
+                    this->m_lights[i].m_flags &= ~CGxApiLight::FIELD_MASK::FIELD_ENABLE;
                 }
             }
         }
@@ -3328,7 +3328,7 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
     int32_t colorMaterial = this->m_appRenderStates[GxRs_ColorMaterial].m_value.m_data.i[0];
 
     if (this->m_primVertexDirty & (1 << GxVA_Color0)) {
-        this->m_materialDirty |= 1 << colorMaterial;
+        this->m_materialDirty |= CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_DIFFUSE << colorMaterial;
     }
 
     if (!this->m_materialDirty) {
@@ -3337,7 +3337,7 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
 
     GLfloat color[4];
 
-    if (this->m_materialDirty & 0x1) {
+    if (this->m_materialDirty & CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_DIFFUSE) {
         ColorToFloats(color, reinterpret_cast<const CImVector&>(this->m_appRenderStates[GxRs_MatDiffuse].m_value.m_data.u[0]));
 
         if (colorMaterial) {
@@ -3348,7 +3348,7 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
         }
     }
 
-    if (this->m_materialDirty & 0x2) {
+    if (this->m_materialDirty & CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_SPECULAR) {
         ColorToFloats(color, reinterpret_cast<const CImVector&>(this->m_appRenderStates[GxRs_MatSpecular].m_value.m_data.u[0]));
 
         if (colorMaterial == 1) {
@@ -3360,13 +3360,13 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
         }
     }
 
-    if (this->m_materialDirty & 0x4) {
+    if (this->m_materialDirty & CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_EMISSIVE) {
         ColorToFloats(color, reinterpret_cast<const CImVector&>(this->m_appRenderStates[GxRs_MatEmissive].m_value.m_data.u[0]));
 
         if (colorMaterial == 2) {
             if (!(this->m_primVertexMask & (1 << GxVA_Color0))) {
                 glColor4fv(color);
-                this->m_materialDirty = 0;
+                this->m_materialDirty = CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_NONE;
                 return;
             }
         } else {
@@ -3374,7 +3374,7 @@ void CGxDeviceOpenGl::IStateSyncMaterial() {
         }
     }
 
-    this->m_materialDirty = 0;
+    this->m_materialDirty = CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_NONE;
 }
 
 // VERIFY: 3bd05b04 manual
@@ -3575,15 +3575,15 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
             break;
 
         case GxRs_MatDiffuse:
-            this->m_materialDirty |= 0x1;
+            this->m_materialDirty |= CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_DIFFUSE;
             break;
 
         case GxRs_MatEmissive:
-            this->m_materialDirty |= 0x4;
+            this->m_materialDirty |= CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_EMISSIVE;
             break;
 
         case GxRs_MatSpecular:
-            this->m_materialDirty |= 0x2;
+            this->m_materialDirty |= CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_SPECULAR;
             break;
 
         case GxRs_MatSpecularExp:
@@ -3638,7 +3638,7 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
         }
 
         case GxRs_Lighting:
-            if ((this->m_appMasterEnables & 0x1) && value.m_data.i[0]) {
+            if ((this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_Lighting)) && value.m_data.i[0]) {
                 glEnable(GL_LIGHTING);
             } else {
                 glDisable(GL_LIGHTING);
@@ -3647,7 +3647,7 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
             break;
 
         case GxRs_Fog:
-            if ((this->m_appMasterEnables & 0x2) && value.m_data.i[0]) {
+            if ((this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_Fog)) && value.m_data.i[0]) {
                 glEnable(GL_FOG);
             } else {
                 glDisable(GL_FOG);
@@ -3656,7 +3656,7 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
             break;
 
         case GxRs_DepthTest:
-            if ((this->m_appMasterEnables & 0x4) && value.m_data.i[0]) {
+            if ((this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_DepthTest)) && value.m_data.i[0]) {
                 glEnable(GL_DEPTH_TEST);
             } else {
                 glDisable(GL_DEPTH_TEST);
@@ -3669,15 +3669,15 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
             break;
 
         case GxRs_DepthWrite:
-            this->DsSet(Ds_DepthMask, (this->m_appMasterEnables & 0x8) ? value.m_data.u[0] : 0, 0);
+            this->DsSet(Ds_DepthMask, (this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_DepthWrite)) ? value.m_data.u[0] : 0, 0);
             break;
 
         case GxRs_ColorWrite:
-            this->DsSet(Ds_ColorMask, (this->m_appMasterEnables & 0x10) ? value.m_data.u[0] : 0, 0);
+            this->DsSet(Ds_ColorMask, (this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_ColorWrite)) ? value.m_data.u[0] : 0, 0);
             break;
 
         case GxRs_Culling: {
-            if (!(this->m_appMasterEnables & 0x20)) {
+            if (!(this->m_appMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_Culling))) {
                 glDisable(GL_CULL_FACE);
                 break;
             }
@@ -3841,7 +3841,7 @@ void CGxDeviceOpenGl::IRsSendToHw(EGxRenderState which) {
 
         case GxRs_ColorMaterial:
             glColorMaterial(GL_FRONT_AND_BACK, s_glColorMaterial[value.m_data.i[0]]);
-            this->m_materialDirty = 7;
+            this->m_materialDirty = CGxDeviceOpenGl::MATERIAL_DIRTY_FLAGS::MATERIAL_DIRTY_ALL;
             break;
 
         default:
@@ -3905,7 +3905,7 @@ void CGxDeviceOpenGl::ScenePresent() {
 
     this->ICursorDraw();
 
-    if (this->m_hwMasterEnables & 0x40) {
+    if (this->m_hwMasterEnables & (1 << EGxMasterEnables::GxMasterEnable_DoubleBuffering)) {
         wglSwapLayerBuffers(this->m_hdc, WGL_SWAP_MAIN_PLANE);
     } else {
         glFinish();
@@ -3926,14 +3926,14 @@ void CGxDeviceOpenGl::IXformSetProjection(const C44Matrix& matrix) {
     }
 
     if (this->m_textureTarget[GxBuffers_Color].m_apiSpecific || this->m_textureTarget[GxBuffers_Depth].m_apiSpecific) {
-        if (!g_theGxDevicePtr->Caps().unk_00B0) {
+        if (!g_theGxDevicePtr->Caps().m_rttOriginUpperLeft) {
             projection.a1 = projection.a1 * -1.0f;
             projection.b1 = projection.b1 * -1.0f;
             projection.c1 = projection.c1 * -1.0f;
             projection.d1 = -1.0f * projection.d1;
             this->DsSet(Ds_CullFace, GL_FRONT, 0);
         }
-    } else if (!g_theGxDevicePtr->Caps().unk_00B0) {
+    } else if (!g_theGxDevicePtr->Caps().m_rttOriginUpperLeft) {
         this->DsSet(Ds_CullFace, GL_BACK, 0);
     }
 
@@ -3960,7 +3960,7 @@ void CGxDeviceOpenGl::IXformSetModelView(const C44Matrix& matrix) {
 // VERIFY: 0739bf05 auto
 // OFFSET: 0x0069E510
 void CGxDeviceOpenGl::XformSetProjection(const C44Matrix& matrix) {
-    this->m_projection = matrix;
+    CGxDevice::XformSetProjection(matrix);
     this->IXformSetProjection(matrix);
 }
 
@@ -4479,13 +4479,13 @@ void CGxDeviceOpenGl::IShaderDeleteVertex(CGxShader*& shader) {
     }
 
     switch (this->m_caps.m_shaderTargets[GxSh_Vertex]) {
-        case 6:
-        case 7:
+        case GxShVS_arbvp1:
+        case GxShVS_arbvp1_cg12:
             glDeleteProgramsARB(1, reinterpret_cast<GLuint*>(&shader->m_apiSpecific));
             break;
 
-        case 8:
-        case 9:
+        case GxShVS_nvvp:
+        case GxShVS_nvvp2:
             glDeleteProgramsNV(1, reinterpret_cast<GLuint*>(&shader->m_apiSpecific));
             break;
 
@@ -4504,7 +4504,7 @@ void CGxDeviceOpenGl::IShaderDeletePixel(CGxShader*& shader) {
         return;
     }
 
-    if (this->m_caps.m_shaderTargets[GxSh_Pixel] == 12) {
+    if (this->m_caps.m_shaderTargets[GxSh_Pixel] == GxShPS_arbfp1) {
         glDeleteProgramsARB(1, reinterpret_cast<GLuint*>(&shader->m_apiSpecific));
     }
 
@@ -4544,7 +4544,7 @@ void CGxDeviceOpenGl::ShaderConstantsSet(EGxShTarget target, uint32_t index, con
     float* dest = &shadow.constants[index * 4];
 
     for (uint32_t i = index; i < index + count; i++) {
-        int32_t changed = 0;
+        BOOL changed = 0;
 
         if (constants[0] != dest[0]) {
             changed = 1;
@@ -4594,14 +4594,14 @@ void CGxDeviceOpenGl::IShaderCreatePixel(CGxShader* shader) {
 
     int32_t target = this->m_caps.m_shaderTargets[GxSh_Pixel];
 
-    if (target < 7) {
+    if (target < GxShPS_nvrc) {
         return;
     }
 
-    if (target <= 10) {
+    if (target <= GxShPS_nvts3) {
         shader->m_apiSpecific = reinterpret_cast<void*>(1);
         shader->m_valid = 1;
-    } else if (target == 12) {
+    } else if (target == GxShPS_arbfp1) {
         GLint current;
         glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_BINDING_ARB, &current);
 
@@ -4635,8 +4635,8 @@ void CGxDeviceOpenGl::IShaderCreateVertex(CGxShader* shader) {
     }
 
     switch (this->m_caps.m_shaderTargets[GxSh_Vertex]) {
-        case 6:
-        case 7: {
+        case GxShVS_arbvp1:
+        case GxShVS_arbvp1_cg12: {
             GLint current;
             glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_PROGRAM_BINDING_ARB, &current);
 
@@ -4658,8 +4658,8 @@ void CGxDeviceOpenGl::IShaderCreateVertex(CGxShader* shader) {
             break;
         }
 
-        case 8:
-        case 9: {
+        case GxShVS_nvvp:
+        case GxShVS_nvvp2: {
             glGenProgramsNV(1, reinterpret_cast<GLuint*>(&shader->m_apiSpecific));
             glLoadProgramNV(GL_VERTEX_PROGRAM_ARB, static_cast<GLuint>(reinterpret_cast<uintptr_t>(shader->m_apiSpecific)), shader->m_code.Count() - 1, shader->m_code.Ptr());
 
@@ -4696,7 +4696,7 @@ void CGxDeviceOpenGl::IVertexShaderPatch(CGxShader* shader) {
     char* end = code + shader->m_code.Count();
 
     switch (this->m_caps.m_shaderTargets[GxSh_Vertex]) {
-        case 6: {
+        case GxShVS_arbvp1: {
             uint32_t paramSize = size;
 
             for (char* c = code; c < end; c++) {
@@ -4728,7 +4728,7 @@ void CGxDeviceOpenGl::IVertexShaderPatch(CGxShader* shader) {
             break;
         }
 
-        case 7: {
+        case GxShVS_arbvp1_cg12: {
             for (char* c = code; c < end; c++) {
                 char* start = c;
 
@@ -4819,7 +4819,7 @@ void CGxDeviceOpenGl::IPixelShaderPatch(CGxShader* shader) {
 
     shader->m_patched = 1;
 
-    if (this->m_caps.m_shaderTargets[GxSh_Pixel] != 12) {
+    if (this->m_caps.m_shaderTargets[GxSh_Pixel] != GxShPS_arbfp1) {
         return;
     }
 
@@ -4887,8 +4887,8 @@ void CGxDeviceOpenGl::IShaderConstantsSend(EGxShTarget target, uint32_t index, c
 
     if (target == GxSh_Vertex) {
         switch (this->m_caps.m_shaderTargets[GxSh_Vertex]) {
-            case 6:
-            case 7:
+            case GxShVS_arbvp1:
+            case GxShVS_arbvp1_cg12:
                 if (glExtGPUProgramParameters) {
                     glProgramEnvParameters4fvEXT(GL_VERTEX_PROGRAM_ARB, index, count, constants);
                 } else {
@@ -4900,8 +4900,8 @@ void CGxDeviceOpenGl::IShaderConstantsSend(EGxShTarget target, uint32_t index, c
 
                 break;
 
-            case 8:
-            case 9:
+            case GxShVS_nvvp:
+            case GxShVS_nvvp2:
                 glProgramParameters4fvNV(GL_VERTEX_PROGRAM_ARB, index, count, constants);
                 break;
 
@@ -4917,7 +4917,7 @@ void CGxDeviceOpenGl::IShaderConstantsSend(EGxShTarget target, uint32_t index, c
     }
 
     switch (this->m_caps.m_shaderTargets[GxSh_Pixel]) {
-        case 7:
+        case GxShPS_nvrc:
             for (uint32_t i = 0; i < count; i++) {
                 glCombinerParameterfvNV(index + i + GL_CONSTANT_COLOR0_NV, constants);
                 constants += 4;
@@ -4925,9 +4925,9 @@ void CGxDeviceOpenGl::IShaderConstantsSend(EGxShTarget target, uint32_t index, c
 
             break;
 
-        case 8:
-        case 9:
-        case 10: {
+        case GxShPS_nvts:
+        case GxShPS_nvts2:
+        case GxShPS_nvts3: {
             CGxShader* shader = static_cast<CGxShader*>(this->m_appRenderStates[GxRs_PixelShader].m_value.m_data.p);
 
             if (!shader) {
@@ -4959,7 +4959,7 @@ void CGxDeviceOpenGl::IShaderConstantsSend(EGxShTarget target, uint32_t index, c
             break;
         }
 
-        case 12:
+        case GxShPS_arbfp1:
             if (glExtGPUProgramParameters) {
                 glProgramEnvParameters4fvEXT(GL_FRAGMENT_PROGRAM_ARB, index, count, constants);
             } else {
@@ -5045,7 +5045,7 @@ void CGxDeviceOpenGl::IBindPixelShader(CGxShader* shader) {
         }
 
         switch (this->m_caps.m_shaderTargets[GxSh_Pixel]) {
-            case 7: {
+            case GxShPS_nvrc: {
                 NvPixelShader* program = reinterpret_cast<NvPixelShader*>(shader->m_code.Ptr());
 
                 if (program) {
@@ -5057,9 +5057,9 @@ void CGxDeviceOpenGl::IBindPixelShader(CGxShader* shader) {
                 break;
             }
 
-            case 8:
-            case 9:
-            case 10: {
+            case GxShPS_nvts:
+            case GxShPS_nvts2:
+            case GxShPS_nvts3: {
                 NvPixelShader* program = reinterpret_cast<NvPixelShader*>(shader->m_code.Ptr());
 
                 if (program) {
@@ -5073,7 +5073,7 @@ void CGxDeviceOpenGl::IBindPixelShader(CGxShader* shader) {
                 break;
             }
 
-            case 12:
+            case GxShPS_arbfp1:
                 glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, static_cast<GLuint>(reinterpret_cast<uintptr_t>(shader->m_apiSpecific)));
                 this->DsSet(Ds_FragmentProgram, 1, 0);
                 break;
@@ -5083,18 +5083,18 @@ void CGxDeviceOpenGl::IBindPixelShader(CGxShader* shader) {
         }
     } else {
         switch (this->m_caps.m_shaderTargets[GxSh_Pixel]) {
-            case 7:
+            case GxShPS_nvrc:
                 this->DsSet(Ds_RegisterCombiners, 0, 0);
                 break;
 
-            case 8:
-            case 9:
-            case 10:
+            case GxShPS_nvts:
+            case GxShPS_nvts2:
+            case GxShPS_nvts3:
                 this->DsSet(Ds_RegisterCombiners, 0, 0);
                 this->DsSet(Ds_TextureShader, 0, 0);
                 break;
 
-            case 12:
+            case GxShPS_arbfp1:
                 this->DsSet(Ds_FragmentProgram, 0, 0);
                 break;
 
@@ -5113,14 +5113,14 @@ void CGxDeviceOpenGl::IBindVertexShader(CGxShader* shader) {
         }
 
         switch (this->m_caps.m_shaderTargets[GxSh_Vertex]) {
-            case 6:
-            case 7:
+            case GxShVS_arbvp1:
+            case GxShVS_arbvp1_cg12:
                 glBindProgramARB(GL_VERTEX_PROGRAM_ARB, static_cast<GLuint>(reinterpret_cast<uintptr_t>(shader->m_apiSpecific)));
                 this->DsSet(Ds_VertexProgram, 1, 0);
                 break;
 
-            case 8:
-            case 9:
+            case GxShVS_nvvp:
+            case GxShVS_nvvp2:
                 glBindProgramNV(GL_VERTEX_PROGRAM_ARB, static_cast<GLuint>(reinterpret_cast<uintptr_t>(shader->m_apiSpecific)));
                 this->DsSet(Ds_VertexProgramNV, 1, 0);
                 break;
@@ -5130,13 +5130,13 @@ void CGxDeviceOpenGl::IBindVertexShader(CGxShader* shader) {
         }
     } else {
         switch (this->m_caps.m_shaderTargets[GxSh_Vertex]) {
-            case 6:
-            case 7:
+            case GxShVS_arbvp1:
+            case GxShVS_arbvp1_cg12:
                 this->DsSet(Ds_VertexProgram, 0, 0);
                 break;
 
-            case 8:
-            case 9:
+            case GxShVS_nvvp:
+            case GxShVS_nvvp2:
                 this->DsSet(Ds_VertexProgramNV, 0, 0);
                 break;
 
@@ -5152,7 +5152,7 @@ void CGxDeviceOpenGl::IShaderForceRecreation() {
     TSExplicitList<CGxShader>& pixelShaders = this->m_shaderList[GxSh_Pixel].m_fulllist;
 
     for (CGxShader* shader = pixelShaders.Head(); !pixelShaders.IsEnd(shader); shader = pixelShaders.RawNext(shader)) {
-        if (shader->m_apiSpecific && this->m_caps.m_shaderTargets[GxSh_Pixel] == 12) {
+        if (shader->m_apiSpecific && this->m_caps.m_shaderTargets[GxSh_Pixel] == GxShPS_arbfp1) {
             glDeleteProgramsARB(1, reinterpret_cast<GLuint*>(&shader->m_apiSpecific));
         }
 
@@ -5165,13 +5165,13 @@ void CGxDeviceOpenGl::IShaderForceRecreation() {
     for (CGxShader* shader = vertexShaders.Head(); !vertexShaders.IsEnd(shader); shader = vertexShaders.RawNext(shader)) {
         if (shader->m_apiSpecific) {
             switch (this->m_caps.m_shaderTargets[GxSh_Vertex]) {
-                case 6:
-                case 7:
+                case GxShVS_arbvp1:
+                case GxShVS_arbvp1_cg12:
                     glDeleteProgramsARB(1, reinterpret_cast<GLuint*>(&shader->m_apiSpecific));
                     break;
 
-                case 8:
-                case 9:
+                case GxShVS_nvvp:
+                case GxShVS_nvvp2:
                     glDeleteProgramsNV(1, reinterpret_cast<GLuint*>(&shader->m_apiSpecific));
                     break;
 

@@ -59,7 +59,7 @@ const char* CGGMSurveyInfo::GetAnswer(uint32_t index, int32_t answer) {
         return nullptr;
     }
 
-    for (int32_t i = 0; i < g_gmSurveyAnswersDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_gmSurveyAnswersDB.GetNumRecords(); i++) {
         GMSurveyAnswersRec* rec = g_gmSurveyAnswersDB.GetRecordByIndex(i);
 
         if (rec && rec->m_gmsurveyQuestionID == questionId && rec->m_sortIndex == answer - 1) {
@@ -89,7 +89,7 @@ int32_t CGGMSurveyInfo::GetNumAnswers(uint32_t index) {
 
     int32_t count = 0;
 
-    for (int32_t i = 0; i < g_gmSurveyAnswersDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_gmSurveyAnswersDB.GetNumRecords(); i++) {
         GMSurveyAnswersRec* rec = g_gmSurveyAnswersDB.GetRecord(i);
 
         if (rec && rec->m_gmsurveyQuestionID == static_cast<int32_t>(index - 1)) {
@@ -108,7 +108,7 @@ void CGGMSurveyInfo::Submit() {
     GMSurveyCurrentSurveyRec* current = g_gmSurveyCurrentSurveyDB.GetRecord(s_locale);
     msg.Put(static_cast<uint32_t>(current ? current->m_gmsurveyID : 0));
 
-    for (uint32_t i = 0; i < 10; i++) {
+    for (uint32_t i = 0; i < NUM_GM_SURVEY_QUESTIONS; i++) {
         GMSurveyCurrentSurveyRec* currentSurvey = g_gmSurveyCurrentSurveyDB.GetRecord(s_locale);
         GMSurveySurveysRec* survey = g_gmSurveySurveysDB.GetRecord(currentSurvey ? currentSurvey->m_gmsurveyID : 0);
         int32_t questionId = survey ? survey->m_questionIds[i] : 0;

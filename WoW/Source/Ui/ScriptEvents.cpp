@@ -37,7 +37,7 @@ static char s_nameWithRealm[305];
 static char s_tokenBuffers[8][32];
 
 // STATIC: 0x00AD2780
-static char* s_tokenIDs[8] = { s_tokenBuffers[0], s_tokenBuffers[1], s_tokenBuffers[2], s_tokenBuffers[3], s_tokenBuffers[4], s_tokenBuffers[5], s_tokenBuffers[6], s_tokenBuffers[7] };
+static char* s_unitTokens[8] = { s_tokenBuffers[0], s_tokenBuffers[1], s_tokenBuffers[2], s_tokenBuffers[3], s_tokenBuffers[4], s_tokenBuffers[5], s_tokenBuffers[6], s_tokenBuffers[7] };
 
 // VERIFY: bb8249cc auto
 // OFFSET: 0x00608880
@@ -76,7 +76,7 @@ static bool ParseTrailingTokens(const char* token, WOWGUID& guid, CGPlayer_C* pl
                 CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
                 guid = unit ? unit->m_unit->m_unitFieldTarget : WOWGUID();
             }
-        } else if (!SStrCmpI(token, "pet", 3) && (guid == ClntObjMgrGetActivePlayer() || CGGameUI::IsPartyMember(guid) || (player && (player->m_player->m_playerFlags & 0x80000)))) {
+        } else if (!SStrCmpI(token, "pet", 3) && (guid == ClntObjMgrGetActivePlayer() || CGGameUI::IsPartyMember(guid) || (player && (player->m_player->m_playerFlags & PLAYER_FLAGS::PLAYER_FLAG_COMMENTATOR)))) {
             token += 3;
             CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
@@ -170,12 +170,12 @@ bool Script_GetGUIDFromToken(const char* token, WOWGUID& guid, bool defaultToTar
         guid = *GetCurrentQuestGiverGUID();
     } else if (!SStrCmpI(token, "none", STORM_MAX_STR)) {
         token += 4;
-        guid.m_guid = 0xFFFFFFFFFFFFFFFFULL;
+        guid.m_guid = WOWGUID_NONE_TOKEN;
     }
 
     if ((guid != WOWGUID() || !*token) && ParseTrailingTokens(token, guid, player)) {
         if (guid == WOWGUID()) {
-            guid.m_guid = 0xFFFFFFFFFFFFFFFEULL;
+            guid.m_guid = WOWGUID_EMPTY_UNIT_TOKEN;
         }
 
         return true;
@@ -186,7 +186,7 @@ bool Script_GetGUIDFromToken(const char* token, WOWGUID& guid, bool defaultToTar
     }
 
     if (guid == WOWGUID()) {
-        guid.m_guid = 0xFFFFFFFFFFFFFFFEULL;
+        guid.m_guid = WOWGUID_EMPTY_UNIT_TOKEN;
     }
 
     return true;
@@ -367,16 +367,16 @@ void ScriptEventsRegisterUnit(CGUnit_C* unit) {
         uint32_t size;
 
         switch (i) {
-            case 0:
-            case 2:
-            case 6:
-            case 12:
+            case CGUnitData::UNIT_FIELD_CHARM:
+            case CGUnitData::UNIT_FIELD_SUMMON:
+            case CGUnitData::UNIT_FIELD_CHARMEDBY:
+            case CGUnitData::UNIT_FIELD_TARGET:
                 size = sizeof(WOWGUID);
                 break;
 
-            case 125:
-            case 132:
-                size = 28;
+            case CGUnitData::UNIT_FIELD_POWER_COST_MODIFIER:
+            case CGUnitData::UNIT_FIELD_POWER_COST_MULTIPLIER:
+                size = CGUnitData::UNIT_FIELD_POWER_COST_MODIFIER_SIZE * sizeof(uint32_t);
                 break;
 
             default:
@@ -861,8 +861,8 @@ const char* Script_GetAuraTokenFromGUID(const WOWGUID* guid) {
 
 // VERIFY: 1a4d44e4 manual
 // OFFSET: 0x0060BB70
-char** Script_GetTokenIDsFromGUID(const WOWGUID& guid, int32_t* count) {
-    *count = 0;
+char** Script_GetTokenIDsFromGUID(const WOWGUID& guid, int32_t* numtokens) {
+    *numtokens = 0;
 
     if (guid == WOWGUID()) {
         return nullptr;
@@ -875,73 +875,74 @@ char** Script_GetTokenIDsFromGUID(const WOWGUID& guid, int32_t* count) {
     }
 
     if (guid == player->m_obj->m_guid) {
-        SStrCopy(s_tokenIDs[(*count)++], "player", sizeof(s_tokenBuffers[0]));
+        SStrCopy(s_unitTokens[(*numtokens)++], "player", sizeof(s_tokenBuffers[0]));
     }
 
     if (player->IsSeatedInVehicle() && guid.m_guid == player->GetTransportGUID()) {
-        SStrCopy(s_tokenIDs[(*count)++], "vehicle", sizeof(s_tokenBuffers[0]));
+        SStrCopy(s_unitTokens[(*numtokens)++], "vehicle", sizeof(s_tokenBuffers[0]));
     }
 
     if (guid == (player->m_unit->m_unitFieldCharm != WOWGUID() ? player->m_unit->m_unitFieldCharm : player->m_unit->m_unitFieldSummon)) {
-        SStrCopy(s_tokenIDs[(*count)++], "pet", sizeof(s_tokenBuffers[0]));
+        SStrCopy(s_unitTokens[(*numtokens)++], "pet", sizeof(s_tokenBuffers[0]));
     }
 
     for (uint32_t i = 0; i < CGPartyInfo::GetNumPartyMembers(); i++) {
         if (guid == CGGameUI::GetPartyMember(i)) {
-            SStrPrintf(s_tokenIDs[(*count)++], sizeof(s_tokenBuffers[0]), "party%d", i + 1);
+            SStrPrintf(s_unitTokens[(*numtokens)++], sizeof(s_tokenBuffers[0]), "party%d", i + 1);
             break;
         }
 
         if (guid == CGGameUI::GetPartyMemberPet(i)) {
-            SStrPrintf(s_tokenIDs[(*count)++], sizeof(s_tokenBuffers[0]), "partypet%d", i + 1);
+            SStrPrintf(s_unitTokens[(*numtokens)++], sizeof(s_tokenBuffers[0]), "partypet%d", i + 1);
             break;
         }
     }
 
     for (uint32_t i = 0; i < CGRaidInfo::m_numMembers; i++) {
         if (guid == GetRaidMemberGUID(i)) {
-            SStrPrintf(s_tokenIDs[(*count)++], sizeof(s_tokenBuffers[0]), "raid%d", i + 1);
+            SStrPrintf(s_unitTokens[(*numtokens)++], sizeof(s_tokenBuffers[0]), "raid%d", i + 1);
             break;
         }
 
         if (guid == CGGameUI::GetRaidMemberPet(i)) {
-            SStrPrintf(s_tokenIDs[(*count)++], sizeof(s_tokenBuffers[0]), "raidpet%d", i + 1);
+            SStrPrintf(s_unitTokens[(*numtokens)++], sizeof(s_tokenBuffers[0]), "raidpet%d", i + 1);
             break;
         }
     }
 
     for (uint32_t i = 0; i < GetArenaPetGUIDCount(); i++) {
         if (guid == CGBattlefieldInfo::GetArenaOpponent(i)) {
-            SStrPrintf(s_tokenIDs[(*count)++], sizeof(s_tokenBuffers[0]), "arena%d", i + 1);
+            SStrPrintf(s_unitTokens[(*numtokens)++], sizeof(s_tokenBuffers[0]), "arena%d", i + 1);
             break;
         }
 
         if (guid == CGBattlefieldInfo::GetArenaOpponentPet(i)) {
-            SStrPrintf(s_tokenIDs[(*count)++], sizeof(s_tokenBuffers[0]), "arenapet%d", i + 1);
+            SStrPrintf(s_unitTokens[(*numtokens)++], sizeof(s_tokenBuffers[0]), "arenapet%d", i + 1);
             break;
         }
     }
 
     for (uint32_t i = 0; i < CGInstanceEncounter_C::GetNumBossSlots(); i++) {
         if (guid == CGInstanceEncounter_C::GetBoss(i)) {
-            SStrPrintf(s_tokenIDs[(*count)++], sizeof(s_tokenBuffers[0]), "boss%d", i + 1);
+            SStrPrintf(s_unitTokens[(*numtokens)++], sizeof(s_tokenBuffers[0]), "boss%d", i + 1);
             break;
         }
     }
 
     if (guid == CGGameUI::m_lockedTarget) {
-        SStrCopy(s_tokenIDs[(*count)++], "target", sizeof(s_tokenBuffers[0]));
+        SStrCopy(s_unitTokens[(*numtokens)++], "target", sizeof(s_tokenBuffers[0]));
     }
 
     if (guid == CGGameUI::m_focusTarget) {
-        SStrCopy(s_tokenIDs[(*count)++], "focus", sizeof(s_tokenBuffers[0]));
+        SStrCopy(s_unitTokens[(*numtokens)++], "focus", sizeof(s_tokenBuffers[0]));
     }
 
     if (guid == CGGameUI::m_interactTarget) {
-        SStrCopy(s_tokenIDs[(*count)++], "npc", sizeof(s_tokenBuffers[0]));
+        SStrCopy(s_unitTokens[(*numtokens)++], "npc", sizeof(s_tokenBuffers[0]));
     }
 
-    return s_tokenIDs;
+    STORM_ASSERT(static_cast<uint32_t>(*numtokens) < ARRSIZE(s_unitTokens)); // 12213: "numtokens < ARRSIZE(s_unitTokens)"
+    return s_unitTokens;
 }
 
 // VERIFY: 36785034 auto
@@ -957,7 +958,7 @@ void Script_SendUnitSignal(const WOWGUID& guid, int32_t signal) {
 
 // VERIFY: b717b06c manual
 // OFFSET: 0x0060BF60
-void Script_SendUnitSpellSignal(const WOWGUID& guid, uint8_t castCount, const SpellRec* spell, int32_t signal) {
+void Script_SendUnitSpellSignal(const WOWGUID& guid, uint8_t castCount, const SpellRec* spell, SCRIPT_EVENT signal) {
     if (!spell) {
         Script_SendUnitSignal(guid, signal);
         return;
@@ -1043,11 +1044,11 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(info->m_guid, TYPE_UNIT, __FILE__, __LINE__));
 
     if (unit) {
-        if ((unit->m_auraEffectMask[36] & 0x80) && ClntObjMgrGetActivePlayer() && !unit->IsFriendly(ClntObjMgrGetActivePlayerObj())) {
+        if (unit->HasAuraEffect(SPELL_AURA_295) && ClntObjMgrGetActivePlayer() && !unit->IsFriendly(ClntObjMgrGetActivePlayerObj())) {
             return 0;
         }
 
-        if (!(unit->m_modelFlags & 0x10000)) {
+        if (!(unit->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLED)) {
             uint32_t slot = unit->GetSortedAuraSlot(info->m_index, info->m_name, info->m_rank, info->m_filter);
             SpellRec spell;
 
@@ -1089,7 +1090,7 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
                 lua_pushnil(L);
             }
 
-            if (spell.m_attributesExG & 0x10000000) {
+            if (spell.m_attributesExG & SPELL_ATTR7::SPELL_ATTR7_CONSOLIDATED_RAID_BUFF) {
                 lua_pushnumber(L, 1.0);
             } else {
                 lua_pushnil(L);
@@ -1104,7 +1105,7 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
     uint8_t* auraFlags;
 
     if (CGPartyMemberState* state = CGPartyMemberStateRepository::GetState(info->m_guid)) {
-        if (!(state->m_flags & 0x1)) {
+        if (!(state->m_flags & CGPartyMemberState::MEMBER_FLAG_CONNECTED)) {
             return 0;
         }
 
@@ -1121,8 +1122,8 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
     bool raid = (info->m_filter & BUFF_FILTER_RAID) != 0;
     int32_t found = 0;
 
-    for (uint32_t i = 0; i < 64 && auras[i]; i++) {
-        if (helpful != !(auraFlags[i] & 0x80)) {
+    for (uint32_t i = 0; i < MAX_PARTY_MEMBER_AURAS && auras[i]; i++) {
+        if (helpful != !(auraFlags[i] & AURA_FLAG_HARMFUL)) {
             continue;
         }
 
@@ -1134,7 +1135,7 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
 
         WOWGUID caster = { 0 };
 
-        if (!CGSpellBook::CanShowAura(&spell, &caster, (auraFlags[i] & 0x8) != 0)) {
+        if (!CGSpellBook::CanShowAura(&spell, &caster, (auraFlags[i] & AURA_FLAG_SELF_CAST) != 0)) {
             continue;
         }
 
@@ -1142,7 +1143,7 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
             continue;
         }
 
-        if ((auraFlags[i] & 0x10) ? (info->m_filter & BUFF_FILTER_NOT_CANCELABLE) : (info->m_filter & BUFF_FILTER_CANCELABLE)) {
+        if ((auraFlags[i] & AURA_FLAG_CANCELABLE) ? (info->m_filter & BUFF_FILTER_NOT_CANCELABLE) : (info->m_filter & BUFF_FILTER_CANCELABLE)) {
             continue;
         }
 
@@ -1168,7 +1169,7 @@ int32_t PushUnitAura(lua_State* L, ScriptAuraInfo* info) {
             lua_pushnil(L);
             lua_pushnil(L);
 
-            if (spell.m_attributesExG & 0x10000000) {
+            if (spell.m_attributesExG & SPELL_ATTR7::SPELL_ATTR7_CONSOLIDATED_RAID_BUFF) {
                 lua_pushnumber(L, 1.0);
             } else {
                 lua_pushnil(L);

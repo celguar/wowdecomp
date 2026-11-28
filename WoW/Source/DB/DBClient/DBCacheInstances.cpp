@@ -201,7 +201,7 @@ static int32_t ReceiveInvalidatePlayer(void* param, NETMESSAGE msgId, uint32_t t
     WOWGUID guid;
     msg->Get(guid.m_guid);
 
-    if ((guid.m_guid & 0xF000000000000000ULL) == 0x1000000000000000ULL && (guid.m_guid & 0x0FF0000000000000ULL) == 0x0FF0000000000000ULL) {
+    if (guid.IsGuild()) {
         g_guildInfoCache.Invalidate(static_cast<int32_t>(guid.m_guid));
     } else {
         g_nameDBCache.Invalidate(guid.m_guid);
@@ -277,7 +277,7 @@ static int32_t ReceiveName(void* param, NETMESSAGE msgId, uint32_t time, CDataSt
     msg->Get(result);
 
     switch (result) {
-        case 0: {
+        case NameCache::QUERY_RESULT_OK: {
             msg->GetString(name.m_name, sizeof(name.m_name));
             msg->GetString(name.m_realmName, sizeof(name.m_realmName));
 
@@ -304,18 +304,18 @@ static int32_t ReceiveName(void* param, NETMESSAGE msgId, uint32_t time, CDataSt
 
             g_nameDBCache.AddItem(&name, name.m_guid.m_guid);
 
-            if ((name.m_guid.m_guid & 0xF000000000000000ULL) == 0x1000000000000000ULL && (name.m_guid.m_guid & 0x0FF0000000000000ULL) == 0x0FD0000000000000ULL) {
+            if (name.m_guid.GetGlobalType() == WOWGUID_TYPE_UNKNOWN_1FD) {
                 g_nameDBCache.SetTemporary(name.m_guid.m_guid);
             }
 
             break;
         }
 
-        case 2:
+        case NameCache::QUERY_RESULT_RETRY:
             g_nameDBCache.RetryItem(name.m_guid.m_guid);
             break;
 
-        case 3:
+        case NameCache::QUERY_RESULT_PLACEHOLDER:
             SStrCopy(name.m_name, "?", sizeof(name.m_name));
             memset(name.m_realmName, 0, sizeof(name.m_realmName));
             name.m_race = 0;
@@ -373,8 +373,8 @@ static int32_t ReceiveDance(void* param, NETMESSAGE msgId, uint32_t time, CDataS
     DanceCache dance;
     dance.Unpack(msg);
 
-    if (dance.m_id & 0x80000000) {
-        g_danceCache.DenyItem(dance.m_id & 0x7FFFFFFF);
+    if (dance.m_id & DanceCache::ID_DENIED_FLAG) {
+        g_danceCache.DenyItem(dance.m_id & ~DanceCache::ID_DENIED_FLAG);
     } else {
         g_danceCache.AddItem(&dance, dance.m_id);
     }
@@ -457,63 +457,63 @@ void DBCache_RegisterHandlers() {
 // VERIFY: 4b275620 auto
 // OFFSET: 0x00635C70
 void DBCache_ClearTemporaryCaches() {
-    if (!g_creatureDBCache.m_enabled) {
+    if (!g_creatureDBCache.IsEnabled()) {
         g_creatureDBCache.Clear();
     }
 
-    if (!g_gameObjectDBCache.m_enabled) {
+    if (!g_gameObjectDBCache.IsEnabled()) {
         g_gameObjectDBCache.Clear();
     }
 
-    if (!g_itemDBCache.m_enabled) {
+    if (!g_itemDBCache.IsEnabled()) {
         g_itemDBCache.Clear();
     }
 
-    if (!g_itemNameDBCache.m_enabled) {
+    if (!g_itemNameDBCache.IsEnabled()) {
         g_itemNameDBCache.Clear();
     }
 
-    if (!g_npcTextDBCache.m_enabled) {
+    if (!g_npcTextDBCache.IsEnabled()) {
         g_npcTextDBCache.Clear();
     }
 
-    if (!g_nameDBCache.m_enabled) {
+    if (!g_nameDBCache.IsEnabled()) {
         g_nameDBCache.Clear();
     }
 
-    if (!g_guildInfoCache.m_enabled) {
+    if (!g_guildInfoCache.IsEnabled()) {
         g_guildInfoCache.Clear();
     }
 
-    if (!g_questDBCache.m_enabled) {
+    if (!g_questDBCache.IsEnabled()) {
         g_questDBCache.Clear();
     }
 
-    if (!g_pageTextCache.m_enabled) {
+    if (!g_pageTextCache.IsEnabled()) {
         g_pageTextCache.Clear();
     }
 
-    if (!g_petNameCache.m_enabled) {
+    if (!g_petNameCache.IsEnabled()) {
         g_petNameCache.Clear();
     }
 
-    if (!g_petitionCache.m_enabled) {
+    if (!g_petitionCache.IsEnabled()) {
         g_petitionCache.Clear();
     }
 
-    if (!g_itemTextDBCache.m_enabled) {
+    if (!g_itemTextDBCache.IsEnabled()) {
         g_itemTextDBCache.Clear();
     }
 
-    if (!g_wardenCache.m_enabled) {
+    if (!g_wardenCache.IsEnabled()) {
         g_wardenCache.Clear();
     }
 
-    if (!g_arenaTeamCache.m_enabled) {
+    if (!g_arenaTeamCache.IsEnabled()) {
         g_arenaTeamCache.Clear();
     }
 
-    if (!g_danceCache.m_enabled) {
+    if (!g_danceCache.IsEnabled()) {
         g_danceCache.Clear();
     }
 }
@@ -542,6 +542,7 @@ DBCache<NameCache, uint64_t, CHashKeyGUID>::REVERSEENTRY* DBCache<NameCache, uin
 // OFFSET: 0x006701F0
 template <>
 NameCache* DBCache<NameCache, uint64_t, CHashKeyGUID>::GetRecordByName(const char* name) {
+    STORM_ASSERT(this->m_created);
     REVERSEENTRY* entry = this->FindReverseEntry(name);
     return entry ? entry->m_record : nullptr;
 }
@@ -569,6 +570,7 @@ DBCache<PetNameCache, int32_t, HASHKEY_INT>::REVERSEENTRY* DBCache<PetNameCache,
 // OFFSET: 0x006701F0
 template <>
 PetNameCache* DBCache<PetNameCache, int32_t, HASHKEY_INT>::GetRecordByName(const char* name) {
+    STORM_ASSERT(this->m_created);
     REVERSEENTRY* entry = this->FindReverseEntry(name);
     return entry ? entry->m_record : nullptr;
 }
@@ -580,7 +582,7 @@ void DBCache<NameCache, uint64_t, CHashKeyGUID>::RemoveReverseEntry(const char* 
     REVERSEENTRY* entry = this->FindReverseEntry(name);
 
     if (!entry) {
-        SErrSetLastError(87);
+        SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return;
     }
 
@@ -614,7 +616,7 @@ void DBCache<NameCache, uint64_t, CHashKeyGUID>::Invalidate(uint64_t key) {
 
     if (!hash->m_loaded) {
         this->DenyItem(key);
-    } else if (hash->m_dispatching) {
+    } else if (hash->m_cbInUse) {
         hash->m_invalidatePending = true;
     } else {
         this->RemoveReverseEntry(hash->m_record.m_name);
@@ -632,7 +634,7 @@ void DBCache<NameCache, uint64_t, CHashKeyGUID>::AddItem(NameCache* item, uint64
         hash = this->m_entries.New(DBCacheHashKey(key), key, 0, 0);
     }
 
-    hash->m_dispatching = true;
+    hash->m_cbInUse = true;
     hash->m_record.Copy(*item);
     hash->m_loaded = true;
     hash->m_id = key;
@@ -646,7 +648,7 @@ void DBCache<NameCache, uint64_t, CHashKeyGUID>::AddItem(NameCache* item, uint64
 
     hash->m_callbacks.Clear();
     bool invalidate = hash->m_invalidatePending;
-    hash->m_dispatching = false;
+    hash->m_cbInUse = false;
 
     if (invalidate) {
         this->Invalidate(key);

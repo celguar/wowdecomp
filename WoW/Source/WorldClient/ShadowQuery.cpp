@@ -1,4 +1,5 @@
 #include "ShadowQuery.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "WoW/Source/WorldClient/WorldConstants.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/ConsoleBase/Types.h"
@@ -58,9 +59,9 @@ void CShadowQuery::Initialize() {
     CShadowCache::SetQueryCallback(CShadowQuery::QueryCallback);
     CShadowCache::SetRenderCallback(CShadowQuery::RenderCallback);
 
-    g_shadowCull = CVar::Register("shadowCull", "enable shadow frustum culling", 0, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
-    g_shadowScissor = CVar::Register("shadowScissor", "enable scissoring when rendering shadowmaps", 0, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
-    g_shadowInstancing = CVar::Register("shadowInstancing", "enable instancing when rendering shadowmaps", 0, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
+    g_shadowCull = CVar::Register("shadowCull", "enable shadow frustum culling", CVAR_FLAGS::CVAR_NONE, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
+    g_shadowScissor = CVar::Register("shadowScissor", "enable scissoring when rendering shadowmaps", CVAR_FLAGS::CVAR_NONE, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
+    g_shadowInstancing = CVar::Register("shadowInstancing", "enable instancing when rendering shadowmaps", CVAR_FLAGS::CVAR_NONE, "1", nullptr, CATEGORY_DEFAULT, false, nullptr, false);
 
     CShadowCache::Initialize();
 }
@@ -72,8 +73,8 @@ void CShadowQuery::FreeBuffers() {
             SMemFree(buffers->m_groups, nullptr, 0, 0);
         }
 
-        if (buffers->m_groupData) {
-            SMemFree(buffers->m_groupData, nullptr, 0, 0);
+        if (buffers->m_groupMatrices) {
+            SMemFree(buffers->m_groupMatrices, nullptr, 0, 0);
         }
 
         delete[] buffers->m_untextured.m_batches;
@@ -85,7 +86,11 @@ void CShadowQuery::FreeBuffers() {
 // OFFSET: 0x007BB3E0
 static void GetViewerPosition(C3Vector* position) {
     *position = DayNight::GetInfo()->m_cameraPos;
+#ifdef WOWDECOMP_TOOL_FEATURES
+    CGCamera* camera = World::GetViewCamera();
+#else
     CGCamera* camera = CGWorldFrame::GetActiveCamera();
+#endif
 
     if (!camera) {
         return;
@@ -102,7 +107,7 @@ static void GetViewerPosition(C3Vector* position) {
 // OFFSET: 0x007BB570
 void CShadowQuery::Update() {
     C3Vector direction = CMap::s_mapLight->m_light.m_dir;
-    int32_t useCullFrustum = CWorldScene::frustumPortalView.m_maxViewDepth >= 0.0f || CWorldScene::s_hasPendingExteriorGroups;
+    BOOL useCullFrustum = CWorldScene::frustumPortalView.m_maxViewDepth >= 0.0f || CWorldScene::s_hasPendingExteriorGroups;
     float z = direction.z * 5.0f;
 
     if (z < -1.2f) {
@@ -135,7 +140,11 @@ void CShadowQuery::MatrixCallback(C3Vector& center, float radius, C44Matrix& mat
     C3Vector eye(0.0f, 0.0f, 0.0f);
     C3Vector target(0.0f, 0.0f, 0.0f);
     C3Vector camera(0.0f, 0.0f, 0.0f);
+#ifdef WOWDECOMP_TOOL_FEATURES
+    World::GetViewCameraPosition(&camera);
+#else
     CGWorldFrame::GetCameraPosition(&camera);
+#endif
 
     eye.x = center.x - CShadowCache::s_sunDir.x * 2000.0f - camera.x;
     eye.y = center.y - CShadowCache::s_sunDir.y * 2000.0f - camera.y;
@@ -204,16 +213,16 @@ void CShadowQuery::FrustumCallback(CFrustum& frustum, C44Matrix& matrix, const C
     frustum.InvertPlanes();
     frustum.SwapCorners();
 
-    float* rect = data.m_cullRects[band];
-    rect[0] = -1.0f;
-    rect[1] = -1.0f;
-    rect[2] = 1.0f;
-    rect[3] = 1.0f;
+    CRect& rect = data.m_cullRects[band];
+    rect.minY = -1.0f;
+    rect.minX = -1.0f;
+    rect.maxY = 1.0f;
+    rect.maxX = 1.0f;
 
     CFrustum& cull = data.m_bandFrustums[band];
     cull = frustum;
 
-    if (data.m_queryFlags[band] == 8 || !g_shadowCull->m_intValue) {
+    if (data.m_queryFlags[band] == CShadowCacheQueryData::QUERY_STATIC || !g_shadowCull->m_intValue) {
         return;
     }
 
@@ -225,17 +234,17 @@ void CShadowQuery::FrustumCallback(CFrustum& frustum, C44Matrix& matrix, const C
     box.t = C3Vector::Max(box.t, C3Vector(-1.0f, -1.0f, -1.0f));
     box.t = C3Vector::Min(box.t, C3Vector(1.0f, 1.0f, 1.0f));
 
-    if (box.t.x > box.b.x && box.t.y > box.b.y && box.t.z > box.b.z) {
+    if (box.IsValid()) {
         C44Matrix ortho;
         GxuXformCreateOrtho(-(bounds[0] * box.b.x), bounds[1] * box.t.x, -(bounds[2] * box.b.y), box.t.y * bounds[3], 1.0f, 4000.0f, ortho);
         GxuXformCalcFrustumCorners(view, ortho, corners);
         cull.CalcPlanesFromCorners(corners);
         cull.InvertPlanes();
         cull.SwapCorners();
-        rect[1] = box.b.x;
-        rect[3] = box.t.x;
-        rect[0] = -box.t.y;
-        rect[2] = -box.b.y;
+        rect.minX = box.b.x;
+        rect.maxX = box.t.x;
+        rect.minY = -box.t.y;
+        rect.maxY = -box.b.y;
     }
 }
 
@@ -251,11 +260,11 @@ void CShadowQuery::AllocBuffers() {
         buffers.m_textured.m_maxCount = 0x2000;
 
         if (!buffers.m_groups) {
-            buffers.m_groups = SMemAlloc(0x800 * sizeof(CMapObjGroup*), __FILE__, __LINE__, 0);
+            buffers.m_groups = static_cast<CMapObjGroup**>(SMemAlloc(0x800 * sizeof(CMapObjGroup*), __FILE__, __LINE__, 0));
         }
 
-        if (!buffers.m_groupData) {
-            buffers.m_groupData = SMemAlloc(0x800 * sizeof(C44Matrix*), __FILE__, __LINE__, 0);
+        if (!buffers.m_groupMatrices) {
+            buffers.m_groupMatrices = static_cast<C44Matrix**>(SMemAlloc(0x800 * sizeof(C44Matrix*), __FILE__, __LINE__, 0));
         }
 
         if (!buffers.m_untextured.m_batches) {
@@ -286,7 +295,7 @@ int32_t CShadowQuery::QueryCallback(CShadowCacheQueryData& data, uint32_t frame)
     CShadowQuery::GatherShadowCasters(data, 0, data.m_lastBand);
 
     if (data.m_useFrustum) {
-        if (flags & 0xC) {
+        if (flags & CShadowCacheQueryData::QUERY_WORLD_MASK) {
             CFrustum& frustum = data.m_frustums[data.m_lastBand];
             C3Vector center(0.0f, 0.0f, 0.0f);
             center.x = frustum.corners[0].x;
@@ -310,7 +319,7 @@ int32_t CShadowQuery::QueryCallback(CShadowCacheQueryData& data, uint32_t frame)
         }
     } else {
         for (int32_t band = 0; band <= data.m_lastBand; band++) {
-            if (flags & 0xC) {
+            if (flags & CShadowCacheQueryData::QUERY_WORLD_MASK) {
                 CWorldOcclusion::ClearVolumes();
                 CShadowQuery::QueryMapObjDefsBand(data, band);
                 CShadowQuery::QueryTerrainBand(data, band);
@@ -351,7 +360,11 @@ int32_t CShadowQuery::RenderCallback(CShadowCacheQueryData& data, int32_t band, 
     GxRsSet(GxRs_Fog, 0);
 
     CShaderEffect* effect = CShaderEffectManager::GetEffect("ShadowMapRenderSL");
+#ifdef WOWDECOMP_TOOL_FEATURES
+    World::GetViewCameraPosition(&camera);
+#else
     CGWorldFrame::GetCameraPosition(&camera);
+#endif
     C3Vector& pos = data.m_pos[band];
     eye.x = pos.x - CShadowCache::s_sunDir.x * 2000.0f - camera.x;
     eye.y = pos.y - CShadowCache::s_sunDir.y * 2000.0f - camera.y;
@@ -382,24 +395,24 @@ int32_t CShadowQuery::RenderCallback(CShadowCacheQueryData& data, int32_t band, 
     inverseView = copy.Inverse(determinant);
 
     effect->SetCurrent();
-    float constants[4] = { 0.0f, 0.0f, 0.0f, 0.00025000001f };
-    CShadowCache::SetShadowScale(0.00025000001f);
+    float constants[4] = { 0.0f, 0.0f, 0.0f, 0.00025f };
+    CShadowCache::SetShadowScale(0.00025f);
     g_theGxDevicePtr->ShaderConstantsSet(GxSh_Pixel, 0, constants, 1);
     CShaderEffect::s_shadowValue = CShadowCache::GetShadowValue();
     g_theGxDevicePtr->XformSetProjection(data.m_matrices[band]);
     CShaderEffect::UpdateProjMatrix();
     GxRsSet(GxRs_ScissorTest, 0);
     g_theGxDevicePtr->DeviceSetRenderTarget(GxBuffers_Color, target, 0);
-    GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+    GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, CImVector(COLOR_WHITE_BGRA));
 
     if (g_shadowScissor->m_intValue) {
         GxRsSet(GxRs_ScissorTest, 1);
-        float* rect = data.m_cullRects[band];
+        CRect& rect = data.m_cullRects[band];
         CRect scissor;
-        scissor.minY = (rect[0] + 1.0f) * 0.5f;
-        scissor.minX = (rect[1] + 1.0f) * 0.5f;
-        scissor.maxY = (rect[2] + 1.0f) * 0.5f;
-        scissor.maxX = 0.5f * (rect[3] + 1.0f);
+        scissor.minY = (rect.minY + 1.0f) * 0.5f;
+        scissor.minX = (rect.minX + 1.0f) * 0.5f;
+        scissor.maxY = (rect.maxY + 1.0f) * 0.5f;
+        scissor.maxX = 0.5f * (rect.maxX + 1.0f);
         g_theGxDevicePtr->SetScissor(scissor);
     }
 
@@ -409,7 +422,7 @@ int32_t CShadowQuery::RenderCallback(CShadowCacheQueryData& data, int32_t band, 
     g_theGxDevicePtr->ShaderConstantsSet(GxSh_Vertex, 14, &texMatrix.a0, 3);
 
     if (buffers.m_groupCount) {
-        CMapObj::RenderMapObjGroupsShadowMap(buffers.m_groups, buffers.m_groupCount, buffers.m_groupData, translation, data.m_frustums[band]);
+        CMapObj::RenderMapObjGroupsShadowMap(buffers.m_groups, buffers.m_groupCount, buffers.m_groupMatrices, translation, data.m_frustums[band]);
     }
 
     if (buffers.m_untextured.m_count || buffers.m_textured.m_count) {
@@ -446,7 +459,7 @@ void CShadowQuery::GatherShadowCasters(CShadowCacheQueryData& data, int32_t firs
     float minRadius[3];
     maxRadius[0] = 10000.0f;
 
-    if ((data.m_queryFlags[0] & 0xC) == 4) {
+    if ((data.m_queryFlags[0] & CShadowCacheQueryData::QUERY_WORLD_MASK) == CShadowCacheQueryData::QUERY_BILLBOARDED) {
         maxRadius[0] = 25.0f;
     }
 
@@ -457,36 +470,36 @@ void CShadowQuery::GatherShadowCasters(CShadowCacheQueryData& data, int32_t firs
     minRadius[2] = 10.0f;
 
     for (CMapEntity* entity = CMap::entityList.Head(); entity; entity = CMap::entityList.Next(entity)) {
-        if (entity->m_staticFlags & 0x4) {
+        if (entity->m_staticFlags & MAP_STATIC_FLAGS::MAP_STATIC_FLAG_HIDDEN) {
             continue;
         }
 
-        CM2Model* model = entity->m_model;
+        CM2Model* model = entity->model;
 
         if (!model) {
             continue;
         }
 
-        int32_t isUnit = 1;
+        BOOL isUnit = 1;
 
-        if (!(entity->m_type & CMapBaseObj::Type_Entity) || (entity->m_staticFlags & 0x2000)) {
+        if (!(entity->GetType() & CMapBaseObj::Type_Entity) || (entity->m_staticFlags & MAP_STATIC_FLAGS::MAP_STATIC_FLAG_LINK_MULTIPLE_WMO_GROUPS)) {
             isUnit = 0;
         }
 
-        uint32_t doodad = (model->m_fFlags & 0x1) ? model->m_shared->m_billboardBoneCount : 0;
+        uint32_t doodad = (model->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED) ? model->m_shared->m_billboardBoneCount : 0;
 
         for (int32_t band = firstBand; band <= lastBand; band++) {
             int32_t queryFlags = data.m_queryFlags[band];
             uint32_t flags;
 
-            if (queryFlags & 0x2) {
+            if (queryFlags & CShadowCacheQueryData::QUERY_INTERIOR) {
                 if (!isUnit) {
                     continue;
                 }
 
                 flags = entity->m_flags;
 
-                if (flags & 0x4) {
+                if (flags & MAPOBJ_FLAG_EXTERIOR) {
                     continue;
                 }
 
@@ -496,8 +509,8 @@ void CShadowQuery::GatherShadowCasters(CShadowCacheQueryData& data, int32_t firs
             } else {
                 flags = entity->m_flags;
 
-                if (flags & 0x2) {
-                    if (!(entity->m_staticFlags & 0x1000)) {
+                if (flags & MAPOBJ_FLAG_INTERIOR) {
+                    if (!(entity->m_staticFlags & MAP_STATIC_FLAGS::MAP_STATIC_FLAG_BLEND_OUTDOOR_LIGHT)) {
                         continue;
                     }
 
@@ -510,11 +523,11 @@ void CShadowQuery::GatherShadowCasters(CShadowCacheQueryData& data, int32_t firs
             int32_t wanted;
 
             if (isUnit) {
-                wanted = queryFlags & 0x1;
+                wanted = queryFlags & CShadowCacheQueryData::QUERY_UNITS;
             } else if (doodad) {
-                wanted = queryFlags & 0x4;
+                wanted = queryFlags & CShadowCacheQueryData::QUERY_BILLBOARDED;
             } else {
-                wanted = queryFlags & 0x8;
+                wanted = queryFlags & CShadowCacheQueryData::QUERY_STATIC;
             }
 
             if (!wanted) {
@@ -524,7 +537,7 @@ void CShadowQuery::GatherShadowCasters(CShadowCacheQueryData& data, int32_t firs
             CAaBox& extents = data.m_extents[band];
             CAaBox& bbox = entity->m_bbox;
 
-            if (extents.t.x >= bbox.b.x && extents.t.y >= bbox.b.y && extents.t.z >= bbox.b.z && extents.b.x <= bbox.t.x && extents.b.y <= bbox.t.y && extents.b.z <= bbox.t.z && minRadius[band] <= entity->m_sphere.r && ((flags & 0x20000) || maxRadius[band] >= entity->m_sphere.r)) {
+            if (extents.Intersects(bbox) && minRadius[band] <= entity->m_sphere.r && ((flags & MAPOBJ_FLAG_SHADOW_20000) || maxRadius[band] >= entity->m_sphere.r)) {
                 if (data.m_bandFrustums[band].Cull(bbox) && (!data.m_useCullFrustum[band] || data.m_cullFrustums[band].CullInv(bbox) != WorldCull_notOutside)) {
                     model->GatherModelBatchesShadowMap(CShadowQuery::s_bandBuffers[band].m_untextured, CShadowQuery::s_bandBuffers[band].m_textured);
                 }
@@ -548,7 +561,7 @@ void CShadowQuery::Clear(CGxTex* target, CGxTex* depthTarget, float* rect) {
     GxRenderTargetSet(GxBuffers_Depth, depthTarget, 0);
     GxRenderTargetSet(GxBuffers_Color, target, 0);
     GxXformSetViewport(rect[0], rect[1], rect[2], rect[3], 0.0f, 1.0f);
-    GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+    GxSceneClear(GxBufferBit_Color | GxBufferBit_Depth, CImVector(COLOR_WHITE_BGRA));
     GxXformSetViewport(viewportMinX, viewportMaxX, viewportMinY, viewportMaxY, viewportMinZ, viewportMaxZ);
     GxRenderTargetSet(GxBuffers_Color, oldTarget, 0);
 }
@@ -559,7 +572,7 @@ void CShadowQuery::GetSize(CShadowCacheQueryData& data, int32_t band, float* min
     *maxSize = 10000.0f;
 
     if (band == 0) {
-        if ((data.m_queryFlags[0] & 0xC) == 4) {
+        if ((data.m_queryFlags[0] & CShadowCacheQueryData::QUERY_WORLD_MASK) == CShadowCacheQueryData::QUERY_BILLBOARDED) {
             *maxSize = 25.0f;
             *minSize = 0.25f;
             return;
@@ -630,7 +643,7 @@ void CShadowQuery::QueryMapObjDefsBand(CShadowCacheQueryData& data, int32_t band
     for (CMapObjDef* def = CMap::mapObjDefHash.m_fulllist.Head(); def; def = CMap::mapObjDefHash.Next(def)) {
         uint32_t flags = def->m_flags;
 
-        if (flags & 0x20) {
+        if (flags & MAPOBJ_FLAG_DISABLED) {
             continue;
         }
 
@@ -639,8 +652,8 @@ void CShadowQuery::QueryMapObjDefsBand(CShadowCacheQueryData& data, int32_t band
         int32_t castDoodads = 0;
         int32_t castOther = 0;
 
-        if (flags & 0x400) {
-            if (!(data.m_queryFlags[band] & 0x4)) {
+        if (flags & MAPOBJ_FLAG_NO_DEPTH_SORT) {
+            if (!(data.m_queryFlags[band] & CShadowCacheQueryData::QUERY_BILLBOARDED)) {
                 continue;
             }
 
@@ -651,11 +664,11 @@ void CShadowQuery::QueryMapObjDefsBand(CShadowCacheQueryData& data, int32_t band
         } else {
             int32_t queryFlags = data.m_queryFlags[band];
 
-            if (queryFlags & 0x8) {
+            if (queryFlags & CShadowCacheQueryData::QUERY_STATIC) {
                 castOther = 1;
             }
 
-            if (queryFlags & 0x4) {
+            if (queryFlags & CShadowCacheQueryData::QUERY_BILLBOARDED) {
                 castDoodads = 1;
             }
         }
@@ -674,42 +687,42 @@ void CShadowQuery::QueryMapObjDefsBand(CShadowCacheQueryData& data, int32_t band
 
         for (uint32_t i = 0; i < groupCount; i++) {
             CMapObjDefGroup* defGroup = def->m_defGroups[i];
-            CMapObjGroup* group = def->m_owner->GetGroup(i, 0);
+            CMapObjGroup* group = def->mapObj->GetGroup(i, 0);
 
-            if (!group || !(group->m_flags & 0x48)) {
+            if (!group || !(group->m_flags & CMapObjGroup::MOGP_FLAGS::F_EXTERIOR_CLASSIFICATION_MASK)) {
                 continue;
             }
 
-            if (!extents.Intersects(defGroup->m_bbox) || !data.m_bandFrustums[band].Cull(defGroup->m_bbox)) {
+            if (!extents.Intersects(defGroup->aaBox) || !data.m_bandFrustums[band].Cull(defGroup->aaBox)) {
                 continue;
             }
 
-            if (data.m_useCullFrustum[band] && data.m_cullFrustums[band].CullInv(defGroup->m_bbox) == WorldCull_notOutside) {
+            if (data.m_useCullFrustum[band] && data.m_cullFrustums[band].CullInv(defGroup->aaBox) == WorldCull_notOutside) {
                 continue;
             }
 
-            if (interior ? (data.m_queryFlags[band] & 0x4) : (data.m_queryFlags[band] & 0x8)) {
+            if (interior ? (data.m_queryFlags[band] & CShadowCacheQueryData::QUERY_BILLBOARDED) : (data.m_queryFlags[band] & CShadowCacheQueryData::QUERY_STATIC)) {
                 ShadowQueryBuffers& buffers = CShadowQuery::s_bandBuffers[band];
 
                 if (buffers.m_groupCount >= 0x800) {
                     break;
                 }
 
-                static_cast<C44Matrix**>(buffers.m_groupData)[buffers.m_groupCount] = &def->m_mat;
-                static_cast<CMapObjGroup**>(buffers.m_groups)[buffers.m_groupCount++] = group;
+                buffers.m_groupMatrices[buffers.m_groupCount] = &def->m_mat;
+                buffers.m_groups[buffers.m_groupCount++] = group;
             }
 
-            for (CMapBaseObjLink* link = defGroup->m_doodadDefLinkList.Head(); link; link = defGroup->m_doodadDefLinkList.Next(link)) {
-                CMapDoodadDef* doodad = static_cast<CMapDoodadDef*>(link->m_owner);
+            for (CMapBaseObjLink* link = defGroup->doodadDefLinkList.Head(); link; link = defGroup->doodadDefLinkList.Next(link)) {
+                CMapDoodadDef* doodad = static_cast<CMapDoodadDef*>(link->owner);
 
                 if (doodad->m_shadowStamps[band] == CShadowQuery::s_stamp) {
                     continue;
                 }
 
                 doodad->m_shadowStamps[band] = CShadowQuery::s_stamp;
-                CM2Model* model = doodad->m_model;
+                CM2Model* model = doodad->model;
 
-                if (!model || !(doodad->m_flags & 0x80) || CWorldScene::IsBeyondFadeDistance(doodad->m_sphere.c, doodad->m_fadeLevel) || maxDoodadSize < doodad->m_sphere.r) {
+                if (!model || !(doodad->m_flags & MAPOBJ_FLAG_PREPARED) || CWorldScene::IsBeyondFadeDistance(doodad->m_sphere.c, doodad->m_fadeLevel) || maxDoodadSize < doodad->m_sphere.r) {
                     continue;
                 }
 
@@ -727,13 +740,13 @@ void CShadowQuery::QueryMapObjDefsBand(CShadowCacheQueryData& data, int32_t band
 // OFFSET: 0x007BC490
 void CShadowQuery::QueryMapObjDefs(CShadowCacheQueryData& data, int32_t firstBand, int32_t lastBand) {
     for (CMapObjDef* def = CMap::mapObjDefHash.m_fulllist.Head(); def; def = CMap::mapObjDefHash.Next(def)) {
-        if (def->m_flags & 0x20) {
+        if (def->m_flags & MAPOBJ_FLAG_DISABLED) {
             continue;
         }
 
         CAaBox& lastExtents = data.m_extents[lastBand];
 
-        if (!(lastExtents.t.x >= def->m_bbox.b.x && lastExtents.t.y >= def->m_bbox.b.y && lastExtents.t.z >= def->m_bbox.b.z && lastExtents.b.x <= def->m_bbox.t.x && lastExtents.b.y <= def->m_bbox.t.y && lastExtents.b.z <= def->m_bbox.t.z)) {
+        if (!lastExtents.Intersects(def->m_bbox)) {
             continue;
         }
 
@@ -747,33 +760,33 @@ void CShadowQuery::QueryMapObjDefs(CShadowCacheQueryData& data, int32_t firstBan
 
         for (uint32_t i = 0; i < groupCount; i++) {
             CMapObjDefGroup* defGroup = def->m_defGroups[i];
-            CMapObjGroup* group = def->m_owner->GetGroup(i, 0);
+            CMapObjGroup* group = def->mapObj->GetGroup(i, 0);
 
-            if (!group || !(group->m_flags & 0x48)) {
+            if (!group || !(group->m_flags & CMapObjGroup::MOGP_FLAGS::F_EXTERIOR_CLASSIFICATION_MASK)) {
                 continue;
             }
 
-            if (!lastExtents.Intersects(defGroup->m_bbox) || !lastFrustum.Cull(defGroup->m_bbox)) {
+            if (!lastExtents.Intersects(defGroup->aaBox) || !lastFrustum.Cull(defGroup->aaBox)) {
                 continue;
             }
 
             for (int32_t band = firstBand; band <= lastBand; band++) {
-                if (data.m_extents[band].Intersects(defGroup->m_bbox) && data.m_bandFrustums[band].Cull(defGroup->m_bbox) && (!data.m_useCullFrustum[band] || data.m_cullFrustums[band].CullInv(defGroup->m_bbox) != WorldCull_notOutside)) {
+                if (data.m_extents[band].Intersects(defGroup->aaBox) && data.m_bandFrustums[band].Cull(defGroup->aaBox) && (!data.m_useCullFrustum[band] || data.m_cullFrustums[band].CullInv(defGroup->aaBox) != WorldCull_notOutside)) {
                     ShadowQueryBuffers& buffers = CShadowQuery::s_bandBuffers[band];
 
                     if (buffers.m_groupCount >= 0x800) {
                         break;
                     }
 
-                    static_cast<C44Matrix**>(buffers.m_groupData)[buffers.m_groupCount] = &def->m_mat;
-                    static_cast<CMapObjGroup**>(buffers.m_groups)[buffers.m_groupCount++] = group;
+                    buffers.m_groupMatrices[buffers.m_groupCount] = &def->m_mat;
+                    buffers.m_groups[buffers.m_groupCount++] = group;
                 }
             }
 
-            for (CMapBaseObjLink* link = defGroup->m_doodadDefLinkList.Head(); link; link = defGroup->m_doodadDefLinkList.Next(link)) {
-                CMapDoodadDef* doodad = static_cast<CMapDoodadDef*>(link->m_owner);
+            for (CMapBaseObjLink* link = defGroup->doodadDefLinkList.Head(); link; link = defGroup->doodadDefLinkList.Next(link)) {
+                CMapDoodadDef* doodad = static_cast<CMapDoodadDef*>(link->owner);
 
-                if (!doodad->m_model || !(doodad->m_flags & 0x80)) {
+                if (!doodad->model || !(doodad->m_flags & MAPOBJ_FLAG_PREPARED)) {
                     continue;
                 }
 
@@ -785,7 +798,7 @@ void CShadowQuery::QueryMapObjDefs(CShadowCacheQueryData& data, int32_t firstBan
                     doodad->m_shadowStamps[band] = CShadowQuery::s_stamp;
 
                     if (!CWorldScene::IsBeyondFadeDistance(doodad->m_sphere.c, doodad->m_fadeLevel) && data.m_extents[band].Intersects(doodad->m_bbox) && data.m_bandFrustums[band].Cull(doodad->m_bbox) && (!data.m_useCullFrustum[band] || data.m_cullFrustums[band].CullInv(doodad->m_bbox) != WorldCull_notOutside)) {
-                        doodad->m_model->GatherModelBatchesShadowMap(CShadowQuery::s_bandBuffers[band].m_untextured, CShadowQuery::s_bandBuffers[band].m_textured);
+                        doodad->model->GatherModelBatchesShadowMap(CShadowQuery::s_bandBuffers[band].m_untextured, CShadowQuery::s_bandBuffers[band].m_textured);
                     }
                 }
             }
@@ -809,19 +822,19 @@ void CShadowQuery::QueryTerrainBand(CShadowCacheQueryData& data, int32_t band) {
 
     for (int32_t row = rect.minY; row <= rect.maxY; row++) {
         for (int32_t col = rect.minX; col <= rect.maxX; col++) {
-            CMapArea* area = CMap::m_areaTable[(((row >> 4) & 0x3F) << 6) + ((col >> 4) & 0x3F)];
+            CMapArea* area = CMap::GetAreaForChunk(col, row);
 
-            if (!area || area->m_asyncObject) {
+            if (!area || area->asyncObject) {
                 continue;
             }
 
-            CMapChunk* chunk = area->m_mapChunks[(col & 0xF) + 16 * (row & 0xF)];
+            CMapChunk* chunk = area->GetChunk(col, row);
 
             if (!chunk) {
                 continue;
             }
 
-            if (!(extents.t.x >= chunk->m_bbox.b.x && extents.t.y >= chunk->m_bbox.b.y && extents.t.z >= chunk->m_bbox.b.z && extents.b.x <= chunk->m_bbox.t.x && extents.b.y <= chunk->m_bbox.t.y && extents.b.z <= chunk->m_bbox.t.z)) {
+            if (!extents.Intersects(chunk->m_bbox)) {
                 continue;
             }
 
@@ -829,21 +842,21 @@ void CShadowQuery::QueryTerrainBand(CShadowCacheQueryData& data, int32_t band) {
                 continue;
             }
 
-            for (CMapBaseObjLink* link = chunk->m_doodadDefLinkList.Head(); link; link = chunk->m_doodadDefLinkList.Next(link)) {
-                CMapDoodadDef* doodad = static_cast<CMapDoodadDef*>(link->m_owner);
+            for (CMapBaseObjLink* link = chunk->doodadDefLinkList.Head(); link; link = chunk->doodadDefLinkList.Next(link)) {
+                CMapDoodadDef* doodad = static_cast<CMapDoodadDef*>(link->owner);
 
                 if (doodad->m_shadowStamps[band] == CShadowQuery::s_stamp) {
                     continue;
                 }
 
                 doodad->m_shadowStamps[band] = CShadowQuery::s_stamp;
-                CM2Model* model = doodad->m_model;
+                CM2Model* model = doodad->model;
 
-                if (!model || !(doodad->m_flags & 0x80) || CWorldScene::IsBeyondFadeDistance(doodad->m_sphere.c, doodad->m_fadeLevel) || maxSize < doodad->m_sphere.r) {
+                if (!model || !(doodad->m_flags & MAPOBJ_FLAG_PREPARED) || CWorldScene::IsBeyondFadeDistance(doodad->m_sphere.c, doodad->m_fadeLevel) || maxSize < doodad->m_sphere.r) {
                     continue;
                 }
 
-                int32_t wanted = model->GetBillboardBoneCount() ? (data.m_queryFlags[band] & 0x4) : (data.m_queryFlags[band] & 0x8);
+                int32_t wanted = model->GetBillboardBoneCount() ? (data.m_queryFlags[band] & CShadowCacheQueryData::QUERY_BILLBOARDED) : (data.m_queryFlags[band] & CShadowCacheQueryData::QUERY_STATIC);
 
                 if (wanted && extents.Intersects(doodad->m_bbox) && data.m_bandFrustums[band].Cull(doodad->m_bbox) && (!data.m_useCullFrustum[band] || data.m_cullFrustums[band].CullInv(doodad->m_bbox) != WorldCull_notOutside)) {
                     model->GatherModelBatchesShadowMap(CShadowQuery::s_bandBuffers[band].m_untextured, CShadowQuery::s_bandBuffers[band].m_textured);
@@ -865,13 +878,13 @@ void CShadowQuery::QueryTerrain(CShadowCacheQueryData& data, int32_t firstBand, 
 
     for (int32_t row = rect.minY; row <= rect.maxY; row++) {
         for (int32_t col = rect.minX; col <= rect.maxX; col++) {
-            CMapArea* area = CMap::m_areaTable[(((row >> 4) & 0x3F) << 6) + ((col >> 4) & 0x3F)];
+            CMapArea* area = CMap::GetAreaForChunk(col, row);
 
-            if (!area || area->m_asyncObject) {
+            if (!area || area->asyncObject) {
                 continue;
             }
 
-            CMapChunk* chunk = area->m_mapChunks[(col & 0xF) + 16 * (row & 0xF)];
+            CMapChunk* chunk = area->GetChunk(col, row);
 
             if (!chunk) {
                 continue;
@@ -879,7 +892,7 @@ void CShadowQuery::QueryTerrain(CShadowCacheQueryData& data, int32_t firstBand, 
 
             CAaBox& lastExtents = data.m_extents[lastBand];
 
-            if (!(lastExtents.t.x >= chunk->m_bbox.b.x && lastExtents.t.y >= chunk->m_bbox.b.y && lastExtents.t.z >= chunk->m_bbox.b.z && lastExtents.b.x <= chunk->m_bbox.t.x && lastExtents.b.y <= chunk->m_bbox.t.y && lastExtents.b.z <= chunk->m_bbox.t.z)) {
+            if (!lastExtents.Intersects(chunk->m_bbox)) {
                 continue;
             }
 
@@ -887,11 +900,11 @@ void CShadowQuery::QueryTerrain(CShadowCacheQueryData& data, int32_t firstBand, 
                 continue;
             }
 
-            for (CMapBaseObjLink* link = chunk->m_doodadDefLinkList.Head(); link; link = chunk->m_doodadDefLinkList.Next(link)) {
-                CMapDoodadDef* doodad = static_cast<CMapDoodadDef*>(link->m_owner);
-                CM2Model* model = doodad->m_model;
+            for (CMapBaseObjLink* link = chunk->doodadDefLinkList.Head(); link; link = chunk->doodadDefLinkList.Next(link)) {
+                CMapDoodadDef* doodad = static_cast<CMapDoodadDef*>(link->owner);
+                CM2Model* model = doodad->model;
 
-                if (!model || !(doodad->m_flags & 0x80)) {
+                if (!model || !(doodad->m_flags & MAPOBJ_FLAG_PREPARED)) {
                     continue;
                 }
 
@@ -908,7 +921,7 @@ void CShadowQuery::QueryTerrain(CShadowCacheQueryData& data, int32_t firstBand, 
                         continue;
                     }
 
-                    if (!(doodadFlag ? (data.m_queryFlags[band] & 0x4) : (data.m_queryFlags[band] & 0x8))) {
+                    if (!(doodadFlag ? (data.m_queryFlags[band] & CShadowCacheQueryData::QUERY_BILLBOARDED) : (data.m_queryFlags[band] & CShadowCacheQueryData::QUERY_STATIC))) {
                         continue;
                     }
 

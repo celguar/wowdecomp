@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C2Vector.h"
@@ -80,19 +81,87 @@ int32_t QSortScoreData(const void* a, const void* b);
 bool IsOnTransport(CGObject_C* object);
 bool IsCurrentMapArena();
 
+// Arena opponent slots (FrameXML MAX_ARENA_ENEMIES).
+static const uint32_t MAX_ARENA_ENEMIES = 5;
+
 class CGBattlefieldInfo {
     public:
-    static void JoinBattlefield(uint32_t index, int32_t asGroup, int32_t isRated);
+    // Shared client display states for battlefield and world-PvP queues.
+    // This is a reconstruction, not a claim about the original enum identity.
+    // Raw carriers retain packet words, boolean acceptance and unknown values.
+    enum QUEUE_STATUS : int32_t {
+        QUEUE_NONE = 0,
+        QUEUE_QUEUED = 1,
+        QUEUE_CONFIRM = 2,
+        QUEUE_ACTIVE = 3,
+    };
+
+    // Descriptive build 12340 errors. -12/-11 share a name-cache path; -1 is silent.
+    // Other signed results remain raw BattlemasterList IDs on the default path.
+    enum GROUP_JOIN_RESULT : int32_t {
+        IN_NON_RANDOM_BG = -15,
+        IN_RANDOM_BG = -14,
+        LFG = -13,
+        UNKNOWN_MINUS_12 = -12,
+        UNKNOWN_MINUS_11 = -11,
+        RANGE_INDEX = -10,
+        XP_GAIN = -9,
+        NOT_IN_BATTLEGROUND = -8,
+        TEAM_LEFT_QUEUE = -7,
+        QUEUED_FOR_RATED = -6,
+        CANNOT_QUEUE_FOR_RATED = -5,
+        TOO_MANY_QUEUES = -4,
+        ARENA_TEAM_PARTY_SIZE = -3,
+        DESERTERS = -2,
+        UNKNOWN_MINUS_1 = -1,
+    };
+
+    // Build 12340 handles these reasons. Only 8 and 10 have named UI consumers.
+    // UNKNOWN members retain verified values without guessing server meanings.
+    enum EJECTION_REASON : int32_t {
+        UNKNOWN_1 = 1,
+        UNKNOWN_2 = 2,
+        UNKNOWN_4 = 4,
+        UNKNOWN_5 = 5,
+        UNKNOWN_7 = 7,
+        PLAYER_EXIT = 8,
+        UNKNOWN_9 = 9,
+        LOW_LEVEL = 10,
+        UNKNOWN_11 = 11,
+    };
+
+    enum SCORE_SORT_COLUMN : int32_t {
+        COLUMN_KILLING_BLOWS = 0,
+        COLUMN_DEATHS = 1,
+        COLUMN_BONUS_HONOR = 2,
+        COLUMN_NAME = 3,
+        COLUMN_CLASS = 4,
+        COLUMN_HONORABLE_KILLS = 5,
+        COLUMN_DAMAGE_DONE = 6,
+        COLUMN_HEALING_DONE = 7,
+        COLUMN_TEAM = 8,
+        COLUMN_STAT1 = 9,
+        COLUMN_STAT2 = 10,
+        COLUMN_STAT3 = 11,
+        COLUMN_STAT4 = 12,
+        COLUMN_STAT5 = 13,
+        COLUMN_STAT6 = 14,
+        COLUMN_STAT7 = 15,
+        COLUMN_STAT8 = 16,
+        NUM_COLUMNS = 17,
+    };
+
+    static void JoinBattlefield(uint32_t index, int32_t asGroup, BOOL isRated);
     static void RequestBattlegroundInstanceInfo(uint32_t index);
     static void SetBattlemaster(WOWGUID battlemaster);
     static void EnterWorld();
     static void LeaveWorld();
     static void InitializeGame();
     static void ShutdownGame();
-    static WOWGUID m_arenaOpponentPets[5][2];
-    static WOWGUID m_arenaOpponents[5];
-    static CGPartyMemberState m_arenaOpponentStats[5];
-    static int32_t m_instanceType;
+    static WOWGUID m_arenaOpponentPets[MAX_ARENA_ENEMIES][2];
+    static WOWGUID m_arenaOpponents[MAX_ARENA_ENEMIES];
+    static CGPartyMemberState m_arenaOpponentStats[MAX_ARENA_ENEMIES];
+    static int32_t m_instanceType; // MAP_INSTANCE_TYPE, copied from MapRec
     static int32_t m_activeIndex;
     static BattlefieldStatus m_status[2];
     static uint32_t m_activeMapID;
@@ -113,7 +182,7 @@ class CGBattlefieldInfo {
     static uint32_t m_positionUpdateTime;
     static C2Vector m_flagPositions[2];
     static int32_t m_logFilterFaction;
-    static int32_t m_allowJoin;
+    static BOOL m_allowJoin;
     static int32_t m_selectedInstance;
     static int32_t m_bgTypeID;
     static uint8_t m_hasHolidayWinToday;
@@ -138,9 +207,9 @@ class CGBattlefieldInfo {
     static uint32_t m_avgMatchmakingRating[2];
     static int32_t m_mapDone;
     static uint32_t m_winner;
-    static int32_t m_arenaOpponentSeen[5];
+    static int32_t m_arenaOpponentSeen[MAX_ARENA_ENEMIES];
     static WorldPvPQueueStatus m_worldPvPQueues[1];
-    static BattlefieldScoreSortCriteria m_scoreSortCriteria[17];
+    static BattlefieldScoreSortCriteria m_scoreSortCriteria[SCORE_SORT_COLUMN::NUM_COLUMNS];
     static TSGrowableArray<int32_t> m_battlegroundTypes;
 
     static void AddArenaOpponent(const WOWGUID& guid);

@@ -1,4 +1,5 @@
 #include "CharacterCreation.h"
+#include "WoW/Common/Types.h"
 #include <cstdint>
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
 #include "Engine/Source/Frame/CScriptObject.h"
@@ -21,6 +22,7 @@
 #include "WoW/Source/Ui/LFGInfo.h"
 #include "WoW/Source/WowSvcs/WowSvcsClient/ClientServices.h"
 #include "WoW/Source/WowSvcs/WowSvcsClient/Types.h"
+#include "Engine/Source/Tempest/CMath.h"
 
 
 // VERIFY: a2e71192 auto
@@ -53,53 +55,53 @@ static int32_t Script_IsRaceClassRestricted(lua_State* L) {
     bool restricted;
 
     switch (raceID) {
-        case 1: {
-            restricted = (CCharacterSelection::s_raceRestrictions[0] & (1 << classID)) != 0;
+        case RACE_HUMAN: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_HUMAN] & (1 << classID)) != 0;
             break;
         }
 
-        case 2: {
-            restricted = (CCharacterSelection::s_raceRestrictions[5] & (1 << classID)) != 0;
+        case RACE_ORC: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_ORC] & (1 << classID)) != 0;
             break;
         }
 
-        case 3: {
-            restricted = (CCharacterSelection::s_raceRestrictions[1] & (1 << classID)) != 0;
+        case RACE_DWARF: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_DWARF] & (1 << classID)) != 0;
             break;
         }
 
-        case 4: {
-            restricted = (CCharacterSelection::s_raceRestrictions[3] & (1 << classID)) != 0;
+        case RACE_NIGHT_ELF: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_NIGHT_ELF] & (1 << classID)) != 0;
             break;
         }
 
-        case 5: {
-            restricted = (CCharacterSelection::s_raceRestrictions[8] & (1 << classID)) != 0;
+        case RACE_UNDEAD: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_UNDEAD] & (1 << classID)) != 0;
             break;
         }
 
-        case 6: {
-            restricted = (CCharacterSelection::s_raceRestrictions[7] & (1 << classID)) != 0;
+        case RACE_TAUREN: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_TAUREN] & (1 << classID)) != 0;
             break;
         }
 
-        case 7: {
-            restricted = (CCharacterSelection::s_raceRestrictions[2] & (1 << classID)) != 0;
+        case RACE_GNOME: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_GNOME] & (1 << classID)) != 0;
             break;
         }
 
-        case 8: {
-            restricted = (CCharacterSelection::s_raceRestrictions[6] & (1 << classID)) != 0;
+        case RACE_TROLL: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_TROLL] & (1 << classID)) != 0;
             break;
         }
 
-        case 10: {
-            restricted = (CCharacterSelection::s_raceRestrictions[9] & (1 << classID)) != 0;
+        case RACE_BLOOD_ELF: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_BLOOD_ELF] & (1 << classID)) != 0;
             break;
         }
 
-        case 11: {
-            restricted = (CCharacterSelection::s_raceRestrictions[4] & (1 << classID)) != 0;
+        case RACE_DRAENEI: {
+            restricted = (CCharacterSelection::s_raceRestrictions[CCharacterSelection::RACE_RESTRICTION_DRAENEI] & (1 << classID)) != 0;
             break;
         }
 
@@ -181,8 +183,8 @@ static int32_t Script_GetFactionForRace(lua_State* L) {
         FactionTemplateRec* factionTemplate = g_factionTemplateDB.GetRecord(raceRec->m_factionID);
 
         if (factionTemplate) {
-            for (int32_t i = 0; i < g_factionGroupDB.m_numRecords; i++) {
-                FactionGroupRec* group = i >= 0 && i < g_factionGroupDB.m_numRecords ? &g_factionGroupDB.m_records[i] : nullptr;
+            for (int32_t i = 0; i < g_factionGroupDB.GetNumRecords(); i++) {
+                FactionGroupRec* group = i >= 0 && i < g_factionGroupDB.GetNumRecords() ? &g_factionGroupDB.m_records[i] : nullptr;
 
                 if (group && group->m_maskID && ((1 << group->m_maskID) & factionTemplate->m_factionGroup)) {
                     lua_pushstring(L, group->m_name);
@@ -201,10 +203,10 @@ static int32_t Script_GetFactionForRace(lua_State* L) {
 // VERIFY: 3d7dbaad manual
 // OFFSET: 0x004E0830
 static int32_t Script_GetAvailableClasses(lua_State* L) {
-    int32_t count = g_chrClassesDB.m_numRecords;
+    int32_t count = g_chrClassesDB.GetNumRecords();
 
     for (int32_t i = 0; i < count; i++) {
-        ChrClassesRec* classRec = i >= 0 && i < g_chrClassesDB.m_numRecords ? &g_chrClassesDB.m_records[i] : nullptr;
+        ChrClassesRec* classRec = i >= 0 && i < g_chrClassesDB.GetNumRecords() ? &g_chrClassesDB.m_records[i] : nullptr;
         const char* name = CGUnit_C::GetDisplayClassNameFromRecord(classRec, CCharacterCreation::m_character->m_data.m_preferences.m_sexID, nullptr);
         bool available = ClientServices::Connection()->m_accountExpansion >= classRec->m_requiredExpansion;
 
@@ -281,8 +283,8 @@ static int32_t Script_GetSelectedClass(lua_State* L) {
 
     int32_t index = 0;
 
-    for (int32_t i = 0; i < g_chrClassesDB.m_numRecords; i++) {
-        ChrClassesRec* rec = i >= 0 && i < g_chrClassesDB.m_numRecords ? &g_chrClassesDB.m_records[i] : nullptr;
+    for (int32_t i = 0; i < g_chrClassesDB.GetNumRecords(); i++) {
+        ChrClassesRec* rec = i >= 0 && i < g_chrClassesDB.GetNumRecords() ? &g_chrClassesDB.m_records[i] : nullptr;
 
         if (rec->m_id == classID) {
             index = i;
@@ -291,10 +293,10 @@ static int32_t Script_GetSelectedClass(lua_State* L) {
 
     lua_pushnumber(L, index + 1);
 
-    uint8_t roles = CGLookingForGroup::GetClassRoles(CCharacterCreation::m_selectedClassID);
-    lua_pushboolean(L, roles & 0x2);
-    lua_pushboolean(L, roles & 0x4);
-    lua_pushboolean(L, roles & 0x8);
+    ROLE_FLAGS_8 roles = CGLookingForGroup::GetClassRoles(CCharacterCreation::m_selectedClassID);
+    lua_pushboolean(L, roles & ROLE_FLAGS::TANK);
+    lua_pushboolean(L, roles & ROLE_FLAGS::HEALER);
+    lua_pushboolean(L, roles & ROLE_FLAGS::DAMAGER);
     return 6;
 }
 
@@ -315,7 +317,7 @@ static int32_t Script_CycleCharCustomization(lua_State* L) {
 // VERIFY: e5380494 auto
 // OFFSET: 0x004E0BE0
 static int32_t Script_GetCharacterCreateFacing(lua_State* L) {
-    lua_pushnumber(L, CCharacterCreation::m_charFacing * 57.29578f);
+    lua_pushnumber(L, CCharacterCreation::m_charFacing * RAD_TO_DEG);
     return 1;
 }
 
@@ -327,7 +329,7 @@ static int32_t Script_SetCharacterCreateFacing(lua_State* L) {
         return 0;
     }
 
-    CCharacterCreation::SetCharacterFacing(lua_tonumber(L, 1) * 0.017453292f);
+    CCharacterCreation::SetCharacterFacing(lua_tonumber(L, 1) * DEG_TO_RAD);
     return 1;
 }
 
@@ -366,7 +368,7 @@ static int32_t Script_IsRaceClassValid(lua_State* L) {
 
     uint32_t raceIndex = static_cast<uint32_t>(lua_tointeger(L, 1) - 1);
     int32_t classIndex = static_cast<int32_t>(lua_tointeger(L, 2) - 1);
-    ChrClassesRec* classRec = classIndex >= 0 && classIndex < g_chrClassesDB.m_numRecords ? &g_chrClassesDB.m_records[classIndex] : nullptr;
+    ChrClassesRec* classRec = classIndex >= 0 && classIndex < g_chrClassesDB.GetNumRecords() ? &g_chrClassesDB.m_records[classIndex] : nullptr;
 
     if (!classRec) {
         return 0;
@@ -392,8 +394,8 @@ static int32_t Script_GetCreateBackgroundModel(lua_State* L) {
         return 1;
     }
 
-    if (CCharacterCreation::m_selectedClassID == 6) {
-        ChrClassesRec* classRec = g_chrClassesDB.GetRecord(6);
+    if (CCharacterCreation::m_selectedClassID == CLASS_DEATH_KNIGHT) {
+        ChrClassesRec* classRec = g_chrClassesDB.GetRecord(CLASS_DEATH_KNIGHT);
 
         if (classRec) {
             lua_pushstring(L, classRec->m_filename);
@@ -402,10 +404,10 @@ static int32_t Script_GetCreateBackgroundModel(lua_State* L) {
     } else {
         uint32_t raceID = CCharacterCreation::m_character->m_data.m_preferences.m_raceID;
 
-        if (raceID == 7) {
-            raceID = 3;
-        } else if (raceID == 8) {
-            raceID = 2;
+        if (raceID == RACE_GNOME) {
+            raceID = RACE_DWARF;
+        } else if (raceID == RACE_TROLL) {
+            raceID = RACE_ORC;
         }
 
         ChrRacesRec* raceRec = g_chrRacesDB.GetRecord(raceID);
@@ -491,7 +493,7 @@ static int32_t Script_SetSelectedClass(lua_State* L) {
     }
 
     int32_t index = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
-    ChrClassesRec* classRec = index >= 0 && index < g_chrClassesDB.m_numRecords ? &g_chrClassesDB.m_records[index] : nullptr;
+    ChrClassesRec* classRec = index >= 0 && index < g_chrClassesDB.GetNumRecords() ? &g_chrClassesDB.m_records[index] : nullptr;
     CCharacterCreation::SetSelectedClass(classRec->m_id);
     return 0;
 }

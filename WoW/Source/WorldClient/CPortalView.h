@@ -1,6 +1,7 @@
 #ifndef WOW_SOURCE_WORLDCLIENT_CPORTALVIEW_H
 #define WOW_SOURCE_WORLDCLIENT_CPORTALVIEW_H
 
+#include <cfloat>
 #include <cstddef>
 #include <cstdint>
 #include "Engine/Source/Tempest/CRect.h"
@@ -12,7 +13,7 @@ class CPortalView {
     /* 0000 */ CRect m_rect;
     /* 0010 */ float m_maxViewDepth;
     /* 0014 */ C3Vector* m_verts;
-    /* 0018 */ uint32_t m_vertCount;
+    /* 0018 */ uint32_t m_numVertices;
 
     CPortalView();
     CPortalView(const CRect& rect, float maxViewDepth);
@@ -21,12 +22,12 @@ class CPortalView {
 
 // INLINED
 inline CPortalView::CPortalView() {
-    this->m_rect.minX = 3.4028235e38f;
+    this->m_rect.minX = FLT_MAX;
     this->m_verts = nullptr;
-    this->m_rect.minY = 3.4028235e38f;
-    this->m_vertCount = 0;
-    this->m_rect.maxX = -3.4028235e38f;
-    this->m_rect.maxY = -3.4028235e38f;
+    this->m_rect.minY = FLT_MAX;
+    this->m_numVertices = 0;
+    this->m_rect.maxX = -FLT_MAX;
+    this->m_rect.maxY = -FLT_MAX;
     this->m_maxViewDepth = -1.0f;
 }
 

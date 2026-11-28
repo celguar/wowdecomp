@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include "Engine/Source/Tempest/CRandom.h"
+#include "Engine/Source/Storm/H/storm.h"
 
 // STATIC: 0x009F1700
 static const uint32_t s_rndTable[64] = {
@@ -71,7 +72,7 @@ void CRndSeed::SetSeed(uint32_t seed) {
 // VERIFY: cab91f8f manual
 // OFFSET: 0x004C1590
 float CRandom::ufloat_(CRndSeed& seed) {
-    uint32_t bits = (CRandom::uint32_(seed) & 0x7FFFFF) | 0x3F800000;
+    uint32_t bits = (CRandom::uint32_(seed) & rmant) | rexp;
 
     return *reinterpret_cast<float*>(&bits) - 1.0f;
 }
@@ -80,7 +81,7 @@ float CRandom::ufloat_(CRndSeed& seed) {
 // OFFSET: 0x004C15C0
 float CRandom::sfloat_(CRndSeed& seed) {
     uint32_t value = CRandom::uint32_(seed);
-    uint32_t bits = (value & 0x7FFFFF) | 0x3F800000;
+    uint32_t bits = (value & rmant) | rexp;
     float f = *reinterpret_cast<float*>(&bits);
 
     if (static_cast<int32_t>(value) >= 0) {
@@ -93,6 +94,7 @@ float CRandom::sfloat_(CRndSeed& seed) {
 // VERIFY: 4687ef93 manual
 // OFFSET: 0x004C1600
 uint32_t CRandom::dice_(uint32_t sides, CRndSeed& seed) {
+    STORM_ASSERT(sides > 0);
     return static_cast<uint32_t>((static_cast<uint64_t>(sides) * CRandom::uint32_(seed)) >> 32);
 }
 
@@ -114,6 +116,7 @@ C2Vector CRandom::C2Vector_(CRndSeed& seed) {
 C3Vector CRandom::C3Vector_(CRndSeed& seed) {
     float z = CRandom::sfloat_(seed);
     float angle = CRandom::ufloat_(seed) * TWO_PI;
+    STORM_ASSERT(z >= -1.0f && z <= 1.0f); // 12213: "z >= -_1 && z <= _1"
     float r = sqrt(1.0f - z * z);
     float c = cos(angle);
     float s = sin(angle);

@@ -76,6 +76,9 @@ struct StorageBlockRecord {
 
 #pragma pack(push, 4)
 struct PartFileHeader {
+    // The only m_magic RebuildHeader writes; ParseFile rebuilds any other.
+    static const int32_t MAGIC = 2;
+
     /* 0000 */ int32_t m_magic;
     /* 0004 */ char m_version[32];
     /* 0024 */ int32_t m_flags;
@@ -108,16 +111,24 @@ struct WriteRequest {
     /* 0020 */ int32_t m_size;
 };
 
+// FILE_THREAD_CMD::m_type; named from the Streaming function that queues
+// each value (inferred). A cancelled command is reset to NONE.
+enum FILE_THREAD_CMD_TYPE : int32_t {
+    FILE_THREAD_CMD_NONE = 0,
+    FILE_THREAD_CMD_LOAD = 1, // QueueLoad
+    FILE_THREAD_CMD_COMPLETION = 2, // QueueCompletion
+};
+
 struct FILE_THREAD_CMD {
     /* 0000 */ Blizzard::File::Filesystem* m_fs;
-    /* 0004 */ int32_t m_type;
+    /* 0004 */ int32_t m_type; // FILE_THREAD_CMD_TYPE
     /* 0008 */ Blizzard::File::StreamRecord* m_file;
     /* 000C */ LoadRange* m_range;
     /* 0010 */ Completion* m_completion;
 };
 
 struct DigestState {
-    /* 0000 */ int32_t m_state;
+    /* 0000 */ int32_t m_state; // SFILE_LOCAL_*, as stored by CheckFileRange
     /* 0004 */ int32_t m_priority;
 };
 
@@ -200,6 +211,16 @@ extern void* s_storageEvent;
 
 }
 }
+
+// StreamingSetState / StreamingManager::m_gameState; named from the function
+// that sets each value (inferred).
+enum STREAMING_GAME_STATE : int32_t {
+    STREAMING_GAME_STATE_NONE = 0, // CGGameUI::Shutdown, constructor
+    STREAMING_GAME_STATE_CHARACTER_SELECT = 1, // CGGameUI::LeaveWorld
+    STREAMING_GAME_STATE_ENTERING_WORLD = 2, // CGlueMgr::EnterWorld
+    STREAMING_GAME_STATE_IN_WORLD = 3, // CGGameUI::InitializeGame
+    STREAMING_GAME_STATE_SHUTDOWN = 4, // StreamingManager::Shutdown
+};
 
 bool CheckIfStreamingAndTrial();
 void StringToLower(char* str);

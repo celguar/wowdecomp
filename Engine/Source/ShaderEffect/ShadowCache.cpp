@@ -41,7 +41,7 @@ const uint32_t CShadowCache::s_shadowValues[NUM_SHADOW_MODES + 1] = { 0, 1, 1, 2
 CTexture* CShadowCache::s_intDynShadow;
 
 // STATIC: 0x00D4314C
-int32_t CShadowCache::s_needsRebuild;
+BOOL CShadowCache::s_needsRebuild;
 
 // STATIC: 0x00D43150
 uint32_t CShadowCache::s_shadowSize;
@@ -68,7 +68,7 @@ int32_t CShadowCache::s_debugLevel;
 uint8_t CShadowCache::s_frameCounter;
 
 // STATIC: 0x00D43170
-float CShadowCache::s_extDynShadowCullRect[4];
+CRect CShadowCache::s_extDynShadowCullRect;
 
 // STATIC: 0x00D43180
 C3Vector CShadowCache::s_sunDir;
@@ -204,11 +204,11 @@ int32_t CShadowCache::ValidateShadowMode(EShadowMode mode) {
             switch (g_theGxDevicePtr->DeviceApi()) {
                 case GxApi_D3d9:
                 case GxApi_D3d9Ex:
-                    if (vertexTarget != 1 && vertexTarget != 2 && vertexTarget != 3) {
+                    if (vertexTarget != GxShVS_vs_1_1 && vertexTarget != GxShVS_vs_2_0 && vertexTarget != GxShVS_vs_3_0) {
                         return 0;
                     }
 
-                    if (pixelTarget != 3 && pixelTarget != 4) {
+                    if (pixelTarget != GxShPS_ps_2_0 && pixelTarget != GxShPS_ps_3_0) {
                         return 0;
                     }
 
@@ -219,7 +219,7 @@ int32_t CShadowCache::ValidateShadowMode(EShadowMode mode) {
                     return depthFormat;
 
                 case GxApi_GLL:
-                    if ((vertexTarget == 6 || vertexTarget == 10) && (pixelTarget == 12 || pixelTarget == 11)) {
+                    if ((vertexTarget == GxShVS_arbvp1 || vertexTarget == GxShVS_nvvp3) && (pixelTarget == GxShPS_arbfp1 || pixelTarget == GxShPS_nvfp2)) {
                         return depthFormat;
                     }
 
@@ -235,7 +235,7 @@ int32_t CShadowCache::ValidateShadowMode(EShadowMode mode) {
             switch (g_theGxDevicePtr->DeviceApi()) {
                 case GxApi_D3d9:
                 case GxApi_D3d9Ex:
-                    if (vertexTarget != 3 || pixelTarget != 4) {
+                    if (vertexTarget != GxShVS_vs_3_0 || pixelTarget != GxShPS_ps_3_0) {
                         return 0;
                     }
 
@@ -452,7 +452,7 @@ void CShadowCache::SetShadowMapDetailDoodad() {
 
 // VERIFY: 2396207d manual
 // OFFSET: 0x00874890
-void CShadowCache::GatherBands(CShadowCacheQueryData& data, const C3Vector& pos, CFrustum& frustum, int32_t useCullFrustum) {
+void CShadowCache::GatherBands(CShadowCacheQueryData& data, const C3Vector& pos, CFrustum& frustum, BOOL useCullFrustum) {
     uint32_t frame = 0;
 
     if (CShadowCache::GetShadowMode() < SHADOW_VERY_HIGH) {
@@ -519,7 +519,7 @@ void CShadowCache::GatherBands(CShadowCacheQueryData& data, const C3Vector& pos,
                 data.m_useCullFrustum[i] = 0;
             }
 
-            data.m_queryFlags[i] = 8;
+            data.m_queryFlags[i] = CShadowCacheQueryData::QUERY_STATIC;
 
             float bounds[4];
             bounds[0] = data.m_bounds[i][0];
@@ -598,7 +598,7 @@ void CShadowCache::GatherBands(CShadowCacheQueryData& data, const C3Vector& pos,
                 data.m_cullFrustums[i] = frustum;
             }
 
-            data.m_queryFlags[i] = 13;
+            data.m_queryFlags[i] = CShadowCacheQueryData::QUERY_UNITS | CShadowCacheQueryData::QUERY_BILLBOARDED | CShadowCacheQueryData::QUERY_STATIC;
             frustum = data.m_frustums[i];
             frustum.InvertPlanes();
 
@@ -704,14 +704,14 @@ void CShadowCache::PostUpdate() {
 // OFFSET: 0x008753F0
 CShadowCacheQueryData::CShadowCacheQueryData() {
     for (uint32_t i = 0; i < 3; i++) {
-        this->m_cullRects[i][0] = 0.0f;
-        this->m_cullRects[i][1] = 0.0f;
-        this->m_cullRects[i][2] = 0.0f;
-        this->m_cullRects[i][3] = 0.0f;
+        this->m_cullRects[i].minY = 0.0f;
+        this->m_cullRects[i].minX = 0.0f;
+        this->m_cullRects[i].maxY = 0.0f;
+        this->m_cullRects[i].maxX = 0.0f;
     }
 
     for (uint32_t i = 0; i < 3; i++) {
-        this->m_queryFlags[i] = 0;
+        this->m_queryFlags[i] = QUERY_NONE;
         this->m_active[i] = 0;
         this->m_useCullFrustum[i] = 0;
         this->m_textureIndex[i] = 0;
@@ -757,7 +757,7 @@ void CShadowCache::ClearBandTextures() {
     clearColor.a = 0xFF;
 
     if (CShaderEffect::s_usePcfFiltering) {
-        GxRsSet(GxRs_ColorWrite, 0);
+        GxRsSet(GxRs_ColorWrite, GxColorWrite_None);
         g_theGxDevicePtr->DeviceGetRenderTarget(GxBuffers_Depth, depthTarget);
     }
 
@@ -822,7 +822,7 @@ void CShadowCache::ClearBandTextures() {
     GxRenderTargetSet(GxBuffers_Color, colorTarget, 0);
 
     if (CShaderEffect::s_usePcfFiltering) {
-        GxRsSet(GxRs_ColorWrite, 15);
+        GxRsSet(GxRs_ColorWrite, GxColorWrite_All);
         GxRenderTargetSet(GxBuffers_Depth, depthTarget, 0);
     }
 
@@ -937,7 +937,7 @@ void CShadowCache::Init() {
 
 // VERIFY: 2346cbd1 auto
 // OFFSET: 0x00875F80
-int32_t CShadowCache::Update(const C3Vector& pos, int32_t useCullFrustum) {
+int32_t CShadowCache::Update(const C3Vector& pos, BOOL useCullFrustum) {
     int32_t recreate = CShadowCache::s_recreateTextures;
     uint32_t frame = 0;
 
@@ -979,7 +979,7 @@ int32_t CShadowCache::Update(const C3Vector& pos, int32_t useCullFrustum) {
     CGxTex* depthTarget = nullptr;
 
     if (CShaderEffect::s_usePcfFiltering) {
-        GxRsSet(GxRs_ColorWrite, 0);
+        GxRsSet(GxRs_ColorWrite, GxColorWrite_None);
         g_theGxDevicePtr->DeviceGetRenderTarget(GxBuffers_Depth, depthTarget);
     }
 
@@ -997,10 +997,10 @@ int32_t CShadowCache::Update(const C3Vector& pos, int32_t useCullFrustum) {
 
     CShadowCache::s_extDynShadow.m_dir = C3Vector(1.0f, 0.0f, 0.0f);
 
-    CShadowCache::s_extDynShadowCullRect[0] = data.m_cullRects[0][0];
-    CShadowCache::s_extDynShadowCullRect[1] = data.m_cullRects[0][1];
-    CShadowCache::s_extDynShadowCullRect[2] = data.m_cullRects[0][2];
-    CShadowCache::s_extDynShadowCullRect[3] = data.m_cullRects[0][3];
+    CShadowCache::s_extDynShadowCullRect.minY = data.m_cullRects[0].minY;
+    CShadowCache::s_extDynShadowCullRect.minX = data.m_cullRects[0].minX;
+    CShadowCache::s_extDynShadowCullRect.maxY = data.m_cullRects[0].maxY;
+    CShadowCache::s_extDynShadowCullRect.maxX = data.m_cullRects[0].maxX;
 
     data.m_lastBand = 0;
 
@@ -1008,7 +1008,7 @@ int32_t CShadowCache::Update(const C3Vector& pos, int32_t useCullFrustum) {
         frame = CShadowCache::s_frameCounter;
     }
 
-    data.m_queryFlags[0] = 3;
+    data.m_queryFlags[0] = CShadowCacheQueryData::QUERY_UNITS | CShadowCacheQueryData::QUERY_INTERIOR;
     data.m_useFrustum = 0;
     CShadowCache::s_queryCallback(data, frame);
 
@@ -1023,12 +1023,12 @@ int32_t CShadowCache::Update(const C3Vector& pos, int32_t useCullFrustum) {
     CShadowCache::s_renderCallback(data, 0, target, colorTarget, CShadowCache::s_extDynShadow.m_dir);
 
     if (useCullFrustum) {
-        data.m_queryFlags[0] = 1;
+        data.m_queryFlags[0] = CShadowCacheQueryData::QUERY_UNITS;
 
         if (mode > SHADOW_HIGH) {
-            data.m_queryFlags[0] = 13;
+            data.m_queryFlags[0] = CShadowCacheQueryData::QUERY_UNITS | CShadowCacheQueryData::QUERY_BILLBOARDED | CShadowCacheQueryData::QUERY_STATIC;
         } else if (mode > SHADOW_MEDIUM) {
-            data.m_queryFlags[0] = 5;
+            data.m_queryFlags[0] = CShadowCacheQueryData::QUERY_UNITS | CShadowCacheQueryData::QUERY_BILLBOARDED;
         }
 
         CShadowCache::s_queryCallback(data, frame);
@@ -1049,7 +1049,7 @@ int32_t CShadowCache::Update(const C3Vector& pos, int32_t useCullFrustum) {
         }
 
         if (useCullFrustum || mode < SHADOW_VERY_HIGH) {
-            int32_t useBandCull = 0;
+            BOOL useBandCull = 0;
             CFrustum frustum;
 
             if (mode < SHADOW_VERY_HIGH) {
@@ -1067,7 +1067,7 @@ int32_t CShadowCache::Update(const C3Vector& pos, int32_t useCullFrustum) {
     }
 
     if (CShaderEffect::s_usePcfFiltering) {
-        GxRsSet(GxRs_ColorWrite, 15);
+        GxRsSet(GxRs_ColorWrite, GxColorWrite_All);
         GxRenderTargetSet(GxBuffers_Depth, depthTarget, 0);
     }
 

@@ -5,6 +5,7 @@
 #include <typeinfo>
 #include "Engine/Source/Gxu/GxuLight.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
+#include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Tempest/CMath.h"
 
@@ -62,14 +63,14 @@ static CGxLight* GxuLightLockImpl(CGxuLight* light) {
 // OFFSET: 0x006BB520
 static void GxuLightSetEnabledImpl(CGxuLight* light, bool enabled) {
     CGxLight* gxLight = GxuLightLock(light);
-    gxLight->m_flags ^= (enabled ^ gxLight->m_flags) & 1;
+    gxLight->m_flags ^= (enabled ^ gxLight->m_flags) & CGxLight::FLAGS::F_ENABLED;
     GxuLightUnlock(light);
 }
 
 // VERIFY: fac290f6 auto
 // OFFSET: 0x006BB550
 static int32_t GxuLightGetEnabledImpl(CGxuLight* light) {
-    int32_t enabled = GxuLightLock(light)->m_flags & 1;
+    int32_t enabled = GxuLightLock(light)->m_flags & CGxLight::FLAGS::F_ENABLED;
     GxuLightUnlock(light);
 
     return enabled;
@@ -93,9 +94,11 @@ static float GxuLightGetGridSizeImpl() {
 
 // VERIFY: fd3c112d auto
 // OFFSET: 0x006BB5B0
-static void GxuLightSetGridSizeImpl(float gridSize) {
-    s_gridSize = gridSize;
-    s_gridHalfSize = gridSize * 0.5;
+static void GxuLightSetGridSizeImpl(float bucketSize) {
+    STORM_ASSERT(bucketSize > 0.0f);
+
+    s_gridSize = bucketSize;
+    s_gridHalfSize = bucketSize * 0.5;
     GxuLightInvalidate();
 }
 
@@ -133,7 +136,7 @@ void CGxuLight::ClearLinks() {
         link->m_lightLink.Unlink();
         link->m_listLink.Unlink();
 
-        if (this->m_light.m_flags & 2) {
+        if (this->m_light.m_flags & CGxLight::FLAGS::F_OMNI) {
             CLightList* list = link->m_list;
 
             if (list->m_links.Head()) {
@@ -152,7 +155,7 @@ CGxuLightLink* CGxuLight::NewLink() {
     CGxuLightLink* link = s_freeLinks.Head();
 
     if (!link) {
-        link = s_freeLinks.NewNode(2, 0, 0);
+        link = s_freeLinks.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     }
 
     link->m_lightLink.Unlink();
@@ -190,7 +193,7 @@ static CGxuLight* GxuLightCreateImpl() {
     CGxuLight* light = s_freeLights.Head();
 
     if (!light) {
-        return s_lights.NewNode(2, 0, 0);
+        return s_lights.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     }
 
     s_freeLights.UnlinkNode(light);
@@ -223,8 +226,7 @@ static void GxuLightApplyImpl(float x, float y, int32_t unused, const C3Vector& 
     uint32_t index = 0;
 
     for (CGxuLightLink* link = s_globalLights.m_links.Head(); link; link = s_globalLights.m_links.Next(link)) {
-        g_theGxDevicePtr->LightSet(index, link->m_light->m_light, viewPos);
-        g_theGxDevicePtr->LightEnable(index, 1);
+        GxLightSet(index, link->m_light->m_light, viewPos, 1);
         link->m_light->m_frame = s_frame;
         link->m_light->m_index = index;
         index++;
@@ -232,8 +234,7 @@ static void GxuLightApplyImpl(float x, float y, int32_t unused, const C3Vector& 
 
     if (list) {
         for (CGxuLightLink* link = list->m_links.Head(); link && index < maxLights; link = list->m_links.Next(link)) {
-            g_theGxDevicePtr->LightSet(index, link->m_light->m_light, viewPos);
-            g_theGxDevicePtr->LightEnable(index, 1);
+            GxLightSet(index, link->m_light->m_light, viewPos, 1);
             link->m_light->m_frame = s_frame;
             link->m_light->m_index = index;
             index++;
@@ -241,7 +242,7 @@ static void GxuLightApplyImpl(float x, float y, int32_t unused, const C3Vector& 
     }
 
     for (; index != 4; index++) {
-        g_theGxDevicePtr->LightEnable(index, 0);
+        GxLightEnable(index, 0);
     }
 
     s_dirty = 0;
@@ -251,6 +252,8 @@ static void GxuLightApplyImpl(float x, float y, int32_t unused, const C3Vector& 
 // VERIFY: 1d2dd109 manual
 // OFFSET: 0x006BC360
 static void GxuLightShutdownImpl() {
+    STORM_ASSERT(!s_lights.Head()); // 12213: "!CGxuLight::s_lights.Head()"
+
     s_lightGrid.Destroy();
     s_freeLights.Clear();
     s_freeLinks.Clear();
@@ -265,11 +268,11 @@ static void GxuLightUnlockImpl(CGxuLight* light) {
 
     uint32_t flags = light->m_light.m_flags;
 
-    if (!(flags & 1)) {
+    if (!(flags & CGxLight::FLAGS::F_ENABLED)) {
         return;
     }
 
-    if (!(flags & 2)) {
+    if (!(flags & CGxLight::FLAGS::F_OMNI)) {
         CGxuLightLink* link = light->NewLink();
         s_globalLights.m_links.LinkToTail(link);
         link->m_light = light;
@@ -322,7 +325,7 @@ static void GxuLightUnlockImpl(CGxuLight* light) {
             }
 
             if (node) {
-                list->m_links.LinkNode(link, 2, node);
+                list->m_links.LinkNode(link, TSLIST_LINK_BEFORE, node);
             } else {
                 list->m_links.LinkToTail(link);
             }
@@ -371,31 +374,5 @@ void (*GxuLightInvalidate)() = GxuLightInvalidateImpl;
 
 // VERIFY: 78842f2d manual
 // OFFSET: 0x006BB8F0
-CGxuLightQueue::CGxuLightQueue(const uint32_t (&params)[2]) : CMemBlock(sizeof(CGxuLight*) * params[0], 0, typeid(CGxuLight*).raw_name(), SLOG_OBJECT) {
-    uint32_t count = params[0];
-    uint32_t chunk = params[1];
-
-    this->m_chunk = chunk;
-    this->m_capacity = count;
-    this->m_count = 0;
-
-    if (count) {
-        this->m_count++;
-        return;
-    }
-
-    if (!chunk) {
-        return;
-    }
-
-    uint32_t grow = chunk;
-
-    if (grow <= 1 - count) {
-        grow = 1 - count;
-    }
-
-    if (this->Resize(sizeof(CGxuLight*) * (grow + count), true)) {
-        this->m_capacity += grow;
-        this->m_count++;
-    }
+CGxuLightQueue::CGxuLightQueue(const uint32_t (&params)[2]) : CPriorityQ<CGxuLight*>(params) {
 }

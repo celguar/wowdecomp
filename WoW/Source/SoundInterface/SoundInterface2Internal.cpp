@@ -34,6 +34,9 @@ VSOUNDKITDEF::~VSOUNDKITDEF() {
             this->m_files[i] = nullptr;
         }
     }
+
+    STORM_ASSERT(this->m_pInitialSoundGroup == NULL);
+    STORM_ASSERT(this->m_pSoundGroup == NULL);
 }
 
 // VERIFY: cca97730 auto
@@ -65,8 +68,8 @@ VSOUNDKITDEF::VSOUNDKITDEF() {
 
 // VERIFY: 229de6de manual
 // OFFSET: 0x004CBAC0
-const char* VSOUNDKITDEF::SelectFile(uint32_t mode, int32_t* index, int32_t fileIndex, int32_t priority) {
-    if (mode > 2) {
+const char* VSOUNDKITDEF::SelectFile(SE2_FILE_SELECT_MODE mode, int32_t* index, int32_t fileIndex, int32_t priority) {
+    if (static_cast<uint32_t>(mode) > SE2_FILE_SELECT_WEIGHTED_CYCLE) {
         return nullptr;
     }
 
@@ -129,11 +132,11 @@ const char* VSOUNDKITDEF::SelectFile(uint32_t mode, int32_t* index, int32_t file
             break;
         }
 
-        if (mode == 0) {
+        if (mode == SE2_FILE_SELECT_SEQUENTIAL) {
             for (int32_t i = 0; i < 10; i++) {
                 this->m_weights[i] = 1;
             }
-        } else if (mode == 1 || mode == 2) {
+        } else if (mode == SE2_FILE_SELECT_WEIGHTED_RANDOM || mode == SE2_FILE_SELECT_WEIGHTED_CYCLE) {
             for (int32_t i = 0; i < this->m_numFiles; i++) {
                 this->m_weights[i] = this->m_frequencies[i];
             }
@@ -142,14 +145,14 @@ const char* VSOUNDKITDEF::SelectFile(uint32_t mode, int32_t* index, int32_t file
         }
     }
 
-    int32_t roll = mode ? static_cast<int32_t>((static_cast<uint64_t>(static_cast<uint32_t>(total)) * CRandom::uint32_(g_rndSeed)) >> 32) : 0;
+    int32_t roll = mode ? static_cast<int32_t>(CRandom::dice_(total, g_rndSeed)) : 0;
 
-    int32_t state = 1;
+    int32_t state = SFILE_LOCAL_YES;
 
     if (this->m_pendingIndex >= 0) {
         state = SFile::FileIsLocal(this->m_files[this->m_pendingIndex], priority);
 
-        if (state && state != 2) {
+        if (state != SFILE_LOCAL_NO && state != SFILE_LOCAL_PARTIAL) {
             this->m_pendingIndex = -1;
         }
     }
@@ -172,7 +175,7 @@ const char* VSOUNDKITDEF::SelectFile(uint32_t mode, int32_t* index, int32_t file
             state = SFile::FileIsLocal(this->m_files[i], priority);
         }
 
-        if (state && state != 2) {
+        if (state != SFILE_LOCAL_NO && state != SFILE_LOCAL_PARTIAL) {
             this->m_weights[i]--;
             selected = i;
         } else {
@@ -200,7 +203,7 @@ const char* VSOUNDKITDEF::SelectFile(uint32_t mode, int32_t* index, int32_t file
         selected = 0;
     }
 
-    if (mode == 1) {
+    if (mode == SE2_FILE_SELECT_WEIGHTED_RANDOM) {
         for (int32_t k = 0; k < 10; k++) {
             this->m_weights[k] = 0;
         }
@@ -222,8 +225,8 @@ void SI2::CreateSoundGroups() {
         VSOUNDKITDEF* def = s_soundKitDefs[i];
 
         if (def && def->m_name) {
-            def->m_loadSoundGroup = SE2::CreateSoundGroup(def->m_name, 3);
-            def->m_soundGroup = SE2::CreateSoundGroup(def->m_name, 3);
+            def->m_pInitialSoundGroup = SE2::CreateSoundGroup(def->m_name, 3);
+            def->m_pSoundGroup = SE2::CreateSoundGroup(def->m_name, 3);
         }
     }
 }
@@ -235,14 +238,14 @@ void SI2::ReleaseSoundGroups() {
         VSOUNDKITDEF* def = s_soundKitDefs[i];
 
         if (def) {
-            if (def->m_loadSoundGroup) {
-                SE2::ReleaseSoundGroup(def->m_loadSoundGroup);
-                def->m_loadSoundGroup = nullptr;
+            if (def->m_pInitialSoundGroup) {
+                SE2::ReleaseSoundGroup(def->m_pInitialSoundGroup);
+                def->m_pInitialSoundGroup = nullptr;
             }
 
-            if (def->m_soundGroup) {
-                SE2::ReleaseSoundGroup(def->m_soundGroup);
-                def->m_soundGroup = nullptr;
+            if (def->m_pSoundGroup) {
+                SE2::ReleaseSoundGroup(def->m_pSoundGroup);
+                def->m_pSoundGroup = nullptr;
             }
         }
     }
@@ -252,7 +255,7 @@ void SI2::ReleaseSoundGroups() {
 // OFFSET: 0x004CBE70
 int32_t SI2::UpdateZoneSoundsForWorldState(int32_t areaId, int32_t zoneId, int32_t wmoAreaId, int32_t wmoGroupAreaId, int32_t inside) {
     int32_t count = s_worldStateZoneSoundOverrides.Count();
-    int32_t found = 0;
+    BOOL found = 0;
 
     if (inside) {
         for (int32_t i = 0; i < count; i++) {
@@ -260,10 +263,10 @@ int32_t SI2::UpdateZoneSoundsForWorldState(int32_t areaId, int32_t zoneId, int32
 
             if ((wmoAreaId > 0 && wmoAreaId == entry->m_wmoAreaId) || (wmoGroupAreaId > 0 && wmoGroupAreaId == entry->m_wmoAreaId)) {
                 if (GetWorldState(entry->m_worldStateId) == entry->m_worldStateValue) {
-                    SI2::SetZoneReverb(1, s_worldStateZoneSoundOverrides[i]->m_soundProviderPreferencesId);
-                    SI2::SetZoneAmbienceID(1, s_worldStateZoneSoundOverrides[i]->m_soundAmbienceId);
-                    SI2::SetZoneIntroMusicID(6, s_worldStateZoneSoundOverrides[i]->m_zoneIntroMusicId);
-                    SI2::SetZoneMusicID(1, s_worldStateZoneSoundOverrides[i]->m_zoneMusicId);
+                    SI2::SetZoneReverb(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_soundProviderPreferencesId);
+                    SI2::SetZoneAmbienceID(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_soundAmbienceId);
+                    SI2::SetZoneIntroMusicID(SI2::ZONE_SOUND_TYPE::SI2ZONESOUNDTYPE_INTRO_WORLDSTATEOVERRIDE, s_worldStateZoneSoundOverrides[i]->m_zoneIntroMusicId);
+                    SI2::SetZoneMusicID(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_zoneMusicId);
                     found = 1;
 
                     if (wmoGroupAreaId == s_worldStateZoneSoundOverrides[i]->m_wmoAreaId) {
@@ -296,10 +299,10 @@ int32_t SI2::UpdateZoneSoundsForWorldState(int32_t areaId, int32_t zoneId, int32
             }
 
             if (rank < best && GetWorldState(entry->m_worldStateId) == entry->m_worldStateValue) {
-                SI2::SetZoneReverb(1, s_worldStateZoneSoundOverrides[i]->m_soundProviderPreferencesId);
-                SI2::SetZoneAmbienceID(1, s_worldStateZoneSoundOverrides[i]->m_soundAmbienceId);
-                SI2::SetZoneIntroMusicID(6, s_worldStateZoneSoundOverrides[i]->m_zoneIntroMusicId);
-                SI2::SetZoneMusicID(1, s_worldStateZoneSoundOverrides[i]->m_zoneMusicId);
+                SI2::SetZoneReverb(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_soundProviderPreferencesId);
+                SI2::SetZoneAmbienceID(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_soundAmbienceId);
+                SI2::SetZoneIntroMusicID(SI2::ZONE_SOUND_TYPE::SI2ZONESOUNDTYPE_INTRO_WORLDSTATEOVERRIDE, s_worldStateZoneSoundOverrides[i]->m_zoneIntroMusicId);
+                SI2::SetZoneMusicID(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_zoneMusicId);
                 found = 1;
                 best = rank;
 
@@ -318,10 +321,10 @@ int32_t SI2::UpdateZoneSoundsForWorldState(int32_t areaId, int32_t zoneId, int32
 
             if ((areaId > 0 && areaId == entry->m_areaId) || (zoneId > 0 && zoneId == entry->m_areaId)) {
                 if (GetWorldState(entry->m_worldStateId) == entry->m_worldStateValue) {
-                    SI2::SetZoneReverb(1, s_worldStateZoneSoundOverrides[i]->m_soundProviderPreferencesId);
-                    SI2::SetZoneAmbienceID(1, s_worldStateZoneSoundOverrides[i]->m_soundAmbienceId);
-                    SI2::SetZoneIntroMusicID(6, s_worldStateZoneSoundOverrides[i]->m_zoneIntroMusicId);
-                    SI2::SetZoneMusicID(1, s_worldStateZoneSoundOverrides[i]->m_zoneMusicId);
+                    SI2::SetZoneReverb(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_soundProviderPreferencesId);
+                    SI2::SetZoneAmbienceID(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_soundAmbienceId);
+                    SI2::SetZoneIntroMusicID(SI2::ZONE_SOUND_TYPE::SI2ZONESOUNDTYPE_INTRO_WORLDSTATEOVERRIDE, s_worldStateZoneSoundOverrides[i]->m_zoneIntroMusicId);
+                    SI2::SetZoneMusicID(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, s_worldStateZoneSoundOverrides[i]->m_zoneMusicId);
                     found = 1;
 
                     if (zoneId == s_worldStateZoneSoundOverrides[i]->m_areaId) {
@@ -336,10 +339,10 @@ int32_t SI2::UpdateZoneSoundsForWorldState(int32_t areaId, int32_t zoneId, int32
         }
     }
 
-    SI2::SetZoneReverb(1, -1);
-    SI2::SetZoneAmbienceID(1, -1);
-    SI2::SetZoneIntroMusicID(6, -1);
-    SI2::SetZoneMusicID(1, -1);
+    SI2::SetZoneReverb(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, -1);
+    SI2::SetZoneAmbienceID(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, -1);
+    SI2::SetZoneIntroMusicID(SI2::ZONE_SOUND_TYPE::SI2ZONESOUNDTYPE_INTRO_WORLDSTATEOVERRIDE, -1);
+    SI2::SetZoneMusicID(SI2::ZONE_SOUND_TYPE::SOURCE_WORLD_STATE, -1);
     return 0;
 }
 
@@ -356,14 +359,14 @@ VSOUNDKITDEF* SI2::GetSoundKitDef(int32_t soundKitId) {
 // VERIFY: 76ad8733 manual
 // OFFSET: 0x004CC1B0
 void SI2::InitWorldStateZoneSoundOverrides() {
-    uint32_t count = g_worldStateZoneSoundsDB.m_numRecords;
+    uint32_t count = g_worldStateZoneSoundsDB.GetNumRecords();
     s_worldStateZoneSoundOverrides.SetCount(count);
     memset(s_worldStateZoneSoundOverrides.Ptr(), 0, sizeof(WorldStateZoneSoundOverride*) * count);
 
     for (uint32_t i = 0; i < s_worldStateZoneSoundOverrides.Count(); i++) {
         s_worldStateZoneSoundOverrides[i] = static_cast<WorldStateZoneSoundOverride*>(SMemAlloc(sizeof(WorldStateZoneSoundOverride), __FILE__, __LINE__, 0));
 
-        WorldStateZoneSoundsRec* rec = (static_cast<int32_t>(i) < 0 || static_cast<int32_t>(i) >= g_worldStateZoneSoundsDB.m_numRecords) ? nullptr : &g_worldStateZoneSoundsDB.m_records[i];
+        WorldStateZoneSoundsRec* rec = (static_cast<int32_t>(i) < 0 || static_cast<int32_t>(i) >= g_worldStateZoneSoundsDB.GetNumRecords()) ? nullptr : &g_worldStateZoneSoundsDB.m_records[i];
 
         s_worldStateZoneSoundOverrides[i]->m_areaId = rec->m_areaID;
         s_worldStateZoneSoundOverrides[i]->m_wmoAreaId = rec->m_wmoareaID;
@@ -441,12 +444,12 @@ int32_t SI2::LookupSoundKitId(const char* name) {
 // VERIFY: 9c167174 manual
 // OFFSET: 0x004CD4A0
 void SI2::InitSoundKitLookup() {
-    uint32_t count = g_soundEntriesDB.m_maxID + 1;
+    uint32_t count = g_soundEntriesDB.GetMaxID() + 1;
     s_soundKitDefs.SetCount(count);
     memset(s_soundKitDefs.Ptr(), 0, sizeof(VSOUNDKITDEF*) * count);
 
-    for (int32_t i = 0; i < g_soundEntriesDB.m_numRecords; i++) {
-        SoundEntriesRec* rec = (i < 0 || i >= g_soundEntriesDB.m_numRecords) ? nullptr : &g_soundEntriesDB.m_records[i];
+    for (int32_t i = 0; i < g_soundEntriesDB.GetNumRecords(); i++) {
+        SoundEntriesRec* rec = (i < 0 || i >= g_soundEntriesDB.GetNumRecords()) ? nullptr : &g_soundEntriesDB.m_records[i];
 
         if (!rec) {
             continue;
@@ -454,7 +457,7 @@ void SI2::InitSoundKitLookup() {
 
         VSOUNDKITDEF* def = new (SMemAlloc(sizeof(VSOUNDKITDEF), __FILE__, __LINE__, 0)) VSOUNDKITDEF();
 
-        for (int32_t j = 0; j < 10; j++) {
+        for (int32_t j = 0; j < NUM_SOUND_ENTRY_FILES; j++) {
             const char* file = rec->m_file[j];
 
             if (!file || !*file) {
@@ -514,8 +517,8 @@ void SI2::InitSoundKitLookup() {
 void SI2::InitZoneSoundOverrides() {
     char key[64];
 
-    for (int32_t i = 0; i < g_worldChunkSoundsDB.m_numRecords; i++) {
-        WorldChunkSoundsRec* rec = (i < 0 || i >= g_worldChunkSoundsDB.m_numRecords) ? nullptr : &g_worldChunkSoundsDB.m_records[i];
+    for (int32_t i = 0; i < g_worldChunkSoundsDB.GetNumRecords(); i++) {
+        WorldChunkSoundsRec* rec = (i < 0 || i >= g_worldChunkSoundsDB.GetNumRecords()) ? nullptr : &g_worldChunkSoundsDB.m_records[i];
 
         SStrPrintf(key, sizeof(key), "%010d_%010d_%010d_%010d_%010d", rec->m_id, rec->m_chunkX, rec->m_chunkY, rec->m_subchunkX, rec->m_subchunkY);
 

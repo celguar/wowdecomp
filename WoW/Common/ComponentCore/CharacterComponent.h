@@ -3,6 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
+#include "WoW/Source/DB/Rec/CharSectionsRec.h"
 #include "Engine/Source/BLPFile/Types.h"
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Services/Types.h"
@@ -26,18 +28,51 @@ class ItemDisplayInfoRec;
 struct st_race;
 
 struct CharacterBaseVariation {
-    /* 0000 */ HTEXTURECACHE m_texture [3];
+    enum TEXTURE_LIMITS : int32_t {
+        // Native destruction scans seven entries; ordinary texture columns remain three.
+        DESTRUCTION_COUNT = 7,
+    };
 
     ~CharacterBaseVariation();
+
+    HTEXTURECACHE GetTexture(uint32_t index) const { // (inferred)
+        STORM_ASSERT(index < 3);
+        return this->m_texture[index];
+    }
+
+    void SetTexture(uint32_t index, HTEXTURECACHE texture) { // (inferred)
+        STORM_ASSERT(index < 3);
+        this->m_texture[index] = texture;
+    }
+
+    private:
+    /* 0000 */ HTEXTURECACHE m_texture [CharSectionsRec::TEXTURE_INDEX::COUNT];
 };
 
+// Item texture layers per body section, ordered by s_itemPriority (inferred name).
+static const int32_t NUM_SECTION_LAYERS = 7;
+
 struct CharacterSection {
-    /* 0000 */ HTEXTURECACHE m_layerTex [7];
-    /* 001C */ uint32_t m_layerItemDisplayId [7];
+    private:
+    friend class CCharacterComponent; // (inferred)
+
+    /* 0000 */ HTEXTURECACHE m_layerTex [NUM_SECTION_LAYERS];
+    /* 001C */ uint32_t m_layerItemDisplayId [NUM_SECTION_LAYERS];
     /* 0038 */ uint32_t m_layerMask;
 
+    public:
     CharacterSection();
     ~CharacterSection();
+
+    bool HasCompMip(uint32_t compMip) const { // (inferred)
+        STORM_ASSERT(compMip < 7);
+        return ((1 << compMip) & this->m_layerMask) != 0;
+    }
+
+    void SetItemDisplayID(uint32_t compMip, uint32_t displayID) { // (inferred)
+        STORM_ASSERT(compMip < 7);
+        this->m_layerItemDisplayId[compMip] = displayID;
+    }
 };
 
 struct CompSectionInfo {
@@ -54,9 +89,15 @@ class CComponentMipBits {
 
 class CComponentRequest {
     public:
+    enum REQUEST_FLAGS : int32_t {
+        IN_USE = 0x1,
+        FINISHED = 0x2,
+        STATE_MASK = 0x3,
+    };
+
     /* 0000 */ uint32_t m_flags;
     /* 0004 */ EGxTexFormat m_format;
-    /* 0008 */ CComponentMipBits* m_mipBits;
+    /* 0008 */ CComponentMipBits* m_componentMipBits;
     /* 000C */ HTEXTURECACHE m_baseTextures [10];
     /* 0034 */ uint32_t m_layerCount;
     /* 0038 */ HTEXTURECACHE m_layerTextures [40];
@@ -70,6 +111,24 @@ class CComponentRequest {
 class CStatus;
 class CCharacterComponent {
     public:
+    enum FLAGS : int32_t {
+        TEXTURES_DIRTY = 0x1,
+        UNKNOWN_2 = 0x2,
+        GEOSETS_DIRTY = 0x4,
+        UNKNOWN_8 = 0x8,
+        BARE_FEET = 0x10,
+        HIDE_PANTS_AND_BELT = 0x20,
+        TABARD_PREVIEW = 0x40,
+        TEXTURES_AND_GEOSETS_DIRTY = 0x5,
+        INITIAL_FLAGS = 0x7,
+        TABARD_PREVIEW_AND_GEOSETS = 0x44,
+        DISPLAY_RESET_MASK = 0x45,
+    };
+
+    enum FLAG_BITS : int32_t {
+        BARE_FEET_BIT_INDEX = 4,
+    };
+
     static CVar* g_componentCompressVar;
     static CVar* g_componentTextureLevelVar;
     static CVar* g_componentThreadVar;
@@ -85,13 +144,13 @@ class CCharacterComponent {
     static EGxTexFormat s_gxFormat;
     static EGxTexFormat s_gxFormatHigh;
     static uint32_t s_mipLevels;
-    static TSExplicitList<CCharacterComponent, 0> s_queue;
+    static TSExplicitList<CCharacterComponent, 0> s_updateList;
     static void (CCharacterComponent::*s_requestFunc[NUM_COMPONENT_SECTIONS])();
     static CompSectionInfo s_sectionInfoRaw[NUM_COMPONENT_SECTIONS];
     static MipBits* s_textureBuffer;
 
-    static GEOCOMPONENTLINKS AddHandItem(CM2Model* model, const ItemDisplayInfoRec* displayRec, INVENTORY_SLOTS invSlot, SHEATHE_TYPE sheatheType, bool sheathed, bool shield, bool mainHand, int32_t itemVisual);
-    static void AddLink(CM2Model* parent, GEOCOMPONENTLINKS link, const char* modelPath, const char* texturePath, int32_t itemVisual, const ItemDisplayInfoRec* displayRec);
+    static MODEL_ATTACHMENT_ID AddHandItem(CM2Model* model, const ItemDisplayInfoRec* displayRec, INVENTORY_SLOTS invSlot, SHEATHE_TYPE sheatheType, bool sheathed, bool shield, bool mainHand, int32_t itemVisual);
+    static void AddLink(CM2Model* parent, MODEL_ATTACHMENT_ID link, const char* modelPath, const char* texturePath, int32_t itemVisual, const ItemDisplayInfoRec* displayRec);
     static CCharacterComponent* AllocComponent();
     static CComponentMipBits* AllocComponentMipBits(EGxTexFormat format);
     static CComponentRequest* AllocComponentRequest();
@@ -112,30 +171,30 @@ class CCharacterComponent {
     static int32_t GetNumHairColorsForStyle(int32_t raceID, int32_t sexID, int32_t classID, int32_t hairStyleID, COMPONENT_CONTEXT context);
     static int32_t GetNumHairStylesForColor(int32_t raceID, int32_t sexID, int32_t classID, int32_t hairColorID, COMPONENT_CONTEXT context);
     static int32_t GetNumSkins(int32_t raceID, int32_t sexID, int32_t classID, COMPONENT_CONTEXT context);
-    static GEOCOMPONENTLINKS GetSheatheLink(SHEATHE_TYPE sheatheType, bool mainHand);
+    static MODEL_ATTACHMENT_ID GetSheatheLink(SHEATHE_TYPE sheatheType, bool mainHand);
     static char* GetTabardBackgroundFileName(COMPONENT_SECTIONS section, int32_t background, char* buffer, int32_t size);
     static char* GetTabardBorderFileName(COMPONENT_SECTIONS section, int32_t border, int32_t color, char* buffer, int32_t size);
     static char* GetTabardEmblemFileName(COMPONENT_SECTIONS section, int32_t emblem, int32_t color, char* buffer, int32_t size);
     static bool Initialize();
-    static bool Initialize(EGxTexFormat format, uint32_t mipLevels, int32_t useThread, int32_t useCompression);
+    static bool Initialize(EGxTexFormat format, uint32_t mipLevels, BOOL useThread, BOOL useCompression);
     static CM2Model* MakeAmmoModel(CM2Model* model, const ItemDisplayInfoRec* displayRec, uint32_t invType);
     static void Paste(HTEXTURECACHE texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel);
     static void PasteCrappyGreen(MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
-    static void PasteOpaque(HTEXTURECACHE texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
+    static void PasteOpaque(HTEXTURECACHE texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& size, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
     static void PasteOpaqueScale(HTEXTURECACHE texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
     static void PasteFromSkin(COMPONENT_SECTIONS section, HTEXTURECACHE texture, MipBits* dstMips);
     static void PasteScale(HTEXTURECACHE texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
     static void PasteToSection(COMPONENT_SECTIONS section, HTEXTURECACHE texture, MipBits* dstMips);
-    static void PasteTransparent1Bit(HTEXTURECACHE texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
+    static void PasteTransparent1Bit(HTEXTURECACHE texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& size, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
     static void PasteTransparent1BitScale(HTEXTURECACHE texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
     static void PasteTransparent4Bit(HTEXTURECACHE texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
-    static void PasteTransparent4BitScale(HTEXTURECACHE texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
+    static void PasteTransparent4BitScale(HTEXTURECACHE texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& size, TCTEXTUREINFO& srcInfo);
     static void PasteTransparent8Bit(HTEXTURECACHE texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
-    static void PasteTransparent8BitScale(HTEXTURECACHE texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
+    static void PasteTransparent8BitScale(HTEXTURECACHE texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& size, TCTEXTUREINFO& srcInfo);
     static void ProcessComponentFinishedList(int32_t all);
     static void ProcessComponentRequest(CComponentRequest* request);
     static void RemoveHandItem(CM2Model* model, INVENTORY_SLOTS invSlot, SHEATHE_TYPE sheatheType, bool shield);
-    static void RemoveLinkpt(CM2Model* model, GEOCOMPONENTLINKS link);
+    static void RemoveLinkpt(CM2Model* model, MODEL_ATTACHMENT_ID link);
     static void RemoveVisuals(CM2Model* model);
     static void ReplaceMonsterSkin(CM2Model* model, const CreatureDisplayInfoRec* displayRec, const CreatureModelDataRec* modelRec);
     static void ThreadDestroy();
@@ -145,27 +204,48 @@ class CCharacterComponent {
     static void UpdateBaseTexture(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     static void ValidateComponentData(ComponentData* data, COMPONENT_CONTEXT context);
 
+    // INLINED
+    BOOL GetAllDirty() const {
+        return this->m_flags & TEXTURES_DIRTY;
+    }
+
+    // INLINED
+    CTexture* GetBaseTexture() const { // (inferred)
+        return this->m_baseTexture;
+    }
+
     /* 0000 */ TSLink<CCharacterComponent> m_link;
     /* 0008 */ uint32_t m_flags;
+    private:
     /* 000C */ uint32_t m_dirtySections;
+
+    public:
     /* 0010 */ uint32_t m_heapIndex;
     /* 0014 */ EGxTexFormat m_gxTexFormat;
     /* 0018 */ ComponentData m_data;
-    /* 0190 */ CTexture* m_baseSkinTexture;
+
+    private:
+    /* 0190 */ CTexture* m_baseTexture;
+
     /* 0194 */ CharacterBaseVariation m_baseVariation [CHARTEXTUREVARIATIONS_NUM];
     /* 01D0 */ CharacterSection m_section [10];
     /* 0428 */ uint32_t m_itemDisplayID [12];
     /* 0458 */ uint32_t m_handItemDisplayID [3];
-    /* 0464 */ int32_t m_itemSlotForAttachSlot [50];
-    /* 052C */ CComponentRequest* m_request;
+    /* 0464 */ int32_t m_itemSlotForAttachSlot [MODEL_ATTACHMENT_ID::NUM_ATTACH_SLOTS];
 
+    void InvalidateComponentRequest(); // (inferred)
+    void UpdateSections();
+    int32_t UpdateItemDisplay(COMPONENT_SECTIONS section, const ItemDisplayInfoRec* displayRec, int32_t priority);
+    /* 052C */ CComponentRequest* m_componentRequest;
+
+    public:
     CCharacterComponent();
     ~CCharacterComponent();
     void AddCape();
     void AddHelm(int32_t itemVisual);
     void AddItem(ITEM_SLOT itemSlot, const ItemDisplayInfoRec* displayRec, int32_t itemVisual);
     void AddItem(ITEM_SLOT itemSlot, int32_t displayID, int32_t itemVisual);
-    void AddItemBySlot(INVENTORY_SLOTS invSlot, int32_t displayID, int32_t itemVisual);
+    void AddItemBySlot(INVENTORY_SLOTS invSlot, int32_t itemDisplayInfoID, int32_t itemVisual);
     void AddItemByType(INVENTORY_TYPES invType, int32_t displayID);
     void AddQuiver(int32_t itemVisual);
     void AddShoulders(int32_t itemVisual);
@@ -197,8 +277,8 @@ class CCharacterComponent {
     bool Init(ComponentData* data, const char* debug);
     bool IsHelmModelCorrect();
     bool IsQuiverModelCorrect();
-    bool ItemsLoaded(int32_t wait);
-    void LoadBaseVariation(CHARTEXTUREVARIATIONS variation, int32_t textureIndex, int32_t variationIndex, int32_t colorIndex, COMPONENT_SECTIONS section, const char* debug);
+    bool ItemsLoaded(BOOL wait);
+    void LoadBaseVariation(CHARTEXTUREVARIATIONS variation, uint32_t index, int32_t variationIndex, int32_t colorIndex, COMPONENT_SECTIONS section, const char* debug);
     HTEXTURECACHE LoadItemComponentTexture(const ItemDisplayInfoRec* displayRec, COMPONENT_SECTIONS section);
     void Prep();
     void PrepSections();
@@ -206,7 +286,7 @@ class CCharacterComponent {
     void RemoveItem(ITEM_SLOT itemSlot);
     void RemoveItemBySlot(INVENTORY_SLOTS invSlot);
     void RemoveItemByType(INVENTORY_TYPES invType);
-    bool RenderPrep(int32_t wait);
+    bool RenderPrep(BOOL wait);
     void RenderPrepAL();
     void RenderPrepAll();
     void RenderPrepAU();
@@ -222,12 +302,12 @@ class CCharacterComponent {
     void ReplaceExtraSkinTexture(const char* debug);
     void ReplaceHairTexture(int32_t hairStyleID, const char* debug);
     void SetBeardStyle(int32_t facialHairID, bool loadVariation, const char* debug);
-    void SetDirtySections(uint32_t mask);
+    void SetDirtySections(uint32_t sections);
     void SetFace(int32_t faceID, bool loadHair, const char* debug);
     void SetHairColor(int32_t hairColorID, bool loadHair, const char* debug);
     void SetHairStyle(int32_t hairStyleID, const char* debug);
     void SetHandItemDisplay(int32_t displayID, uint32_t hand, INVENTORY_SLOTS invSlot, bool shield);
-    void SetItemSlotUsingAttachSlot(ITEM_SLOT itemSlot, GEOCOMPONENTLINKS link);
+    void SetItemSlotUsingAttachSlot(ITEM_SLOT itemSlot, MODEL_ATTACHMENT_ID link);
     void SetMainHandItemDisplay(int32_t displayID);
     void SetOffHandItemDisplay(int32_t displayID);
     void SetShieldItemDisplay(int32_t displayID);
@@ -261,9 +341,7 @@ class CCharacterComponent {
     void UpdateItemLU(ITEM_SLOT itemSlot, const ItemDisplayInfoRec* displayRec, bool apply);
     void UpdateItemTL(ITEM_SLOT itemSlot, const ItemDisplayInfoRec* displayRec, bool apply);
     void UpdateItemTU(ITEM_SLOT itemSlot, const ItemDisplayInfoRec* displayRec, bool apply);
-    void UpdateSections();
-    int32_t UpdateTextureSlot(COMPONENT_SECTIONS section, const ItemDisplayInfoRec* displayRec, int32_t layer);
-    bool VariationsLoaded(int32_t wait);
+    bool VariationsLoaded(BOOL wait);
 };
 
 bool ComponentVarHandler(CVar* var, const char* oldValue, const char* value, void* arg);

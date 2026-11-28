@@ -4,6 +4,7 @@
 #include <malloc.h>
 #include <new>
 #include "ObjectMgrClient.h"
+#include "WoW/Source/DB/Rec/MapRec.h"
 #include "Engine/Source/Base/CDataStore.h"
 #include "Engine/Source/Base/ObjectAlloc.h"
 #include "Engine/Source/ConsoleBase/ConsoleCommand.h"
@@ -35,9 +36,12 @@
 
 // STATIC: 0x00DD2008
 static thread_local ObjectMgr* s_curMgr;
+#if defined(WOWDECOMP_ASSERTIONS)
+static thread_local uint32_t s_localPlayerUpdates;
+#endif
 
 // STATIC: 0x00B4B014
-static ObjectMgr* s_savedObjMgr;
+static ObjectMgr* s_savMgr;
 
 // STATIC: 0x00B4B020
 static TSList<CMirrorHandler, TSGetLink<CMirrorHandler> > s_typeMirrorHandlers[NUM_CLIENT_OBJECT_TYPES][1326];
@@ -55,28 +59,28 @@ static const char* s_objNames[NUM_CLIENT_OBJECT_TYPES] = { "CGObject_C", "CGItem
 static const uint32_t s_objHeapSize[NUM_CLIENT_OBJECT_TYPES] = { 0, 512, 32, 64, 64, 64, 32, 32 };
 
 // STATIC: 0x00AC3D04
-static const uint32_t s_objDwordCount[NUM_CLIENT_OBJECT_TYPES] = { 0x6, 0x40, 0x8A, 0x94, 0x52E, 0x12, 0xC, 0x24 };
+static const uint32_t s_objDwordCount[NUM_CLIENT_OBJECT_TYPES] = { OBJECT_FIELDS::OBJECT_END, OBJECT_FIELDS::OBJECT_END + CGItemData::FIELD_ID::ITEM_END, OBJECT_FIELDS::OBJECT_END + CGItemData::FIELD_ID::ITEM_END + CGContainerData::FIELD_ID::CONTAINER_END, OBJECT_FIELDS::OBJECT_END + CGUnitData::FIELD_ID::UNIT_END, OBJECT_FIELDS::OBJECT_END + CGUnitData::FIELD_ID::UNIT_END + CGPlayerLocalData::FIELD_ID::PLAYER_END, OBJECT_FIELDS::OBJECT_END + CGGameObjectData::FIELD_ID::GAMEOBJECT_END, OBJECT_FIELDS::OBJECT_END + CGDynamicObjectData::FIELD_ID::DYNAMICOBJECT_END, OBJECT_FIELDS::OBJECT_END + CGCorpseData::FIELD_ID::CORPSE_END, };
 
 // STATIC: 0x00B6A160
 uint32_t s_objTotalSize[NUM_CLIENT_OBJECT_TYPES] = {
     sizeof(CGObject_C) + sizeof(CGObjectData) + CGObject::TotalFieldsSaved() * sizeof(uint32_t),
     sizeof(CGItem_C) + sizeof(CGObjectData) + sizeof(CGItemData) + CGItem::TotalFieldsSaved() * sizeof(uint32_t),
     sizeof(CGContainer_C) + sizeof(CGObjectData) + sizeof(CGItemData) + sizeof(CGContainerData) + CGContainer::TotalFieldsSaved() * sizeof(uint32_t),
-    sizeof(CGUnit_C) + sizeof(CGObjectData) + sizeof(CGUnitData) + CGUnit::TotalFields() * sizeof(uint32_t),
-    sizeof(CGPlayer_C) + sizeof(CGObjectData) + sizeof(CGUnitData) + sizeof(CGPlayerData) + CGPlayer::TotalRemoteFields() * sizeof(uint32_t),
+    sizeof(CGUnit_C) + sizeof(CGObjectData) + sizeof(CGUnitData) + CGUnit::TotalFieldsSaved() * sizeof(uint32_t),
+    sizeof(CGPlayer_C) + sizeof(CGObjectData) + sizeof(CGUnitData) + sizeof(CGPlayerData) + CGPlayer::TotalRemoteFieldsSaved() * sizeof(uint32_t),
     sizeof(CGGameObject_C) + sizeof(CGObjectData) + sizeof(CGGameObjectData) + CGGameObject::TotalFieldsSaved() * sizeof(uint32_t),
-    sizeof(CGDynamicObject_C) + sizeof(CGObjectData) + sizeof(CGDynamicObjectData) + CGDynamicObject::TotalFields() * sizeof(uint32_t),
+    sizeof(CGDynamicObject_C) + sizeof(CGObjectData) + sizeof(CGDynamicObjectData) + CGDynamicObject::TotalFieldsSaved() * sizeof(uint32_t),
     sizeof(CGCorpse_C) + sizeof(CGObjectData) + sizeof(CGCorpseData) + CGCorpse::TotalFieldsSaved() * sizeof(uint32_t),
 };
 
 // VERIFY: 9aded9c4 manual
 // OFFSET: 0x004D5850
 static CMirrorHandler* AssignMirrorHandler(TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* list, uint32_t fieldByteOffset, uint32_t mirrorByteOffset, uint32_t fieldByteSize, MIRRORHANDLERFUNC function, void* param, HANDLER_PRIORITY priority, int32_t alwaysFire) {
-    CMirrorHandler* handler = list->NewNode(2, 0, 0);
+    CMirrorHandler* handler = list->NewNode(TSLIST_LINK_BEFORE, 0, 0);
     handler->m_fieldByteOffset = fieldByteOffset;
     handler->m_mirrorByteOffset = mirrorByteOffset;
     handler->m_fieldByteSize = fieldByteSize;
-    handler->m_function = function;
+    handler->handler = function;
     handler->m_functionParam = param;
     handler->m_linkPositionSelector = priority;
     handler->m_dispatching = 0;
@@ -113,38 +117,46 @@ static uint32_t GetObjectTypeFieldByteOffset(OBJECT_TYPE_ID typeId) {
 
 // VERIFY: 846bf934 auto
 // OFFSET: 0x004D44F0
-static uint32_t TypeDescriptorToMirrorOffset(OBJECT_TYPE_ID typeId, uint32_t offset, uint32_t size) {
+static uint32_t TypeDescriptorToMirrorOffset(OBJECT_TYPE_ID typeId, uint32_t dataOffset, uint32_t size) {
     switch (typeId) {
         case ID_ITEM: {
-            return CGItem::DescriptorToMirrorOffset(offset, size, 0, 0);
+            STORM_ASSERT(dataOffset < CGItem::GetDataSize());
+            return CGItem::DescriptorToMirrorOffset(dataOffset, size, 0, 0);
         }
 
         case ID_CONTAINER: {
-            return CGContainer::DescriptorToMirrorOffset(offset, size, 0, 0);
+            STORM_ASSERT(dataOffset < CGContainer::GetDataSize());
+            return CGContainer::DescriptorToMirrorOffset(dataOffset, size, 0, 0);
         }
 
         case ID_UNIT: {
-            return CGUnit::DescriptorToMirrorOffset(offset, size, 0, 0);
+            STORM_ASSERT(dataOffset < CGUnit::GetDataSize());
+            return CGUnit::DescriptorToMirrorOffset(dataOffset, size, 0, 0);
         }
 
         case ID_PLAYER: {
-            return CGPlayer::DescriptorToMirrorOffset(offset, size, 0, 0);
+            STORM_ASSERT(dataOffset < CGPlayer::GetDataSize());
+            return CGPlayer::DescriptorToMirrorOffset(dataOffset, size, 0, 0);
         }
 
         case ID_GAMEOBJECT: {
-            return CGGameObject::DescriptorToMirrorOffset(offset, size, 0, 0);
+            STORM_ASSERT(dataOffset < CGGameObject::GetDataSize());
+            return CGGameObject::DescriptorToMirrorOffset(dataOffset, size, 0, 0);
         }
 
         case ID_DYNAMICOBJECT: {
-            return CGDynamicObject::DescriptorToMirrorOffset(offset, size, 0, 0);
+            STORM_ASSERT(dataOffset < CGDynamicObject::GetDataSize());
+            return CGDynamicObject::DescriptorToMirrorOffset(dataOffset, size, 0, 0);
         }
 
         case ID_CORPSE: {
-            return CGCorpse::DescriptorToMirrorOffset(offset, size, 0, 0);
+            STORM_ASSERT(dataOffset < CGCorpse::GetDataSize());
+            return CGCorpse::DescriptorToMirrorOffset(dataOffset, size, 0, 0);
         }
 
         default: {
-            return (offset & 3) + 4 * CGObject::GetSavedIndexFromDataIndex(offset >> 2);
+            STORM_ASSERT(dataOffset < CGObject::GetDataSize());
+            return (dataOffset & 3) + 4 * CGObject::GetSavedIndexFromDataIndex(dataOffset >> 2, (size + 3) >> 2, 0);
         }
     }
 }
@@ -153,7 +165,7 @@ static uint32_t TypeDescriptorToMirrorOffset(OBJECT_TYPE_ID typeId, uint32_t off
 // OFFSET: 0x004D5900
 static void UnassignMirrorHandler(TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* list, MIRRORHANDLERFUNC function, void* param) {
     for (CMirrorHandler* handler = list->Head(); handler; handler = list->Next(handler)) {
-        if (handler->m_function == function && handler->m_functionParam == param) {
+        if (handler->handler == function && handler->m_functionParam == param) {
             if (handler->m_dispatching) {
                 handler->m_deletePending = 1;
             } else {
@@ -168,14 +180,16 @@ static void UnassignMirrorHandler(TSList<CMirrorHandler, TSGetLink<CMirrorHandle
 // VERIFY: d1ddc062 manual
 // OFFSET: 0x004D36C0
 void NetClient::PushObjMgr(ClntObjMgr* mgr) {
-    if (s_savedObjMgr) {
+    STORM_ASSERT(s_savMgr == NULL);
+
+    if (s_savMgr) {
         return;
     }
 
     ObjectMgr* current = s_curMgr;
 
     if (reinterpret_cast<ObjectMgr*>(mgr) != current) {
-        s_savedObjMgr = current;
+        s_savMgr = current;
         s_curMgr = reinterpret_cast<ObjectMgr*>(mgr);
     }
 }
@@ -183,17 +197,17 @@ void NetClient::PushObjMgr(ClntObjMgr* mgr) {
 // VERIFY: a15d9aa7 manual
 // OFFSET: 0x004D3700
 void NetClient::PopObjMgr() {
-    if (s_savedObjMgr) {
-        s_curMgr = s_savedObjMgr;
-        s_savedObjMgr = nullptr;
+    if (s_savMgr) {
+        s_curMgr = s_savMgr;
+        s_savMgr = nullptr;
     }
 }
 
 // VERIFY: f58d5266 manual
 // OFFSET: 0x004D3750
-int32_t ClntObjMgrIsValid(int32_t a1) {
+int32_t ClntObjMgrIsValid(uint32_t flags) {
     ObjectMgr* mgr = s_curMgr;
-    return mgr && SMemIsValidPointer(mgr, sizeof(ObjectMgr), a1);
+    return mgr && SMemIsValidPointer(mgr, sizeof(ObjectMgr), flags);
 }
 
 // VERIFY: 1c37b7e9 manual
@@ -217,7 +231,7 @@ CGObject_C* ClntObjMgrObjectPtr(WOWGUID guid, OBJECT_TYPE mask, const char* file
         return nullptr;
     }
 
-    CGObject_C* object = mgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = mgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (object && !(object->m_obj->m_type & mask)) {
         return nullptr;
@@ -265,7 +279,7 @@ CMovementGlobals* ClntObjMgrGetMovementGlobals() {
         return nullptr;
     }
 
-    return mgr->m_movementGlobal;
+    return mgr->m_movement;
 }
 
 // VERIFY: 05ff89f3 manual
@@ -278,7 +292,7 @@ uint32_t ClntObjMgrGetPlayerType() {
 // OFFSET: 0x004D4CA0
 void ClntObjMgrHideObject(WOWGUID guid) {
     ObjectMgr* mgr = s_curMgr;
-    CGObject_C* object = mgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = mgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (object && mgr->m_visibleObjects.IsLinked(object)) {
         mgr->m_visibleObjects.UnlinkNode(object);
@@ -289,13 +303,13 @@ void ClntObjMgrHideObject(WOWGUID guid) {
 // OFFSET: 0x004D6BC0
 void ClntObjMgrLinkInNewObject(CGObject_C* object) {
     WOWGUID guid = object->m_obj->m_guid;
-    s_curMgr->m_objects.Insert(object, static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    s_curMgr->m_objects.Insert(object, guid.GetLow(), CHashKeyGUID(guid.m_guid));
 }
 
 // VERIFY: be60d36c manual
 // OFFSET: 0x004D4D60
 void ClntObjMgrLockObject(WOWGUID guid) {
-    CGObject_C* object = s_curMgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = s_curMgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (object) {
         object->SetObjectLocked(1);
@@ -308,22 +322,24 @@ void ClntObjMgrSetMovementGlobals(CMovementGlobals* globals) {
     ObjectMgr* mgr = s_curMgr;
 
     if (mgr) {
-        mgr->m_movementGlobal = globals;
+        mgr->m_movement = globals;
     }
 }
 
 // VERIFY: ba2b5330 manual
 // OFFSET: 0x004D5BA0
-void ClntObjMgrSetTypeMirrorHandler(OBJECT_TYPE_ID typeId, uint32_t fieldOffset, uint32_t fieldSize, MIRRORHANDLERFUNC function, void* param, HANDLER_PRIORITY priority, int32_t alwaysFire) {
-    uint32_t mirrorOffset = TypeDescriptorToMirrorOffset(typeId, fieldOffset, fieldSize);
-    AssignMirrorHandler(&s_typeMirrorHandlers[typeId][fieldOffset >> 2], fieldOffset + GetObjectTypeFieldByteOffset(typeId), mirrorOffset, fieldSize, function, param, priority, alwaysFire);
+void ClntObjMgrSetTypeMirrorHandler(OBJECT_TYPE_ID type, uint32_t fieldOffset, uint32_t fieldSize, MIRRORHANDLERFUNC function, void* param, HANDLER_PRIORITY priority, int32_t alwaysFire) {
+    STORM_ASSERT(type < NUM_CLIENT_OBJECT_TYPES);
+
+    uint32_t mirrorOffset = TypeDescriptorToMirrorOffset(type, fieldOffset, fieldSize);
+    AssignMirrorHandler(&s_typeMirrorHandlers[type][fieldOffset >> 2], fieldOffset + GetObjectTypeFieldByteOffset(type), mirrorOffset, fieldSize, function, param, priority, alwaysFire);
 }
 
 // VERIFY: df93f0c4 manual
 // OFFSET: 0x004D4D00
 void ClntObjMgrShowObject(WOWGUID guid) {
     ObjectMgr* mgr = s_curMgr;
-    CGObject_C* object = mgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = mgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (object && !mgr->m_visibleObjects.IsLinked(object)) {
         mgr->m_visibleObjects.LinkToTail(object);
@@ -396,54 +412,70 @@ static OBJECT_TYPE_ID IncTypeId(CGObject_C* object, OBJECT_TYPE_ID typeId) {
 
 // VERIFY: de904275 manual
 // OFFSET: 0x004D3D40
-static TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* GetObjectMirrorList(OBJECT_TYPE_ID typeId, CGObject_C* object, uint32_t index) {
+static TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* GetObjectMirrorList(OBJECT_TYPE_ID typeId, CGObject_C* object, uint32_t blockId) {
     TSList<void>* list;
 
     switch (typeId) {
         case ID_OBJECT: {
-            list = &object->m_objMirrorLists[index];
+            STORM_ASSERT(blockId < sizeof(CGObjectData)/sizeof(DWORD));
+            list = &object->m_objMirrorLists[blockId];
             break;
         }
 
         case ID_ITEM: {
-            list = &static_cast<CGItem_C*>(object)->m_itemMirrorLists[index];
+            STORM_ASSERT(blockId < sizeof(CGItemData)/sizeof(DWORD));
+            list = &static_cast<CGItem_C*>(object)->m_itemMirrorLists[blockId];
             break;
         }
 
         case ID_CONTAINER: {
-            list = &static_cast<CGContainer_C*>(object)->m_containerMirrorLists[index];
+            STORM_ASSERT(blockId < sizeof(CGContainerData)/sizeof(DWORD));
+            list = &static_cast<CGContainer_C*>(object)->m_containerMirrorLists[blockId];
             break;
         }
 
         case ID_UNIT: {
-            list = &static_cast<CGUnit_C*>(object)->m_unitMirrorLists[index];
+            STORM_ASSERT(blockId < sizeof(CGUnitData)/sizeof(DWORD));
+            list = &static_cast<CGUnit_C*>(object)->m_unitMirrorLists[blockId];
             break;
         }
 
         case ID_PLAYER: {
             CGPlayer_C* player = static_cast<CGPlayer_C*>(object);
 
-            if (player->IsActivePlayer() && index >= 176) {
-                list = &player->m_playerLocalMirrorLists[index - 176];
+            if (player->IsActivePlayer()) {
+                // 12213: "blockId < sizeof(CGPlayerData)/sizeof(DWORD)"; its CGPlayerData is our CGPlayerLocalData.
+                STORM_ASSERT(blockId < sizeof(CGPlayerLocalData)/sizeof(DWORD));
+
+                if (blockId >= 176) {
+                    list = &player->m_playerLocalMirrorLists[blockId - 176];
+                } else {
+                    list = &player->m_playerMirrorLists[blockId];
+                }
             } else {
-                list = &player->m_playerMirrorLists[index];
+                // 12213: "blockId < ((sizeof(CGPlayerData)-sizeof(CGLocalPlayerData))/sizeof(DWORD))"
+                STORM_ASSERT(blockId < sizeof(CGPlayerData)/sizeof(DWORD));
+                list = &player->m_playerMirrorLists[blockId];
             }
 
             break;
         }
 
         case ID_GAMEOBJECT: {
-            list = &static_cast<CGGameObject_C*>(object)->m_gameObjectMirrorLists[index];
+            STORM_ASSERT(blockId < sizeof(CGGameObjectData)/sizeof(DWORD));
+            list = &static_cast<CGGameObject_C*>(object)->m_gameObjectMirrorLists[blockId];
             break;
         }
 
         case ID_DYNAMICOBJECT: {
-            list = &static_cast<CGDynamicObject_C*>(object)->m_dynamicObjectMirrorLists[index];
+            STORM_ASSERT(blockId < sizeof(CGDynamicObjectData)/sizeof(DWORD));
+            list = &static_cast<CGDynamicObject_C*>(object)->m_dynamicObjectMirrorLists[blockId];
             break;
         }
 
         case ID_CORPSE: {
-            list = &static_cast<CGCorpse_C*>(object)->m_corpseMirrorLists[index];
+            STORM_ASSERT(blockId < sizeof(CGCorpseData)/sizeof(DWORD));
+            list = &static_cast<CGCorpse_C*>(object)->m_corpseMirrorLists[blockId];
             break;
         }
 
@@ -497,6 +529,14 @@ static uint32_t GetNumDwordBlocks(uint32_t type, WOWGUID guid) {
     }
 }
 
+// Update packets carry at most 42 dirty-mask words (1344 fields); PLAYER_END needs 37.
+static const uint32_t MAX_DIRTY_MASK_BLOCKS = 42;
+
+// INLINED: one dirty bit per update field.
+static bool IsFieldDirty(const uint32_t* masks, uint32_t field) {
+    return (masks[field >> 5] & (1 << (field & 0x1F))) != 0;
+}
+
 // VERIFY: 09b26427 manual
 // OFFSET: 0x004D3F10
 static int32_t ExtractDirtyMasks(CDataStore* msg, uint8_t* blockCount, uint32_t* masks) {
@@ -504,7 +544,7 @@ static int32_t ExtractDirtyMasks(CDataStore* msg, uint8_t* blockCount, uint32_t*
     msg->Get(count);
     *blockCount = count;
 
-    if (count > 42) {
+    if (count > MAX_DIRTY_MASK_BLOCKS) {
         return 0;
     }
 
@@ -514,8 +554,8 @@ static int32_t ExtractDirtyMasks(CDataStore* msg, uint8_t* blockCount, uint32_t*
         msg->Get(masks[i]);
     }
 
-    if (i < 42) {
-        memset(&masks[i], 0, sizeof(uint32_t) * (42 - i));
+    if (i < MAX_DIRTY_MASK_BLOCKS) {
+        memset(&masks[i], 0, sizeof(uint32_t) * (MAX_DIRTY_MASK_BLOCKS - i));
     }
 
     return 1;
@@ -524,7 +564,7 @@ static int32_t ExtractDirtyMasks(CDataStore* msg, uint8_t* blockCount, uint32_t*
 // VERIFY: 3918bd3a manual
 // OFFSET: 0x004D3F80
 static int32_t SkipPartialObjectUpdate(CDataStore* msg) {
-    uint32_t masks[42];
+    uint32_t masks[MAX_DIRTY_MASK_BLOCKS];
     uint8_t blockCount;
 
     if (!ExtractDirtyMasks(msg, &blockCount, masks)) {
@@ -532,7 +572,7 @@ static int32_t SkipPartialObjectUpdate(CDataStore* msg) {
     }
 
     for (uint32_t i = 0; i < 32u * blockCount; i++) {
-        if (masks[i >> 5] & (1 << (i & 31))) {
+        if (IsFieldDirty(masks, i)) {
             uint32_t value;
             msg->Get(value);
         }
@@ -682,7 +722,7 @@ static uint32_t ObjDescriptorToMirrorOffset(OBJECT_TYPE_ID typeId, int32_t local
         }
     }
 
-    return (offset & 3) + 4 * CGObject::GetSavedIndexFromDataIndex(offset >> 2);
+    return (offset & 3) + 4 * CGObject::GetSavedIndexFromDataIndex(offset >> 2, (size + 3) >> 2, local);
 }
 
 // VERIFY: 839b7b55 manual
@@ -729,7 +769,7 @@ static void SetupObjectStorage(CGObject_C* object, OBJECT_TYPE_ID typeId, WOWGUI
 
             if (guid == ClntObjMgrGetActivePlayer()) {
                 size = sizeof(CGObjectData) + sizeof(CGUnitData) + sizeof(CGPlayerLocalData);
-                player->m_playerLocalMirrorLists = reinterpret_cast<TSList<void>*>(base + sizeof(CGPlayer_C) + size + CGPlayer::TotalFields() * sizeof(uint32_t));
+                player->m_playerLocalMirrorLists = reinterpret_cast<TSList<void>*>(base + sizeof(CGPlayer_C) + size + CGPlayer::TotalFieldsSaved() * sizeof(uint32_t));
             } else {
                 size = sizeof(CGObjectData) + sizeof(CGUnitData) + sizeof(CGPlayerData);
                 player->m_playerLocalMirrorLists = nullptr;
@@ -797,20 +837,23 @@ static void ExpireOldObjects(uint32_t expireTime, OBJECT_TYPE_ID typeId) {
 
 // VERIFY: 30ceb511 manual
 // OFFSET: 0x004D4930
-CGObject_C* ClntObjMgrAllocObject(OBJECT_TYPE_ID typeId, WOWGUID guid) {
+CGObject_C* ClntObjMgrAllocObject(OBJECT_TYPE_ID type, WOWGUID guid) {
+    STORM_ASSERT(type > 0);
+    STORM_ASSERT(type < NUM_CLIENT_OBJECT_TYPES);
+
     if (guid == ClntObjMgrGetActivePlayer()) {
-        return static_cast<CGObject_C*>(SMemAlloc(sizeof(CGPlayer_C) + s_objDwordCount[ID_PLAYER] * sizeof(uint32_t) + CGPlayer::TotalFields() * sizeof(uint32_t) + 1002 * sizeof(TSList<void>), __FILE__, __LINE__, 0));
+        return static_cast<CGObject_C*>(SMemAlloc(sizeof(CGPlayer_C) + s_objDwordCount[ID_PLAYER] * sizeof(uint32_t) + CGPlayer::TotalFieldsSaved() * sizeof(uint32_t) + 1002 * sizeof(TSList<void>), __FILE__, __LINE__, 0));
     }
 
-    ExpireOldObjects(10000, typeId);
+    ExpireOldObjects(10000, type);
 
     uint32_t memHandle;
 
-    if (!ObjectAlloc(s_objHeapIds[typeId], &memHandle, nullptr, false)) {
+    if (!ObjectAlloc(s_objHeapIds[type], &memHandle, nullptr, false)) {
         return nullptr;
     }
 
-    CGObject_C* object = static_cast<CGObject_C*>(ObjectPtr(s_objHeapIds[typeId], memHandle));
+    CGObject_C* object = static_cast<CGObject_C*>(ObjectPtr(s_objHeapIds[type], memHandle));
     object->m_heapIndex = memHandle;
     return object;
 }
@@ -859,20 +902,21 @@ void ClntObjMgrInitializeShared() {
 // VERIFY: 6d6f17bf manual
 // OFFSET: 0x004D5150
 static void CallMirrorFunctions(TSExplicitList<CMirrorHandler, offsetof(CMirrorHandler, m_link2)>* pending, WOWGUID guid, CGObject_C* object, OBJECT_TYPE_ID typeId) {
-    CMirrorHandler* handler = pending->Head();
+    CMirrorHandler* mirror = pending->Head();
 
-    while (handler) {
-        handler->m_dispatching = 1;
-        handler->m_count = 1;
+    while (mirror) {
+        mirror->m_dispatching = 1;
+        mirror->m_count = 1;
 
-        const void* mirror = static_cast<uint8_t*>(object->m_objMirror) + handler->m_mirrorByteOffset;
+        const void* oldValue = static_cast<uint8_t*>(object->m_objMirror) + mirror->m_mirrorByteOffset;
 
-        if (handler->m_alwaysFire || memcmp(reinterpret_cast<uint8_t*>(object->m_obj) + handler->m_fieldByteOffset, mirror, handler->m_fieldByteSize)) {
-            handler->m_function(guid, handler->m_fieldByteOffset - GetObjectTypeFieldByteOffset(typeId), handler->m_fieldByteSize, mirror, handler->m_functionParam);
+        if (mirror->m_alwaysFire || memcmp(reinterpret_cast<uint8_t*>(object->m_obj) + mirror->m_fieldByteOffset, oldValue, mirror->m_fieldByteSize)) {
+            STORM_ASSERT(mirror->handler);
+            mirror->handler(guid, mirror->m_fieldByteOffset - GetObjectTypeFieldByteOffset(typeId), mirror->m_fieldByteSize, oldValue, mirror->m_functionParam);
         }
 
-        CMirrorHandler* current = handler;
-        handler = pending->Next(handler);
+        CMirrorHandler* current = mirror;
+        mirror = pending->Next(mirror);
 
         if (current->m_deletePending) {
             delete current;
@@ -884,25 +928,29 @@ static void CallMirrorFunctions(TSExplicitList<CMirrorHandler, offsetof(CMirrorH
 
 // VERIFY: 5369b3f6 manual
 // OFFSET: 0x004D52B0
-static void CopyMirrorFields(TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* list, CGObject_C* object) {
-    int32_t local = object->m_obj->m_guid == ClntObjMgrGetActivePlayer();
+static void CopyMirrorFields(TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* list, CGObject_C* obj) {
+    STORM_ASSERT(obj);
+
+    int32_t local = obj->m_obj->m_guid == ClntObjMgrGetActivePlayer();
 
     for (CMirrorHandler* handler = list->Head(); handler; handler = handler->m_link.Next()) {
-        uint32_t mirrorOffset = ObjDescriptorToMirrorOffset(object->m_typeId, local, handler->m_fieldByteOffset, handler->m_fieldByteSize);
-        memcpy(static_cast<uint8_t*>(object->m_objMirror) + mirrorOffset, reinterpret_cast<uint8_t*>(object->m_obj) + handler->m_fieldByteOffset, handler->m_fieldByteSize);
+        uint32_t mirrorOffset = ObjDescriptorToMirrorOffset(obj->m_typeId, local, handler->m_fieldByteOffset, handler->m_fieldByteSize);
+        memcpy(static_cast<uint8_t*>(obj->m_objMirror) + mirrorOffset, reinterpret_cast<uint8_t*>(obj->m_obj) + handler->m_fieldByteOffset, handler->m_fieldByteSize);
     }
 }
 
 // VERIFY: 199f0f4a manual
 // OFFSET: 0x004D5350
-static int32_t LinkPendingNodes(TSExplicitList<CMirrorHandler, offsetof(CMirrorHandler, m_link2)>* pending, TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* list) {
+static int32_t LinkPendingNodes(TSExplicitList<CMirrorHandler, offsetof(CMirrorHandler, m_link2)>* handlerList, TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* list) {
+    STORM_ASSERT(handlerList);
+
     if (!list || !list->Head()) {
         return 0;
     }
 
     for (CMirrorHandler* handler = list->Head(); handler; handler = handler->m_link.Next()) {
         uint32_t misalign = handler->m_fieldByteOffset & 3;
-        pending->LinkNode(handler, (handler->m_linkPositionSelector != HANDLER_PRIORITY_HIGH) + 1, nullptr);
+        handlerList->LinkNode(handler, (handler->m_linkPositionSelector != HANDLER_PRIORITY_HIGH) + 1, nullptr);
         handler->m_count = (handler->m_fieldByteSize + misalign + 3) >> 2;
     }
 
@@ -911,8 +959,11 @@ static int32_t LinkPendingNodes(TSExplicitList<CMirrorHandler, offsetof(CMirrorH
 
 // VERIFY: 5cf2342e manual
 // OFFSET: 0x004D53C0
-static int32_t FillInPartialObjectData(CGObject_C* object, WOWGUID guid, CDataStore* msg, bool skipMirrorUpdate, bool zeroFillAbsent) {
-    uint32_t masks[42];
+static int32_t FillInPartialObjectData(CGObject_C* obj, WOWGUID guid, CDataStore* msg, bool skipMirrorUpdate, bool zeroFillAbsent) {
+    STORM_ASSERT(obj);
+    STORM_ASSERT(msg);
+
+    uint32_t masks[MAX_DIRTY_MASK_BLOCKS];
     uint8_t blockCount;
 
     if (!ExtractDirtyMasks(msg, &blockCount, masks)) {
@@ -921,13 +972,13 @@ static int32_t FillInPartialObjectData(CGObject_C* object, WOWGUID guid, CDataSt
 
     OBJECT_TYPE_ID typeId = ID_OBJECT;
     uint32_t typeBase = 0;
-    uint32_t numBlocks = GetNumDwordBlocks(object->m_obj->m_type, guid);
+    uint32_t numBlocks = GetNumDwordBlocks(obj->m_obj->m_type, guid);
     TSExplicitList<CMirrorHandler, offsetof(CMirrorHandler, m_link2)> pending;
 
     for (uint32_t i = 0; i < numBlocks; i++) {
         if (i >= s_objDwordCount[typeId]) {
             typeBase = s_objDwordCount[typeId];
-            typeId = IncTypeId(object, typeId);
+            typeId = IncTypeId(obj, typeId);
         }
 
         if (!skipMirrorUpdate) {
@@ -936,19 +987,19 @@ static int32_t FillInPartialObjectData(CGObject_C* object, WOWGUID guid, CDataSt
             TSList<CMirrorHandler, TSGetLink<CMirrorHandler> >* list = &s_typeMirrorHandlers[typeId][i - typeBase];
 
             if (LinkPendingNodes(&pending, list)) {
-                CopyMirrorFields(list, object);
+                CopyMirrorFields(list, obj);
             }
 
-            list = GetObjectMirrorList(typeId, object, i - typeBase);
+            list = GetObjectMirrorList(typeId, obj, i - typeBase);
 
             if (LinkPendingNodes(&pending, list)) {
-                CopyMirrorFields(list, object);
+                CopyMirrorFields(list, obj);
             }
         }
 
         uint32_t value;
 
-        if (masks[i >> 5] & (1 << (i & 31))) {
+        if (IsFieldDirty(masks, i)) {
             msg->GetArray(reinterpret_cast<uint8_t*>(&value), sizeof(value));
         } else if (zeroFillAbsent) {
             value = 0;
@@ -956,7 +1007,7 @@ static int32_t FillInPartialObjectData(CGObject_C* object, WOWGUID guid, CDataSt
             continue;
         }
 
-        object->SetBlock(i, value);
+        obj->SetBlock(i, value);
     }
 
     return 1;
@@ -971,13 +1022,13 @@ static int32_t CallMirrorHandlers(CDataStore* msg, bool postInit, WOWGUID guid) 
         guid = smartGuid;
     }
 
-    CGObject_C* object = s_curMgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = s_curMgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (!object) {
         return SkipPartialObjectUpdate(msg);
     }
 
-    uint32_t masks[42];
+    uint32_t masks[MAX_DIRTY_MASK_BLOCKS];
     uint8_t blockCount;
 
     if (!ExtractDirtyMasks(msg, &blockCount, masks)) {
@@ -999,7 +1050,7 @@ static int32_t CallMirrorHandlers(CDataStore* msg, bool postInit, WOWGUID guid) 
         LinkPendingNodes(&pending, &s_typeMirrorHandlers[typeId][i - typeBase]);
         LinkPendingNodes(&pending, GetObjectMirrorList(typeId, object, i - typeBase));
 
-        if (masks[i >> 5] & (1 << (i & 31))) {
+        if (IsFieldDirty(masks, i)) {
             uint32_t value = 0;
             msg->Get(value);
         } else if (!postInit) {
@@ -1103,7 +1154,7 @@ static void DestroyAllObjects() {
 // OFFSET: 0x004D5A80
 void ClntObjMgrSetObjMirrorHandler(WOWGUID guid, OBJECT_TYPE_ID typeId, uint32_t fieldOffset, uint32_t fieldSize, MIRRORHANDLERFUNC function, void* param, HANDLER_PRIORITY priority, int32_t alwaysFire) {
     ObjectMgr* mgr = s_curMgr;
-    CGObject_C* object = mgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = mgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (!object) {
         return;
@@ -1117,7 +1168,7 @@ void ClntObjMgrSetObjMirrorHandler(WOWGUID guid, OBJECT_TYPE_ID typeId, uint32_t
 // VERIFY: a922342a manual
 // OFFSET: 0x004D5B40
 void ClntObjMgrUnsetObjMirrorHandler(WOWGUID guid, OBJECT_TYPE_ID typeId, uint32_t fieldOffset, MIRRORHANDLERFUNC function, void* param) {
-    CGObject_C* object = s_curMgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = s_curMgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (object) {
         UnassignMirrorHandler(GetObjectMirrorList(typeId, object, fieldOffset >> 2), function, param);
@@ -1147,18 +1198,18 @@ ObjectMgr::ObjectMgr(uint32_t type) {
     this->m_playerGuid = WOWGUID();
     this->m_mapId = 0;
     this->m_realmConnection = nullptr;
-    this->m_movementGlobal = nullptr;
+    this->m_movement = nullptr;
 }
 
 // VERIFY: 64bc6bb1 manual
 // OFFSET: 0x004D6290
 ObjectMgr::~ObjectMgr() {
     if (this->m_realmConnection) {
-        this->m_realmConnection->m_objMgr = nullptr;
+        this->m_realmConnection->SetObjectManager(nullptr);
     }
 
-    if (this == s_savedObjMgr) {
-        s_savedObjMgr = nullptr;
+    if (this == s_savMgr) {
+        s_savMgr = nullptr;
     }
 }
 
@@ -1175,7 +1226,7 @@ static int32_t PostInitObject(uint32_t time, CDataStore* msg, bool reenable) {
         return 0;
     }
 
-    CGObject_C* object = s_curMgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = s_curMgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (!object) {
         return 0;
@@ -1187,11 +1238,11 @@ static int32_t PostInitObject(uint32_t time, CDataStore* msg, bool reenable) {
         return 0;
     }
 
-    if ((object->m_modelFlags & 0x20000) && (object->m_obj->m_type & TYPE_UNIT)) {
+    if ((object->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_POST_REENABLE_PENDING) && (object->m_obj->m_type & TYPE_UNIT)) {
       static_cast<CGUnit_C*>(object)->SetClientInitData(create, object->m_obj->m_guid == ClntObjMgrGetActivePlayer());
     }
 
-    if (object->m_modelFlags & 0x40000) {
+    if (object->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_POST_INITED) {
         return CallMirrorHandlers(msg, true, guid);
     }
 
@@ -1250,6 +1301,8 @@ void ClntObjMgrDestroy() {
 
     DestroyAllObjects();
 
+    // 12213: "s_curMgr->m_movement == __null"
+    STORM_ASSERT(s_curMgr->m_movement == nullptr);
     ObjectMgr* mgr = s_curMgr;
     s_curMgr = nullptr;
     delete mgr;
@@ -1258,17 +1311,19 @@ void ClntObjMgrDestroy() {
 // VERIFY: 362ba495 manual
 // OFFSET: 0x004D6AE0
 static CGObject_C* GetUpdateObject(WOWGUID guid, int32_t* reenabled) {
+    STORM_ASSERT(s_curMgr);
+
     *reenabled = 0;
 
     ObjectMgr* mgr = s_curMgr;
-    CGObject_C* object = mgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = mgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (object) {
         object->SetDisablePending(0);
         return object;
     }
 
-    object = mgr->m_lazyCleanupObjects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    object = mgr->m_lazyCleanupObjects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (!object) {
         return nullptr;
@@ -1276,7 +1331,7 @@ static CGObject_C* GetUpdateObject(WOWGUID guid, int32_t* reenabled) {
 
     mgr->m_lazyCleanupObjects.Unlink(object);
     object->m_link.Unlink();
-    mgr->m_objects.Insert(object, static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    mgr->m_objects.Insert(object, guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     ObjectMgr* current = s_curMgr;
 
@@ -1302,6 +1357,8 @@ void ClntObjMgrReenableObject(WOWGUID guid) {
 // VERIFY: 3154e6f8 manual
 // OFFSET: 0x004D6C00
 static int32_t CreateObject(CDataStore* msg, uint32_t time) {
+    STORM_ASSERT(msg);
+
     SmartGUID guid;
     *msg >> guid;
 
@@ -1335,7 +1392,7 @@ static int32_t CreateObject(CDataStore* msg, uint32_t time) {
         return 0;
     }
 
-    if (create.m_updateFlags & 0x1) {
+    if (create.m_updateFlags & OBJECT_UPDATE_FLAGS::UPDATEFLAG_SELF) {
         s_curMgr->m_playerGuid = guid;
     }
 
@@ -1386,6 +1443,12 @@ static int32_t PartialUpdateFromFullUpdate(CDataStore* msg) {
     SmartGUID guid;
     *msg >> guid;
 
+#if defined(WOWDECOMP_ASSERTIONS)
+    if (guid == ClntObjMgrGetActivePlayer()) {
+        ++s_localPlayerUpdates;
+    }
+#endif
+
     int32_t reenabled;
     CGObject_C* object = GetUpdateObject(guid, &reenabled);
 
@@ -1410,6 +1473,7 @@ static int32_t PartialUpdateFromFullUpdate(CDataStore* msg) {
 static void UpdateInRangeObjects(CDataStore* msg) {
     uint32_t count;
     msg->Get(count);
+    STORM_ASSERT(count > 0);
 
     while (count) {
         count--;
@@ -1447,15 +1511,27 @@ static void ObjDelete(CGObject_C* object) {
     s_curMgr->m_lazyCleanupFifo[object->m_typeId - 1].LinkToTail(object);
 }
 
+// SMSG_UPDATE_OBJECT block type. Names follow the 0.5.3 symbols; 3.3.5 adds
+// a second full-update type at 3 (passed to PostInitObject as reenable),
+// moving OUT_OF_RANGE and IN_RANGE up by one.
+enum OBJECT_UPDATE_TYPE : uint8_t {
+    UPDATE_PARTIAL = 0,
+    UPDATE_MOVEMENT = 1,
+    UPDATE_FULL = 2,
+    UPDATE_FULL_UNKNOWN_3 = 3,
+    UPDATE_OUT_OF_RANGE = 4,
+    UPDATE_IN_RANGE = 5,
+};
+
 // VERIFY: 1ddf9f77 auto
 // OFFSET: 0x004D7050
 static int32_t ObjectUpdateFirstPass(uint32_t index, CDataStore* msg, uint32_t time, uint32_t count) {
     for (; index < count; index++) {
-        uint8_t type;
-        msg->Get(type);
+        OBJECT_UPDATE_TYPE type;
+        msg->Get(reinterpret_cast<uint8_t&>(type));
 
         switch (type) {
-            case 0: {
+            case UPDATE_PARTIAL: {
                 if (!PartialUpdateFromFullUpdate(msg)) {
                     return 0;
                 }
@@ -1463,15 +1539,15 @@ static int32_t ObjectUpdateFirstPass(uint32_t index, CDataStore* msg, uint32_t t
                 break;
             }
 
-            case 1: {
+            case UPDATE_MOVEMENT: {
                 SmartGUID guid;
                 *msg >> guid;
                 CClientMoveUpdate::Skip(msg);
                 break;
             }
 
-            case 2:
-            case 3: {
+            case UPDATE_FULL:
+            case UPDATE_FULL_UNKNOWN_3: {
                 if (!CreateObject(msg, time)) {
                     return 0;
                 }
@@ -1479,7 +1555,7 @@ static int32_t ObjectUpdateFirstPass(uint32_t index, CDataStore* msg, uint32_t t
                 break;
             }
 
-            case 5: {
+            case UPDATE_IN_RANGE: {
                 UpdateInRangeObjects(msg);
                 break;
             }
@@ -1498,11 +1574,11 @@ static int32_t ObjectUpdateFirstPass(uint32_t index, CDataStore* msg, uint32_t t
 // OFFSET: 0x004D7100
 static int32_t ObjectUpdateSecondPass(CDataStore* msg, uint32_t time, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
-        uint8_t type;
-        msg->Get(type);
+        OBJECT_UPDATE_TYPE type;
+        msg->Get(reinterpret_cast<uint8_t&>(type));
 
         switch (type) {
-            case 0: {
+            case UPDATE_PARTIAL: {
                 if (!CallMirrorHandlers(msg, false, WOWGUID())) {
                     return 0;
                 }
@@ -1510,22 +1586,22 @@ static int32_t ObjectUpdateSecondPass(CDataStore* msg, uint32_t time, uint32_t c
                 break;
             }
 
-            case 1: {
+            case UPDATE_MOVEMENT: {
                 PostMovementUpdate(msg);
                 break;
             }
 
-            case 2:
-            case 3: {
-                if (!PostInitObject(time, msg, type == 3)) {
+            case UPDATE_FULL:
+            case UPDATE_FULL_UNKNOWN_3: {
+                if (!PostInitObject(time, msg, type == UPDATE_FULL_UNKNOWN_3)) {
                     return 0;
                 }
 
                 break;
             }
 
-            case 4:
-            case 5: {
+            case UPDATE_OUT_OF_RANGE:
+            case UPDATE_IN_RANGE: {
                 SkipSetOfObjects(msg);
                 break;
             }
@@ -1547,6 +1623,7 @@ static int32_t ObjectUpdateSecondPass(CDataStore* msg, uint32_t time, uint32_t c
 static void UpdateOutOfRangeObjects(CDataStore* msg) {
     uint32_t count;
     msg->Get(count);
+    STORM_ASSERT(count > 0);
 
     CVehiclePassenger_C::StartAddingPendingRescueTransitions();
 
@@ -1560,18 +1637,18 @@ static void UpdateOutOfRangeObjects(CDataStore* msg) {
             continue;
         }
 
-        CGObject_C* object = s_curMgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+        CGObject_C* object = s_curMgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
         if (!object) {
             continue;
         }
 
-        if (CGBattlefieldInfo::m_instanceType == 4) {
+        if (CGBattlefieldInfo::m_instanceType == MAP_INSTANCE_TYPE::MAP_INSTANCE_TYPE_ARENA_BATTLEFIELD) {
             WOWGUID objectGuid = object->m_obj->m_guid;
             CGBattlefieldInfo::OnArenaUnitOutOfRange(objectGuid);
         }
 
-        object->HandleOutOfRange(static_cast<OUT_OF_RANGE_TYPE>(0));
+        object->HandleOutOfRange(OUT_OF_RANGE_UPDATE);
 
         if (object->IsObjectLocked()) {
             object->SetDisablePending(1);
@@ -1591,7 +1668,7 @@ static void UpdateOutOfRangeObjects(CDataStore* msg) {
             continue;
         }
 
-        CGObject_C* object = s_curMgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+        CGObject_C* object = s_curMgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
         if (object && !object->IsObjectLocked()) {
             ObjDelete(object);
@@ -1603,17 +1680,17 @@ static void UpdateOutOfRangeObjects(CDataStore* msg) {
 
 // VERIFY: 1da078ed manual
 // OFFSET: 0x004D73A0
-int32_t Packet_SMSG_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
+static int32_t Packet_SMSG_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
     uint32_t count;
     msg->Get(count);
 
     uint32_t read = msg->m_read;
     uint32_t index = 0;
 
-    uint8_t type = 0;
-    msg->Get(type);
+    OBJECT_UPDATE_TYPE type = UPDATE_PARTIAL;
+    msg->Get(reinterpret_cast<uint8_t&>(type));
 
-    if (type == 4) {
+    if (type == UPDATE_OUT_OF_RANGE) {
         UpdateOutOfRangeObjects(msg);
         index = 1;
     } else {
@@ -1622,7 +1699,11 @@ int32_t Packet_SMSG_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, 
 
     int32_t result = 0;
 
+#if defined(WOWDECOMP_ASSERTIONS)
+    s_localPlayerUpdates = 0;
+#endif
     if (ObjectUpdateFirstPass(index, msg, time, count)) {
+        STORM_ASSERT(s_localPlayerUpdates <= 1);
         msg->m_read = read;
         result = ObjectUpdateSecondPass(msg, time, count);
     }
@@ -1636,9 +1717,9 @@ int32_t Packet_SMSG_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, 
 
 // VERIFY: d5d28268 manual
 // OFFSET: 0x004D74D0
-int32_t Packet_SMSG_COMPRESSED_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
-    uint32_t size;
-    msg->Get(size);
+static int32_t Packet_SMSG_COMPRESSED_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
+    uint32_t origSize;
+    msg->Get(origSize);
 
     uint32_t compressedSize = msg->m_size - msg->m_read;
     void* compressed;
@@ -1647,22 +1728,24 @@ int32_t Packet_SMSG_COMPRESSED_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint
     uint8_t* buffer;
     bool stackBuffer;
 
-    if (size >= 0x2000) {
-        buffer = static_cast<uint8_t*>(SMemAlloc(size, __FILE__, __LINE__, 0));
+    if (origSize >= 0x2000) {
+        buffer = static_cast<uint8_t*>(SMemAlloc(origSize, __FILE__, __LINE__, 0));
         stackBuffer = false;
     } else {
-        buffer = static_cast<uint8_t*>(alloca(size));
+        buffer = static_cast<uint8_t*>(alloca(origSize));
         stackBuffer = true;
     }
 
-    uint32_t uncompressedSize = size;
+    uint32_t destSize = origSize;
     int32_t result;
 
-    if (zlib_uncompress(buffer, &uncompressedSize, static_cast<const uint8_t*>(compressed), compressedSize)) {
+    if (zlib_uncompress(buffer, &destSize, static_cast<const uint8_t*>(compressed), compressedSize)) {
         result = 0;
     } else {
+        STORM_ASSERT(destSize == origSize);
+
         WDataStore data;
-        data.PutData(buffer, uncompressedSize);
+        data.PutData(buffer, destSize);
         data.m_read = 0;
         result = Packet_SMSG_UPDATE_OBJECT(nullptr, SMSG_UPDATE_OBJECT, time, &data);
     }
@@ -1676,14 +1759,14 @@ int32_t Packet_SMSG_COMPRESSED_UPDATE_OBJECT(void* param, NETMESSAGE msgId, uint
 
 // VERIFY: 2f490dee manual
 // OFFSET: 0x004D7610
-int32_t Packet_SMSG_DESTROY_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
+static int32_t Packet_SMSG_DESTROY_OBJECT(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg) {
     WOWGUID guid;
     msg->Get(guid.m_guid);
 
     uint8_t death;
     msg->Get(death);
 
-    CGObject_C* object = s_curMgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = s_curMgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (!object) {
         return 1;
@@ -1693,7 +1776,7 @@ int32_t Packet_SMSG_DESTROY_OBJECT(void* param, NETMESSAGE msgId, uint32_t time,
         static_cast<CGUnit_C*>(object)->OnDeath();
     }
 
-    object->HandleOutOfRange(static_cast<OUT_OF_RANGE_TYPE>(1));
+    object->HandleOutOfRange(OUT_OF_RANGE_DESTROYED);
 
     if (object->IsObjectLocked()) {
         object->SetDisablePending(1);
@@ -1709,6 +1792,8 @@ int32_t Packet_SMSG_DESTROY_OBJECT(void* param, NETMESSAGE msgId, uint32_t time,
 // VERIFY: ed7998e3 manual
 // OFFSET: 0x004D76E0
 void ClntObjMgrInitialize() {
+    STORM_ASSERT(s_curMgr);
+
     s_curMgr->m_realmConnection->SetMessageHandler(SMSG_UPDATE_OBJECT, Packet_SMSG_UPDATE_OBJECT, nullptr);
     s_curMgr->m_realmConnection->SetMessageHandler(SMSG_COMPRESSED_UPDATE_OBJECT, Packet_SMSG_COMPRESSED_UPDATE_OBJECT, nullptr);
     s_curMgr->m_realmConnection->SetMessageHandler(SMSG_DESTROY_OBJECT, Packet_SMSG_DESTROY_OBJECT, nullptr);
@@ -1719,9 +1804,13 @@ void ClntObjMgrInitialize() {
 void ClntObjMgrInitializeStd(uint32_t mapId) {
     CGGameUI::SetLastInstanceTime(static_cast<int32_t>(time(nullptr)), CGGameUI::m_iCurrentMapID, mapId);
 
-    ObjectMgr* mgr = new (__FILE__, __LINE__) ObjectMgr(0);
-    g_clientConnection->m_objMgr = reinterpret_cast<ClntObjMgr*>(mgr);
+    STORM_ASSERT(g_clientConnection != NULL);
+    STORM_ASSERT(s_curMgr == NULL);
+
+    ObjectMgr* mgr = new (__FILE__, __LINE__) ObjectMgr(PLAYER_NORMAL);
+    g_clientConnection->SetObjectManager(reinterpret_cast<ClntObjMgr*>(mgr));
     s_curMgr = mgr;
+    STORM_ASSERT(s_curMgr);
     mgr->m_realmConnection = g_clientConnection;
     ClntObjMgrInitialize();
     s_curMgr->m_mapId = mapId;
@@ -1730,7 +1819,7 @@ void ClntObjMgrInitializeStd(uint32_t mapId) {
 // VERIFY: 35db2401 manual
 // OFFSET: 0x004D77E0
 void ClntObjMgrUnlockObject(WOWGUID guid, const char* fileName, int32_t lineNumber) {
-    CGObject_C* object = s_curMgr->m_objects.Ptr(static_cast<uint32_t>(guid.m_guid), CHashKeyGUID(guid.m_guid));
+    CGObject_C* object = s_curMgr->m_objects.Ptr(guid.GetLow(), CHashKeyGUID(guid.m_guid));
 
     if (!object) {
         return;
@@ -1738,11 +1827,11 @@ void ClntObjMgrUnlockObject(WOWGUID guid, const char* fileName, int32_t lineNumb
 
     object->SetObjectLocked(0);
 
-    if (object->IsObjectLocked() || !(object->m_modelFlags & 0x100000)) {
+    if (object->IsObjectLocked() || !(object->m_modelFlags & OBJECT_MODEL_FLAGS::OBJECT_MODEL_FLAG_DISABLE_PENDING)) {
         return;
     }
 
-    object->HandleOutOfRange(static_cast<OUT_OF_RANGE_TYPE>(2));
+    object->HandleOutOfRange(OUT_OF_RANGE_UNLOCKED);
 
     if (object->IsObjectLocked()) {
         object->SetDisablePending(1);

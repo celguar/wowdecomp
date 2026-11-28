@@ -4,6 +4,7 @@
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Gx/CGxBuf.h"
 #include "Engine/Source/Gx/CGxDevice/CGxShader.h"
 #include "Engine/Source/Gx/CGxDevice/EmergencyMem.h"
@@ -63,7 +64,7 @@ struct CGxPushedRenderState {
 struct CGxAppRenderState {
     /* 0000 */ CGxStateBom m_value;
     /* 0010 */ uint32_t m_stackDepth;
-    /* 0014 */ int32_t m_dirty;
+    /* 0014 */ BOOL m_dirty;
 };
 
 typedef void (__fastcall* GxDeviceCallback)();
@@ -76,13 +77,16 @@ class CGxDevice {
         /* 0008 */ void* m_apiSpecific;
     };
 
+    private:
     /* 0004 */ TSGrowableArray<CGxPushedRenderState> m_pushedStates;
     /* 0014 */ TSGrowableArray<uint32_t> m_stackOffsets;
+
+    public:
     /* 0024 */ TSGrowableArray<EGxRenderState> m_dirtyStates;
     /* 0034 */ EGxPrim m_primType;
-    /* 0038 */ int32_t m_indexLocked;
+    /* 0038 */ BOOL m_indexLocked;
     /* 003C */ int32_t m_vertexLocked;
-    /* 0040 */ int32_t m_inBeginEnd;
+    /* 0040 */ BOOL m_inBeginEnd;
     /* 0044 */ C3Vector m_primVertex;
     /* 0050 */ C2Vector m_primTexCoord [8];
     /* 0090 */ C3Vector m_primNormal;
@@ -209,7 +213,7 @@ class CGxDevice {
     virtual void PrimColor(const CImVector& c);
     virtual void PrimPointSize(float size);
     virtual void PrimLineWidth(float width);
-    virtual void MasterEnableSet(EGxMasterEnables state, int32_t enable);
+    virtual void MasterEnableSet(EGxMasterEnables state, BOOL enable);
     virtual void PoolSizeSet(CGxPool* pool, uint32_t size) = 0;
     virtual void PoolDestroy(CGxPool* pool);
     virtual char* BufLock(CGxBuf* buf);
@@ -231,7 +235,7 @@ class CGxDevice {
     virtual void ShaderConstantsSet(EGxShTarget target, uint32_t index, const float* constants, uint32_t count);
     virtual void IShaderReload(CGxShader* shader, const char* path, const char* name) = 0;
     virtual void IShaderCreate(CGxShader* shader) = 0;
-    virtual void CursorSetVisible(int32_t visible);
+    virtual void CursorSetVisible(BOOL visible);
     virtual uint32_t* CursorLock();
     virtual void CursorUnlock(uint32_t x, uint32_t y);
     virtual void StereoSetConvergence(float convergence) = 0;
@@ -245,8 +249,8 @@ class CGxDevice {
 
     static HSLOG m_log;
     static C2iVector s_clientAdjust;
-    static const char* s_pixelShaderTargetNames[14];
-    static const char* s_vertexShaderTargetNames[12];
+    static const char* s_pixelShaderTargetNames[GxShPS_Last];
+    static const char* s_vertexShaderTargetNames[GxShVS_Last];
     static C3Vector s_pointScaleAttenuation;
     static CGxShader* s_uiPixelShader;
     static CGxShader* s_uiVertexShader[2];
@@ -292,7 +296,7 @@ class CGxDevice {
     void BufSizeSet(CGxBuf* buf, uint32_t itemSize, uint32_t itemCount);
     CGxCaps& Caps();
     int32_t CapsHasContext(int32_t context);
-    int32_t CapsIsWindowVisible(int32_t visible);
+    int32_t CapsIsWindowVisible(BOOL visible);
     int32_t CapsWindowHasFocus(int32_t focus);
     void ClampRectToWindow(CiRect& rect);
     void Log(const CGxCaps& caps) const;
@@ -301,10 +305,11 @@ class CGxDevice {
     void IRsForceUpdate();
     void IRsForceUpdate(EGxRenderState which);
     void IRsInit();
-    void IRsSync(int32_t force);
+    void IRsSync(BOOL force);
     void RsPop();
     void RsInit();
     void RsPush();
+    uint32_t RsStackOffset() const { return this->m_stackOffsets.Count(); } // (inferred)
     void RsSet(EGxRenderState which, void* value);
     void RsSet(EGxRenderState which, int32_t value);
     void RsSet(EGxRenderState which, float value);
@@ -329,10 +334,10 @@ class CGxDevice {
     uint32_t ITexBitsSize(CGxTex* texId, uint32_t width, uint32_t height);
     void ITexWHDStartEnd(CGxTex* texId, uint32_t& width, uint32_t& height, uint32_t& baseMip, uint32_t& mipCount);
     void Light(uint32_t index, CGxLight& light);
-    void LightEnable(uint32_t index, int32_t enable);
+    void LightEnable(uint32_t index, BOOL enable);
     void LightSet(uint32_t index, const CGxLight& light, const C3Vector& pos);
     int32_t MasterEnable(EGxMasterEnables state);
-    int32_t NeedsUpdate(uint32_t app, uint32_t hw, uint32_t appDisables, uint32_t hwDisables, uint32_t flagPos, int32_t& enable);
+    BOOL NeedsUpdate(uint32_t app, uint32_t hw, uint32_t appDisables, uint32_t hwDisables, uint32_t flagPos, int32_t& enable);
     uint32_t PrimCalcCount(EGxPrim primType, uint32_t indexCount);
     void PrimIndexPtr(CGxBuf* buf);
     void PrimVertexFormat(CGxBuf* buf, const CGxVertexAttrib* attribs, uint32_t count);
@@ -344,7 +349,7 @@ class CGxDevice {
     void ShaderConstantsUnlock(EGxShTarget target, uint32_t index, uint32_t count);
     int32_t TexCanUpdate(CGxTex* texId);
     int32_t TexIsReadyNow(CGxTex* texId);
-    void TexMarkForUpdate(CGxTex* texId, const CiRect& updateRect, int32_t immediate);
+    void TexMarkForUpdate(CGxTex* texId, const CiRect& updateRect, BOOL immediate);
     void TexParameters(const CGxTex* texId, CGxTexParms& parms);
     void TexSetCannotUpdate(CGxTex* texId);
     void TexSetDataFormat(CGxTex* texId, EGxTexFormat dataFormat);
@@ -356,6 +361,19 @@ class CGxDevice {
 };
 
 extern CGxDevice* g_theGxDevicePtr;
+
+// Inlined helper (name inferred from GxXformViewProjNativeTranspose): the native projection,
+// with its third row (c0..c3) negated on OpenGL.
+inline void GxXformProjNative(C44Matrix& matrix) {
+    matrix = g_theGxDevicePtr->m_projNative;
+
+    if (g_theGxDevicePtr->DeviceApi() == GxApi_OpenGl) {
+        matrix.c0 *= -1.0f;
+        matrix.c1 *= -1.0f;
+        matrix.c2 *= -1.0f;
+        matrix.c3 *= -1.0f;
+    }
+}
 extern const char* s_formatToInt[CGxFormat::Formats_Last];
 
 #endif

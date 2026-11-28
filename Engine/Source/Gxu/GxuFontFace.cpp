@@ -4,8 +4,17 @@
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
 #include "Engine/Source/Storm/H/storm.h"
 
+struct FACEDATA : public CHandleObject, public TSHashObject<FACEDATA, HASHKEY_STRI> {
+    /* 0020 */ void* m_data;
+    /* 0024 */ FT_Face m_face;
+    /* 0028 */ HOBJECT selfReference;
+
+    FACEDATA();
+    virtual ~FACEDATA();
+};
+
 // STATIC: 0x00C7D2FC
-TSHashTable<FACEDATA, HASHKEY_STRI> s_faceHash;
+static TSHashTable<FACEDATA, HASHKEY_STRI> s_faceHash;
 
 // VERIFY: e0237d01 auto
 // OFFSET: 0x006C8080
@@ -15,7 +24,9 @@ FT_Face FontFaceGetFace(HFACE handle) {
         return nullptr;
     }
 
-    return reinterpret_cast<FACEDATA*>(handle)->m_face;
+    FACEDATA* dataPtr = reinterpret_cast<FACEDATA*>(handle);
+    STORM_ASSERT(dataPtr->selfReference);
+    return dataPtr->m_face;
 }
 
 // VERIFY: 5082eae0 auto
@@ -26,13 +37,16 @@ void FontFaceCloseHandle(HFACE handle) {
         return;
     }
 
-    FACEDATA* face = reinterpret_cast<FACEDATA*>(handle);
+    FACEDATA* dataPtr = reinterpret_cast<FACEDATA*>(handle);
 
     HandleClose(reinterpret_cast<HOBJECT>(handle));
 
-    if (face->m_refcount <= 1) {
-        HOBJECT selfReference = face->m_selfReference;
-        face->m_selfReference = nullptr;
+    int32_t refCount = dataPtr->m_refcount;
+    STORM_ASSERT(refCount >= 1);
+    STORM_ASSERT(dataPtr->selfReference);
+    if (refCount <= 1) {
+        HOBJECT selfReference = dataPtr->selfReference;
+        dataPtr->selfReference = nullptr;
         HandleClose(selfReference);
     }
 }
@@ -58,6 +72,8 @@ FACEDATA::FACEDATA() {
 // VERIFY: 263b0e27 manual
 // OFFSET: 0x006C81C0
 FACEDATA::~FACEDATA() {
+    STORM_ASSERT(!selfReference);
+
     if (this->m_face) {
         FT_Done_Face(this->m_face);
     }
@@ -74,10 +90,11 @@ HFACE FontFaceGetHandle(const char* fileName, FT_Library library) {
         return nullptr;
     }
 
-    FACEDATA* existing = s_faceHash.Ptr(fileName);
+    FACEDATA* faceData = s_faceHash.Ptr(fileName);
 
-    if (existing) {
-        return reinterpret_cast<HFACE>(HandleDuplicate(existing->m_selfReference));
+    if (faceData) {
+        STORM_ASSERT(faceData->selfReference);
+        return reinterpret_cast<HFACE>(HandleDuplicate(faceData->selfReference));
     }
 
     HFACE handle = nullptr;
@@ -92,14 +109,15 @@ HFACE FontFaceGetHandle(const char* fileName, FT_Library library) {
         FT_Face ftFace;
 
         if (!FT_New_Memory_Face(library, static_cast<FT_Byte*>(data), size, 0, &ftFace) && ftFace && !FT_Select_Charmap(ftFace, ft_encoding_unicode)) {
-            FACEDATA* face = new ("HFACE", SLOG_OBJECT) FACEDATA;
-            face->m_data = data;
-            face->m_face = ftFace;
-            s_faceHash.Insert(face, fileName);
+            faceData = new ("HFACE", SLOG_OBJECT) FACEDATA;
+            STORM_ASSERT(faceData);
+            faceData->m_data = data;
+            faceData->m_face = ftFace;
+            s_faceHash.Insert(faceData, fileName);
             data = nullptr;
             ftFace = nullptr;
-            face->m_selfReference = HandleCreate(face, "HFACE");
-            handle = reinterpret_cast<HFACE>(HandleDuplicate(face->m_selfReference));
+            faceData->selfReference = HandleCreate(faceData, "HFACE");
+            handle = reinterpret_cast<HFACE>(HandleDuplicate(faceData->selfReference));
         }
     }
 

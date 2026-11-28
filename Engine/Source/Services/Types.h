@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 
 class CAsyncObject;
@@ -11,24 +12,63 @@ class SFileImpl;
 
 class CAsyncObject {
     public:
-    /* 0000 */ SFileImpl* m_file;
-    /* 0004 */ void* m_buffer;
-    /* 0008 */ uint32_t m_size;
-    /* 000C */ void* m_userArg;
-    /* 0010 */ void* m_userPostloadCallback;
-    /* 0014 */ void* m_userPostUnloadCallback;
-    /* 0018 */ CAsyncQueue* m_queue;
-    /* 001C */ uint32_t m_queuedFrame;
-    /* 0020 */ uint8_t m_priority;
-    /* 0021 */ int8_t m_isProcessed;
-    /* 0022 */ int8_t m_isRead;
-    /* 0023 */ int8_t m_isCurrent;
+    // 3.3.5 post callbacks take one opaque argument using the cdecl ABI.
+    using POST_CALLBACK = void (__cdecl *)(void*);
+
+    // Field names from the 12213 assertions; userArg, userPostUnloadCallback, queuedFrame, priority and link inferred.
+    /* 0000 */ SFileImpl* file;
+    /* 0004 */ void* buffer;
+    /* 0008 */ uint32_t size;
+    /* 000C */ void* userArg;
+    /* 0010 */ POST_CALLBACK userPostloadCallback;
+    /* 0014 */ POST_CALLBACK userPostUnloadCallback;
+    /* 0018 */ CAsyncQueue* queue;
+    /* 001C */ uint32_t queuedFrame;
+    /* 0020 */ uint8_t priority;
+    /* 0021 */ int8_t isProcessed;
+    /* 0022 */ int8_t isRead;
+    /* 0023 */ int8_t isCurrent;
     /* 0024 */ int8_t m_char24;
     /* 0025 */ int8_t m_char25;
     /* 0026 */ uint16_t m_padding;
-    /* 0028 */ TSLink<CAsyncObject> m_link;
+    /* 0028 */ TSLink<CAsyncObject> link;
 
-    int32_t IsPending();
+    BOOL IsPending() const;
+};
+
+// Font flags taken by TextBlockGenerateFont; names from the FrameXML s_fontFlags strings
+// (OUTLINE, MONOCHROME, THICKOUTLINE). TextBlock maps them onto CGxFont::FONT_FLAGS.
+enum TEXTBLOCK_FONT_FLAGS : uint32_t {
+    TEXTBLOCK_FONT_NONE = 0x0,
+    TEXTBLOCK_FONT_OUTLINE = 0x1,
+    TEXTBLOCK_FONT_MONOCHROME = 0x2,
+    TEXTBLOCK_FONT_THICKOUTLINE = 0x4,
+};
+
+enum TEXTBLOCK_STYLE_FLAGS : uint32_t {
+    TEXTBLOCK_NONE = 0,
+    TEXTBLOCK_JUSTIFY_LEFT = 0x1,
+    TEXTBLOCK_JUSTIFY_CENTER = 0x2,
+    TEXTBLOCK_JUSTIFY_RIGHT = 0x4,
+    TEXTBLOCK_JUSTIFY_TOP = 0x8,
+    TEXTBLOCK_JUSTIFY_MIDDLE = 0x10,
+    TEXTBLOCK_JUSTIFY_BOTTOM = 0x20,
+    TEXTBLOCK_NO_WORD_WRAP = 0x40,
+    TEXTBLOCK_IGNORE_PIPE_CODES = 0x80,
+    TEXTBLOCK_SHADOW = 0x100,
+    TEXTBLOCK_FIXED_SIZE = 0x200,
+    TEXTBLOCK_UNIFORM_COLOR = 0x400,
+    TEXTBLOCK_FIXED_WIDTH = 0x800,
+    TEXTBLOCK_NON_SPACE_WRAP = 0x1000,
+    TEXTBLOCK_IGNORE_COLOR_CODES = 0x2000,
+    TEXTBLOCK_IGNORE_NEWLINE_CODES = 0x4000,
+    TEXTBLOCK_IGNORE_HYPERLINK_CODES = 0x8000,
+    TEXTBLOCK_IGNORE_TEXTURE_CODES = 0x10000,
+    TEXTBLOCK_INDENTED = 0x20000,
+    TEXTBLOCK_JUSTIFY_H_MASK = 0x7,
+    TEXTBLOCK_JUSTIFY_V_MASK = 0x38,
+    TEXTBLOCK_DEFAULT_STYLE = 0x212,
+    TEXTBLOCK_DEFAULT_SETTABLE_STYLE = 0x2107F,
 };
 
 struct HTEXTBLOCK__ {

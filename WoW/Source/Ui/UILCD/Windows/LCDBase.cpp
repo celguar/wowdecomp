@@ -14,7 +14,7 @@ CLCDBase::CLCDBase() {
     this->m_sizeLogical.cx = 0;
     this->m_sizeLogical.cy = 0;
     this->m_nBkMode = TRANSPARENT;
-    this->m_nObjectType = 4;
+    this->m_nObjectType = LCD_OBJECT_TYPE_DEFAULT;
     this->m_crBackgroundColor = RGB(0, 0, 0);
     this->m_crForegroundColor = RGB(255, 255, 255);
 }
@@ -96,19 +96,19 @@ void CLCDBase::Shutdown() {
 
 // VERIFY: dbc03d2b auto
 // OFFSET: 0x0095BE10
-void CLCDBase::Show(int32_t show) {
+void CLCDBase::Show(BOOL show) {
     this->m_bVisible = show;
 }
 
 // VERIFY: 894332e8 auto
 // OFFSET: 0x00431E70
-int32_t CLCDBase::IsVisible() {
+BOOL CLCDBase::IsVisible() {
     return this->m_bVisible;
 }
 
 // VERIFY: 6e0ea336 auto
 // OFFSET: 0x0095BE20
-void CLCDBase::Invert(int32_t enable) {
+void CLCDBase::Invert(BOOL enable) {
     this->m_bInverted = enable;
 }
 
@@ -163,13 +163,13 @@ int32_t CLCDBase::GetBackgroundMode() {
 
 // VERIFY: 876e6a13 auto
 // OFFSET: 0x00499FB0
-int32_t CLCDBase::GetObjectType() {
+LCD_OBJECT_TYPE CLCDBase::GetObjectType() {
     return this->m_nObjectType;
 }
 
 // VERIFY: 5757b5c6 auto
 // OFFSET: 0x0095BE40
-void CLCDBase::SetObjectType(int32_t type) {
+void CLCDBase::SetObjectType(LCD_OBJECT_TYPE type) {
     this->m_nObjectType = type;
 }
 

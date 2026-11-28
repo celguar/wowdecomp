@@ -87,6 +87,8 @@ void CSimpleMessageFrame::HideLineNode(CSimpleMessageFrameLineNode* node) {
 
 // INLINED
 void CSimpleMessageFrame::ShowLineNode(CSimpleMessageFrameLineNode* node, float timeVisible, float fadeDuration) {
+    STORM_ASSERT(!node->m_isVisible); // 12213: "!node->isVisible"
+
     CSimpleFontString* string = node->m_string;
     string->m_shown = 1;
     string->ShowThis();
@@ -94,6 +96,7 @@ void CSimpleMessageFrame::ShowLineNode(CSimpleMessageFrameLineNode* node, float 
     node->m_timeLeft = timeVisible;
     node->m_fadeLeft = fadeDuration;
     this->m_numVisible++;
+    STORM_ASSERT(m_numVisible <= m_rows);
 }
 
 // VERIFY: 043a2fa3 manual
@@ -122,15 +125,15 @@ CSimpleMessageFrameLineNode::CSimpleMessageFrameLineNode() {
     this->m_fadeLeft = 0.0f;
     this->m_isVisible = false;
 
-    void* data = CSimpleFontString::s_allocator.GetData(0, typeid(CSimpleFontString).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleFontString::Allocate(sizeof(CSimpleFontString));
     this->m_string = data ? new (data) CSimpleFontString(nullptr, 2, true) : nullptr;
 
     CSimpleFontString* string = this->m_string;
     uint32_t styleFlags = string->m_styleFlags;
-    string->m_settableStyleFlags &= ~0x4000u;
+    string->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES;
 
-    if ((styleFlags | 0x4000) != styleFlags) {
-        string->m_styleFlags = styleFlags | 0x4000;
+    if ((styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES) != styleFlags) {
+        string->m_styleFlags = styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES;
 
         if (string->m_string) {
             string->UpdateString();
@@ -278,7 +281,7 @@ void CSimpleMessageFrame::ClearPending() {
 // VERIFY: ca437c53 manual
 // OFFSET: 0x00968790
 void CSimpleMessageFrame::UpdateRect() {
-    if (!(this->m_layoutFlags & 0x100)) {
+    if (!(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID)) {
         return;
     }
 
@@ -411,7 +414,7 @@ CSimpleMessageFrame::~CSimpleMessageFrame() {
 // VERIFY: 3758e948 auto
 // OFFSET: 0x00968C90
 void CSimpleMessageFrame::FontUpdated(CSimpleFontedFrameFont* font, int32_t flags) {
-    if (flags & 0x11) {
+    if (flags & (FLAG_FONT_UPDATE | FLAG_SPACING_UPDATE)) {
         this->UpdateRect();
     }
 }

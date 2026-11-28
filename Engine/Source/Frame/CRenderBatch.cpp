@@ -9,6 +9,7 @@
 #include "Engine/Source/Gxu/GxuFont.h"
 #include "Engine/Source/Services/Texture.h"
 #include "Engine/Source/Services/TextBlock.h"
+#include "Engine/Source/Storm/H/storm.h"
 
 // STATIC: 0x00AC0F04
 static uint16_t s_quadIndices[6] = { 0, 1, 2, 2, 1, 3 };
@@ -19,8 +20,8 @@ static int32_t SortByTexture(const void* elem1, const void* elem2) {
     const CSimpleBatchedMesh* mesh1 = static_cast<const CSimpleBatchedMesh*>(elem1);
     const CSimpleBatchedMesh* mesh2 = static_cast<const CSimpleBatchedMesh*>(elem2);
 
-    if (mesh1->m_textureID != mesh2->m_textureID) {
-        return static_cast<int32_t>(reinterpret_cast<uintptr_t>(mesh1->m_textureID) - reinterpret_cast<uintptr_t>(mesh2->m_textureID));
+    if (mesh1->m_texSort != mesh2->m_texSort) {
+        return static_cast<int32_t>(reinterpret_cast<uintptr_t>(mesh1->m_texSort) - reinterpret_cast<uintptr_t>(mesh2->m_texSort));
     }
 
     int32_t alphaMode1 = (mesh1->m_color && mesh1->m_alphaMode < GxBlend_Alpha) ? GxBlend_Alpha : mesh1->m_alphaMode;
@@ -44,6 +45,11 @@ void CRenderBatch::Finish() {
 // VERIFY: f0079ae6 auto
 // OFFSET: 0x004846F0
 void CRenderBatch::Queue(CTexture* texture, EGxBlend alphaMode, int32_t posCount, const C3Vector* position, const C2Vector* texCoord, int32_t colorCount, const CImVector* color, int32_t idxCount, const uint16_t* indices, CGxShader* shader) {
+    STORM_ASSERT(texture);
+    STORM_ASSERT(position);
+    STORM_ASSERT(texCoord);
+    STORM_ASSERT(indices);
+
     CGxTex* gxTex = TextureGetGxTex(texture, 1, nullptr);
 
     if (!gxTex) {
@@ -55,16 +61,16 @@ void CRenderBatch::Queue(CTexture* texture, EGxBlend alphaMode, int32_t posCount
 
     CSimpleBatchedMesh* mesh = &this->m_texturelist[index];
     mesh->m_texture = texture;
-    mesh->m_textureID = gxTex;
+    mesh->m_texSort = gxTex;
     mesh->m_alphaMode = alphaMode;
     mesh->m_shader = shader;
-    mesh->m_posCount = posCount;
+    mesh->m_positionCount = posCount;
     mesh->m_position = position;
     mesh->m_texCoord = texCoord;
     mesh->m_color = color;
     mesh->m_colorCount = colorCount;
     mesh->m_indices = indices;
-    mesh->m_idxCount = idxCount;
+    mesh->m_indexCount = idxCount;
     mesh->m_onAtlas = TextureOnAtlas(texture);
 
     if (mesh->m_onAtlas) {
@@ -84,7 +90,7 @@ CRenderBatch::CRenderBatch() {
 // VERIFY: 6542125c manual
 // OFFSET: 0x004858E0
 void CRenderBatch::QueueCallback(void (*callback)(void*), void* param) {
-    RENDERCALLBACKNODE* node = this->m_callbacks.NewNode(2, 0, 0);
+    RENDERCALLBACKNODE* node = this->m_callbacks.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     node->m_callback = callback;
     node->m_param = param;
     this->m_count++;
@@ -135,6 +141,7 @@ void CRenderBatch::QueueFontString(CSimpleFontString* string) {
 
     if (!this->m_stringbatch) {
         this->m_stringbatch = GxuFontCreateBatch(false, false);
+        STORM_ASSERT(m_stringbatch);
     }
 
     GxuFontAddToBatch(this->m_stringbatch, gxString);
@@ -144,7 +151,7 @@ void CRenderBatch::QueueFontString(CSimpleFontString* string) {
 // VERIFY: 597baa7e manual
 // OFFSET: 0x004847A0
 void CRenderBatch::QueueTexture(CSimpleTexture* texture) {
-    CGxTex* gxTex = TextureGetGxTex(texture->m_texture, (texture->m_textureFlags & 1) ? 0 : 2, nullptr);
+    CGxTex* gxTex = TextureGetGxTex(texture->m_texture, (texture->m_textureFlags & CSimpleTexture::TEXTURE_FLAGS::FLAG_NONBLOCKING) ? 0 : 2, nullptr);
 
     if (!gxTex) {
         texture->NotifyDelayedLoad();
@@ -157,7 +164,7 @@ void CRenderBatch::QueueTexture(CSimpleTexture* texture) {
 
     uint32_t flags = texture->m_textureFlags;
 
-    if (flags & 2) {
+    if (flags & CSimpleTexture::TEXTURE_FLAGS::FLAG_TEXCOORDS_DIRTY) {
         C2Vector texCoords[4];
         texture->GetTexCoord(texCoords);
 
@@ -166,7 +173,7 @@ void CRenderBatch::QueueTexture(CSimpleTexture* texture) {
         float bottom = texture->m_positions[1].y;
         float top = texture->m_positions[0].y;
 
-        if (flags & 4) {
+        if (flags & CSimpleTexture::TEXTURE_FLAGS::FLAG_HORIZ_TILE) {
             uint32_t width = gxTex->m_width;
             float ndcWidth = DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * (right - left));
 
@@ -189,7 +196,7 @@ void CRenderBatch::QueueTexture(CSimpleTexture* texture) {
             }
         }
 
-        if (texture->m_textureFlags & 8) {
+        if (texture->m_textureFlags & CSimpleTexture::TEXTURE_FLAGS::FLAG_VERT_TILE) {
             uint32_t height = gxTex->m_height;
             float ndcHeight = DDCToNDCWidth(CoordinateGetAspectCompensation() * 1024.0f * (top - bottom));
 
@@ -212,11 +219,8 @@ void CRenderBatch::QueueTexture(CSimpleTexture* texture) {
             }
         }
 
-        texture->m_textureFlags &= ~2u;
-        texture->m_texCoords[0] = texCoords[0];
-        texture->m_texCoords[1] = texCoords[1];
-        texture->m_texCoords[2] = texCoords[2];
-        texture->m_texCoords[3] = texCoords[3];
+        texture->m_textureFlags &= ~CSimpleTexture::TEXTURE_FLAGS::FLAG_TEXCOORDS_DIRTY;
+        texture->SetTexCoord(texCoords);
     }
 
     uint32_t colorCount = texture->m_colorCount;

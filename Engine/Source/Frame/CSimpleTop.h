@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Scrn/Types.h"
 #include "Engine/Source/Event/Types.h"
 #include "Engine/Source/Frame/CLayoutFrame.h"
@@ -25,7 +26,7 @@ class CFrameStrata {
     /* 0000 */ int32_t m_batchDirty;
     /* 0004 */ int32_t m_levelsDirty;
     /* 0008 */ uint32_t m_topLevel;
-    /* 000C */ TSFixedArray<CFrameStrataNode*> m_levels;
+    /* 000C */ TSFixedArray<CFrameStrataNode*> levels;
 
     CFrameStrata();
     ~CFrameStrata();
@@ -59,9 +60,9 @@ class CSimpleSortedArray {
 class CSimpleTop : public CLayoutFrame {
     public:
     static CSimpleTop* s_instance;
-    static uint32_t s_eventTime;
 
     static CSimpleTop* GetInstance();
+    static uint32_t GetEventTime() { return s_eventTime; } // (inferred)
     static int32_t OnChar(const void* data, void* param);
     static int32_t OnDisplaySizeChanged(const void* data, void* param);
     static int32_t OnFocusChanged(const void* data, void* param);
@@ -98,18 +99,25 @@ class CSimpleTop : public CLayoutFrame {
     /* 1240 */ void (*m_displaySizeCallback)(const CSizeEvent& evt);
     /* 1244 */ void (*m_focusChangedCallback)(const CFocusEvent& evt);
     /* 1248 */ void (*m_keyDownCallback)(const CKeyEvent& evt);
-    /* 124C */ int32_t m_allowProtectedActions;
+    /* 124C */ BOOL m_allowProtectedActions;
     /* 1250 */ uint32_t unused_1250;
     /* 1254 */ void (*m_actionBlockedCallback)(CScriptRegion* region);
 
     virtual ~CSimpleTop();
 
     CSimpleTop();
+    // INLINED: reports a protected action that ProtectedFunctionsAllowed refused (name inferred).
+    void NotifyActionBlocked(CScriptRegion* region) {
+        if (this->m_actionBlockedCallback) {
+            this->m_actionBlockedCallback(region);
+        }
+    }
+
     void CompressStrata(int32_t strata);
     void DisableEvents();
     void EnableEvents();
     void GetCursorPosition(C2Vector& position);
-    void HideFrame(CSimpleFrame* frame, int32_t a3);
+    void HideFrame(CSimpleFrame* frame, BOOL reregister);
     int32_t LowerFrame(CSimpleFrame* frame);
     void MoveOrResizeFrame(const CMouseEvent& evt);
     void NotifyFrameDelayedLoad(CSimpleFrame* frame);
@@ -119,18 +127,21 @@ class CSimpleTop : public CLayoutFrame {
     void OnLayerUpdate(float elapsedSec);
     int32_t RaiseFrame(CSimpleFrame* frame, int32_t checkOcclusion);
     void RegisterForCleanup(CSimpleFrame* frame);
-    void RegisterForEvent(CSimpleFrame* frame, CSimpleEventType event, int32_t a4, int32_t priority);
+    void RegisterForEvent(CSimpleFrame* frame, CSimpleEventType event, BOOL reregister, int32_t priority);
     void RegisterFrame(CSimpleFrame* frame);
     void SetCursor(MipBits* image);
     void SetMouseFocus(CSimpleFrame* frame);
-    void ShowFrame(CSimpleFrame* frame, int32_t a3);
+    void ShowFrame(CSimpleFrame* frame, BOOL reregister);
     int32_t StartMoveOrResizeFrame(const CMouseEvent& evt, MOVERESIZE_REASON reason, int32_t resize);
     int32_t StartMoveOrResizeFrame(CSimpleFrame* frame, MOVERESIZE_REASON reason, float x, float y, FRAMEPOINT point);
     int32_t StartMoveOrResizeFrame(CSimpleFrame* frame, MOVERESIZE_REASON reason, float x, float y, int32_t resize);
     void StopMoveOrResizeFrame();
-    void UnregisterForEvent(CSimpleFrame* frame, CSimpleEventType event, int32_t a4);
+    void UnregisterForEvent(CSimpleFrame* frame, CSimpleEventType event, BOOL reregister);
     void UnregisterFrame(CSimpleFrame* frame);
     void ValidateDeletedFrame(CSimpleFrame* frame);
+
+    private:
+    static uint32_t s_eventTime;
 };
 
 // INLINED

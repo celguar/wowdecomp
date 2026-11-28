@@ -1,4 +1,5 @@
 #include "WoW/Source/WorldClient/WorldConstants.h"
+#include "WoW/Common/Types.h"
 #include "MinimapFrame.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Services/Texture.h"
@@ -52,6 +53,7 @@
 #include <ctime>
 #include <malloc.h>
 #include "WoW/Source/Ui/PartyFrame.h"
+#include "WoW/Source/Object/GameObjectDef.h"
 #include "WoW/Source/Ui/RaidInfo.h"
 #include "WoW/Source/Game/GameClient/NameCache.h"
 #include "WoW/Source/DB/DBClient/DBCacheInstances.h"
@@ -123,37 +125,43 @@ const TrackingTypeInfo* CGMinimapFrame::s_trackingInfo;
 int32_t CGMinimapFrame::s_trackingSpell;
 
 // STATIC: 0x00BEBA04
-static CTexture* s_vehicleTextures[7];
+static CTexture* s_vehicleBlipTextures[7];
 
 // STATIC: 0x00BEBA20
-static CTexture* s_groupArrowTexture;
+static CTexture* s_arrowPartyTexture;
 
 // STATIC: 0x00BEBA24
-CTexture* s_staticPOIArrowTexture;
+CTexture* s_arrowStaticTexture;
 
 // STATIC: 0x00BEBA28
-CTexture* s_corpseArrowTexture;
+CTexture* s_arrowCorpseTexture;
 
 // STATIC: 0x00BEBA2C
-CTexture* s_poiArrowTexture;
+CTexture* s_arrowPOITexture;
 
 // STATIC: 0x00BEBA30
-CTexture* s_maskTexture;
+CTexture* s_minimapMaskTexture;
 
 // STATIC: 0x00BEBA34
 CTexture* s_classBlipTexture;
 
 // STATIC: 0x00BEBA38
-CTexture* s_blipTexture;
+CTexture* s_objectBlipTexture;
 
 // STATIC: 0x00BEBA3C
 CTexture* s_iconTexture;
 
+// Icon cells in the minimap object icon atlas, a square grid (inferred name).
+static const uint32_t NUM_MINIMAP_ICONS = 196;
+
+// Cells in the class blip atlas, two rows of eight (inferred name).
+static const uint32_t NUM_CLASS_BLIPS = 16;
+
 // STATIC: 0x00BF6148
-static C2Vector s_iconTexCoords[196][4];
+static C2Vector s_iconTexCoords[NUM_MINIMAP_ICONS][4];
 
 // STATIC: 0x00BF79C8
-static C2Vector s_classBlipTexCoords[16][4];
+static C2Vector s_classBlipTexCoords[NUM_CLASS_BLIPS][4];
 
 // STATIC: 0x00BF7BC8
 static C2Vector s_blipTexCoords[32][4];
@@ -206,25 +214,27 @@ static uint64_t s_hoverRaid;
 
 // STATIC: 0x00A11C50
 const TrackingTypeInfo CGMinimapFrame::s_trackingTypes[15] = {
-    { 1, 0x1000, "MINIMAP_TRACKING_REPAIR", "Repair", 0x0 },
-    { 1, 0x200, "MINIMAP_TRACKING_VENDOR_FOOD", "Food", 0x0 },
-    { 1, 0x400, "MINIMAP_TRACKING_VENDOR_POISON", "Poisons", 0x10 },
-    { 1, 0x100, "MINIMAP_TRACKING_VENDOR_AMMO", "Ammunition", 0x1A },
-    { 1, 0x800, "MINIMAP_TRACKING_VENDOR_REAGENT", "Reagents", 0x0 },
-    { 1, 0x10000, "MINIMAP_TRACKING_INNKEEPER", "Innkeeper", 0x0 },
-    { 1, 0x2000, "MINIMAP_TRACKING_FLIGHTMASTER", "FlightMaster", 0x0 },
-    { 1, 0x400000, "MINIMAP_TRACKING_STABLEMASTER", "StableMaster", 0x8 },
-    { 1, 0x100000, "MINIMAP_TRACKING_BATTLEMASTER", "BattleMaster", 0x0 },
-    { 1, 0x20, "MINIMAP_TRACKING_TRAINER_CLASS", "Class", 0x0 },
-    { 1, 0x40, "MINIMAP_TRACKING_TRAINER_PROFESSION", "Profession", 0x0 },
-    { 1, 0x200000, "MINIMAP_TRACKING_AUCTIONEER", "Auctioneer", 0x0 },
-    { 1, 0x20000, "MINIMAP_TRACKING_BANKER", "Banker", 0x0 },
-    { 2, 0x13, "MINIMAP_TRACKING_MAILBOX", "Mailbox", 0x0 },
-    { 3, 0x0, "MINIMAP_TRACKING_TRIVIAL_QUESTS", "TrivialQuests", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_REPAIR, "MINIMAP_TRACKING_REPAIR", "Repair", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR_FOOD, "MINIMAP_TRACKING_VENDOR_FOOD", "Food", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR_POISON, "MINIMAP_TRACKING_VENDOR_POISON", "Poisons", 1u << CLASS_ROGUE },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR_AMMO, "MINIMAP_TRACKING_VENDOR_AMMO", "Ammunition", (1u << CLASS_WARRIOR) | (1u << CLASS_HUNTER) | (1u << CLASS_ROGUE) },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_VENDOR_REAGENT, "MINIMAP_TRACKING_VENDOR_REAGENT", "Reagents", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_INNKEEPER, "MINIMAP_TRACKING_INNKEEPER", "Innkeeper", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_FLIGHT_MASTER, "MINIMAP_TRACKING_FLIGHTMASTER", "FlightMaster", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_STABLE_MASTER, "MINIMAP_TRACKING_STABLEMASTER", "StableMaster", 1u << CLASS_HUNTER },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_BATTLEMASTER, "MINIMAP_TRACKING_BATTLEMASTER", "BattleMaster", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_TRAINER_CLASS, "MINIMAP_TRACKING_TRAINER_CLASS", "Class", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_TRAINER_PROFESSION, "MINIMAP_TRACKING_TRAINER_PROFESSION", "Profession", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_AUCTIONEER, "MINIMAP_TRACKING_AUCTIONEER", "Auctioneer", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_NPC_FLAGS, UNIT_NPC_FLAGS::UNIT_NPC_FLAG_BANKER, "MINIMAP_TRACKING_BANKER", "Banker", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_GAMEOBJECT, TYPE_MAILBOX, "MINIMAP_TRACKING_MAILBOX", "Mailbox", 0x0 },
+    { TRACKING_TYPE::TRACKING_TYPE_TRIVIAL_QUESTS, 0x0, "MINIMAP_TRACKING_TRIVIAL_QUESTS", "TrivialQuests", 0x0 },
 };
 
 // STATIC: 0x00A41E04
-static const uint32_t s_outdoorZoomTiles[6] = { 14, 12, 10, 8, 6, 4 };
+static constexpr uint32_t NUM_ZOOMS = 6;
+
+static const uint32_t s_chunksPerSizeAtZoom[NUM_ZOOMS] = { 14, 12, 10, 8, 6, 4 };
 
 // STATIC: 0x00A41E1C
 static const float s_indoorZoomRadius[6] = { 150.0f, 120.0f, 90.0f, 60.0f, 40.0f, 25.0f };
@@ -233,7 +243,7 @@ static const float s_indoorZoomRadius[6] = { 150.0f, 120.0f, 90.0f, 60.0f, 40.0f
 static int32_t s_mapId = -1;
 
 // STATIC: 0x00AF4E4C
-static int32_t s_outdoorZoom = 3;
+static int32_t s_currentZoom = 3;
 
 // STATIC: 0x00AF4E50
 static int32_t s_indoorZoom = 3;
@@ -251,7 +261,7 @@ static int32_t s_closestPOIs[3];
 static int32_t s_poisChanged;
 
 // STATIC: 0x00D39230
-static char s_dynamicPOINames[4][64];
+static char s_dynamicPOINames[NUM_DYNAMIC_POIS][64];
 
 // STATIC: 0x00D39434
 static uint8_t s_isIndoors;
@@ -260,7 +270,7 @@ static uint8_t s_isIndoors;
 static uint32_t s_numPOIs;
 
 // STATIC: 0x00D39448
-static uint32_t s_numClosestPOIs;
+static uint32_t s_numDistantPOI;
 
 // STATIC: 0x00D3944C
 static int32_t s_closestPOIsChanged;
@@ -269,7 +279,7 @@ static int32_t s_closestPOIsChanged;
 static C3Vector s_playerPosition;
 
 // STATIC: 0x00D39490
-static AreaPOIRec s_dynamicPOIs[4];
+static AreaPOIRec s_dynamicPOIs[NUM_DYNAMIC_POIS];
 
 // STATIC: 0x00D395F0
 static TSFixedArray<AreaPOIRec*> s_pois;
@@ -294,8 +304,11 @@ static MINIMAPQUAD s_quads[4] = {
     { { 0.0f, 0.5f, 0.5f, 1.0f }, C2Vector(0.0f, 1.0f) },
 };
 
+// Tile slots for the indoor (WMO) minimap (inferred name).
+static const uint32_t MAX_MINIMAP_TILES = 256;
+
 // STATIC: 0x00BEBB10
-static MINIMAPTILE s_tiles[256];
+static MINIMAPTILE s_tiles[MAX_MINIMAP_TILES];
 
 // STATIC: 0x00BF5F10
 static MINIMAPINDOOR s_indoor;
@@ -322,7 +335,7 @@ static C2Vector s_poiArrowPositions[3];
 static C2Vector s_partyArrowPositions[5];
 
 // STATIC: 0x00BF6008
-static C2Vector s_raidArrowPositions[40];
+static C2Vector s_raidArrowPositions[CGRaidInfo::MAX_RAID_MEMBERS];
 
 // STATIC: 0x00BF8088
 static TSGrowableArray<POIDIRECTIONDATA> s_poiDirections;
@@ -337,7 +350,7 @@ static float s_arrowRotation = 2.3561945f;
 static MEMBERINFO s_partyMembers[5];
 
 // STATIC: 0x00BF8398
-static MEMBERINFO s_raidMembers[40];
+static MEMBERINFO s_raidMembers[CGRaidInfo::MAX_RAID_MEMBERS];
 
 // STATIC: 0x00ACECE4
 static uint16_t s_quadIndices[4] = { 0, 1, 2, 3 };
@@ -352,7 +365,16 @@ static uint16_t s_insideIndices[4] = { 0, 1, 3, 2 };
 static float s_indoorTexScale = 0.33333334f;
 
 // STATIC: 0x00D3922C
-static uint32_t s_updateFlags;
+// Pending minimap rebuild work.
+enum MINIMAP_UPDATE_FLAGS : uint32_t {
+    MINIMAP_UPDATE_NONE = 0x0,
+    // Zoom or indoor state changed; the tile/quad layout must be rebuilt.
+    MINIMAP_UPDATE_RELOAD = 0x1,
+    // The rebuilt layout is waiting for tile textures to finish loading.
+    MINIMAP_UPDATE_TEXTURES_PENDING = 0x2,
+};
+
+static uint32_t s_updateFlags; // MINIMAP_UPDATE_FLAGS
 
 // STATIC: 0x00D39330
 static char s_mapObjName[260];
@@ -415,7 +437,7 @@ static float s_mapObjRotation = 90.0f;
 static C2Vector s_tileSize(1066.6666f, 1066.6666f);
 
 // STATIC: 0x00A41EF0
-static const int32_t s_tileOffsets[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+static const C2iVector s_tileOffsets[4] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
 
 // INLINED
 void CGMinimapFrame::operator delete(void* ptr) {
@@ -526,9 +548,9 @@ void CGMinimapFrame::OnLayerUpdate(float elapsedSec) {
 
 // VERIFY: 44ce878d auto
 // OFFSET: 0x0057D580
-void CGMinimapFrame::OnLayerCursorExit(int32_t motion, int32_t a3) {
+void CGMinimapFrame::OnLayerCursorExit(int32_t motion, BOOL releaseMouse) {
     CGGameUI::m_gameTooltip->Hide();
-    CSimpleFrame::OnLayerCursorExit(motion, a3);
+    CSimpleFrame::OnLayerCursorExit(motion, releaseMouse);
 }
 
 // VERIFY: b41af30f auto
@@ -566,7 +588,7 @@ CGMinimapFrame::CGMinimapFrame(CSimpleFrame* parent) : CSimpleFrame(parent) {
 
     this->m_blipFrameLevel = this->m_level + 3;
 
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     CSimpleTexture* texture = data ? new (data) CSimpleTexture(this, 2, 1) : nullptr;
     this->m_playerTexture = texture;
     texture->SetPoint(FRAMEPOINT_CENTER, this, FRAMEPOINT_CENTER, 0.001f, 0.001f, 1);
@@ -613,6 +635,8 @@ void CGMinimapFrame::EnterWorld() {
         format = GxTex_Abgr8888;
     } else if (g_theGxDevicePtr->Caps().m_rttFormat[GxTex_Rgb565]) {
         format = GxTex_Rgb565;
+    } else {
+        STORM_ASSERT(!("CGMinimapFrame::Initialize(): can't get render target for minimap"));
     }
 
     CGxTexFlags flags(GxTex_Linear, 0, 0, 0, 0, 1, 1, 0, 0, 0);
@@ -625,31 +649,46 @@ void CGMinimapFrame::EnterWorld() {
 void CGMinimapFrame::InitializeGame() {
     CStatus status;
 
-    s_maskTexture = TextureCreate("Textures\\MinimapMask", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    s_minimapMaskTexture = TextureCreate("Textures\\MinimapMask", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    STORM_ASSERT(s_minimapMaskTexture);
     s_iconTexture = TextureCreate("Interface\\Minimap\\POIIcons", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_blipTexture = TextureCreate("Interface\\Minimap\\ObjectIcons", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    STORM_ASSERT(s_iconTexture);
+    s_objectBlipTexture = TextureCreate("Interface\\Minimap\\ObjectIcons", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    STORM_ASSERT(s_objectBlipTexture);
     s_classBlipTexture = TextureCreate("Interface\\Minimap\\PartyRaidBlips", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_vehicleTextures[0] = TextureCreate("Interface\\Minimap\\Vehicle-Ground-Unoccupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_vehicleTextures[1] = TextureCreate("Interface\\Minimap\\Vehicle-Ground-Occupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_vehicleTextures[2] = TextureCreate("Interface\\Minimap\\Vehicle-Air-Unoccupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_vehicleTextures[3] = TextureCreate("Interface\\Minimap\\Vehicle-Air-Occupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_vehicleTextures[4] = TextureCreate("Interface\\Minimap\\Vehicle-Ground-Unoccupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_vehicleTextures[5] = TextureCreate("Interface\\Minimap\\Vehicle-Air-Horde", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_vehicleTextures[6] = TextureCreate("Interface\\Minimap\\Vehicle-Air-Alliance", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_staticPOIArrowTexture = TextureCreate("Interface\\Minimap\\Rotating-MinimapArrow", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_poiArrowTexture = TextureCreate("Interface\\Minimap\\Rotating-MinimapGuideArrow", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_corpseArrowTexture = TextureCreate("Interface\\Minimap\\Rotating-MinimapCorpseArrow", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-    s_groupArrowTexture = TextureCreate("Interface\\Minimap\\Rotating-MinimapGroupArrow", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    STORM_ASSERT(s_classBlipTexture);
+    s_vehicleBlipTextures[0] = TextureCreate("Interface\\Minimap\\Vehicle-Ground-Unoccupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    s_vehicleBlipTextures[1] = TextureCreate("Interface\\Minimap\\Vehicle-Ground-Occupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    s_vehicleBlipTextures[2] = TextureCreate("Interface\\Minimap\\Vehicle-Air-Unoccupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    s_vehicleBlipTextures[3] = TextureCreate("Interface\\Minimap\\Vehicle-Air-Occupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    s_vehicleBlipTextures[4] = TextureCreate("Interface\\Minimap\\Vehicle-Ground-Unoccupied", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    s_vehicleBlipTextures[5] = TextureCreate("Interface\\Minimap\\Vehicle-Air-Horde", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    s_vehicleBlipTextures[6] = TextureCreate("Interface\\Minimap\\Vehicle-Air-Alliance", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+
+#if defined(WOWDECOMP_ASSERTIONS)
+    for (uint32_t i = 0; i < ARRSIZE(s_vehicleBlipTextures); i++) {
+        STORM_ASSERT(s_vehicleBlipTextures[i]);
+    }
+#endif
+
+    s_arrowStaticTexture = TextureCreate("Interface\\Minimap\\Rotating-MinimapArrow", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    STORM_ASSERT(s_arrowStaticTexture);
+    s_arrowPOITexture = TextureCreate("Interface\\Minimap\\Rotating-MinimapGuideArrow", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    STORM_ASSERT(s_arrowPOITexture);
+    s_arrowCorpseTexture = TextureCreate("Interface\\Minimap\\Rotating-MinimapCorpseArrow", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    STORM_ASSERT(s_arrowCorpseTexture);
+    s_arrowPartyTexture = TextureCreate("Interface\\Minimap\\Rotating-MinimapGroupArrow", CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
+    STORM_ASSERT(s_arrowPartyTexture);
 
     uint32_t width = 256;
     uint32_t height = 256;
     TextureGetDimensions(s_iconTexture, &width, &height, 1);
 
-    uint32_t columns = CMath::sqrt_(196);
+    uint32_t columns = CMath::sqrt_(NUM_MINIMAP_ICONS);
     float texel = 1.0f / width;
     float size = texel * 18.0f;
 
-    for (uint32_t i = 0; i < 196; i++) {
+    for (uint32_t i = 0; i < NUM_MINIMAP_ICONS; i++) {
         float left = (i % columns) * size + texel;
         float right = left + size - texel;
         float top = (i / columns) * size + texel;
@@ -665,7 +704,7 @@ void CGMinimapFrame::InitializeGame() {
         s_iconTexCoords[i][3].y = top;
     }
 
-    for (uint32_t i = 0; i < 16; i++) {
+    for (uint32_t i = 0; i < NUM_CLASS_BLIPS; i++) {
         float left = (i & 7) * 0.125f;
         float bottom = ((i >> 3) + 1) * 0.5f;
         float right = ((i & 7) + 1) * 0.125f;
@@ -706,7 +745,7 @@ void CGMinimapFrame::InitializeGame() {
 int32_t CGMinimapFrame::CountAvailableTrackingTypes() {
     int32_t count = 0;
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
-    uint32_t classMask = player ? 1 << player->m_unit->m_unitFieldBytes0[1] : 0;
+    uint32_t classMask = player ? 1 << player->m_unit->m_classID : 0;
 
     for (uint32_t i = 0; i < sizeof(CGMinimapFrame::s_trackingTypes) / sizeof(CGMinimapFrame::s_trackingTypes[0]); i++) {
         uint32_t mask = CGMinimapFrame::s_trackingTypes[i].m_classMask;
@@ -724,7 +763,7 @@ int32_t CGMinimapFrame::CountAvailableTrackingTypes() {
 const TrackingTypeInfo* CGMinimapFrame::GetTrackingTypeByIndex(int32_t index) {
     int32_t count = 0;
     CGPlayer_C* player = static_cast<CGPlayer_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
-    uint32_t classMask = player ? 1 << player->m_unit->m_unitFieldBytes0[1] : 0;
+    uint32_t classMask = player ? 1 << player->m_unit->m_classID : 0;
 
     for (uint32_t i = 0; i < sizeof(CGMinimapFrame::s_trackingTypes) / sizeof(CGMinimapFrame::s_trackingTypes[0]); i++) {
         uint32_t mask = CGMinimapFrame::s_trackingTypes[i].m_classMask;
@@ -746,7 +785,7 @@ const TrackingTypeInfo* CGMinimapFrame::GetTrackingTypeByIndex(int32_t index) {
 // VERIFY: aba21c39 auto
 // OFFSET: 0x007F3BE0
 AreaPOIRec* MinimapGetGossipPoi() {
-    return &s_dynamicPOIs[1];
+    return &s_dynamicPOIs[DYNAMIC_POI_GOSSIP];
 }
 
 // VERIFY: 23614ed9 manual
@@ -768,7 +807,8 @@ float MinimapGetViewRadius() {
         return s_indoorZoomRadius[s_indoorZoom];
     }
 
-    return s_outdoorZoomTiles[s_outdoorZoom] * 0.5f * 33.333332f;
+    STORM_ASSERT(static_cast<uint32_t>(s_currentZoom) < NUM_ZOOMS); // 12213: "s_currentZoom < NUM_ZOOMS"
+    return s_chunksPerSizeAtZoom[s_currentZoom] * 0.5f * 33.333332f;
 }
 
 // VERIFY: 10a7b5c4 manual
@@ -779,7 +819,8 @@ void UpdatePointsOfInterest() {
     }
 
     s_visiblePOIs.SetCount(0);
-    float viewRadius = MinimapGetViewRadius();
+    float minimapVisRadius = MinimapGetViewRadius();
+    STORM_ASSERT(minimapVisRadius > 0.0f);
 
     for (uint32_t i = 0; i < s_numPOIs; i++) {
         AreaPOIRec* poi = s_pois.m_data[i];
@@ -798,7 +839,7 @@ void UpdatePointsOfInterest() {
         float dy = s_playerPosition.y - poi->m_pos[1];
         float dx = s_playerPosition.x - poi->m_pos[0];
 
-        if (sqrt(dx * dx + dy * dy) / viewRadius > 0.8f) {
+        if (sqrt(dx * dx + dy * dy) / minimapVisRadius > 0.8f) {
             if (!s_poiVisible.m_data[i] && s_poiOnEdge.m_data[i]) {
                 continue;
             }
@@ -809,7 +850,7 @@ void UpdatePointsOfInterest() {
             continue;
         }
 
-        if (!(poi->m_flags & 2)) {
+        if (!(poi->m_flags & AREA_POI_FLAG_SHOW_MINIMAP_ICON)) {
             if (!s_poiVisible.m_data[i] && !s_poiOnEdge.m_data[i]) {
                 continue;
             }
@@ -847,7 +888,7 @@ void UpdatePointsOfInterest() {
         float dx = poi->m_pos[0] - s_playerPosition.x;
         float distance = sqrt(dx * dx + dy * dy);
 
-        if (distance > MAX_POI_DISTANCE && poi != &s_dynamicPOIs[2]) {
+        if (distance > MAX_POI_DISTANCE && poi != &s_dynamicPOIs[DYNAMIC_POI_CORPSE]) {
             continue;
         }
 
@@ -873,8 +914,8 @@ void UpdatePointsOfInterest() {
         }
     }
 
-    if (s_numClosestPOIs != count) {
-        s_numClosestPOIs = count;
+    if (s_numDistantPOI != count) {
+        s_numDistantPOI = count;
         s_closestPOIsChanged = 1;
     } else {
         for (uint32_t j = 0; j < count; j++) {
@@ -896,13 +937,13 @@ void UpdatePointsOfInterest() {
 // VERIFY: 52931454 auto
 // OFFSET: 0x007F4930
 void DisplayQuestPoint(float x, float y, int32_t importance, const char* name) {
-    s_dynamicPOIs[0].m_pos[0] = x;
-    s_dynamicPOIs[0].m_pos[1] = y;
-    s_dynamicPOIs[0].m_flags = 0;
-    s_dynamicPOIs[0].m_continentID = s_mapId;
-    s_dynamicPOIs[0].m_icon[0] = 6;
-    s_dynamicPOIs[0].m_importance = importance;
-    SStrCopy(s_dynamicPOINames[0], name, sizeof(s_dynamicPOINames[0]));
+    s_dynamicPOIs[DYNAMIC_POI_QUEST].m_pos[0] = x;
+    s_dynamicPOIs[DYNAMIC_POI_QUEST].m_pos[1] = y;
+    s_dynamicPOIs[DYNAMIC_POI_QUEST].m_flags = 0;
+    s_dynamicPOIs[DYNAMIC_POI_QUEST].m_continentID = s_mapId;
+    s_dynamicPOIs[DYNAMIC_POI_QUEST].m_icon[0] = 6;
+    s_dynamicPOIs[DYNAMIC_POI_QUEST].m_importance = importance;
+    SStrCopy(s_dynamicPOINames[DYNAMIC_POI_QUEST], name, sizeof(s_dynamicPOINames[DYNAMIC_POI_QUEST]));
     UpdatePointsOfInterest();
     s_closestPOIsChanged = 1;
 }
@@ -918,7 +959,7 @@ void MinimapSetDynamicPOI(int32_t index, int32_t flags, float x, float y, int32_
     s_dynamicPOIs[index].m_importance = importance;
     SStrCopy(s_dynamicPOINames[index], name, sizeof(s_dynamicPOINames[index]));
 
-    if (index == 1) {
+    if (index == DYNAMIC_POI_GOSSIP) {
         s_worldMapRefreshTime = static_cast<uint32_t>(time(nullptr)) + 480;
 
         if (CGWorldMap::m_currentOrphanZone == -1) {
@@ -936,13 +977,13 @@ void MinimapSetDynamicPOI(int32_t index, int32_t flags, float x, float y, int32_
 // OFFSET: 0x007F4990
 void MinimapSetCorpsePOI(float x, float y) {
     const char* name = FrameScript_GetText("CORPSE_RED", -1, GENDER_NOT_APPLICABLE);
-    s_dynamicPOIs[2].m_pos[0] = x;
-    s_dynamicPOIs[2].m_pos[1] = y;
-    s_dynamicPOIs[2].m_flags = 2;
-    s_dynamicPOIs[2].m_continentID = s_mapId;
-    s_dynamicPOIs[2].m_icon[0] = 8;
-    s_dynamicPOIs[2].m_importance = -1;
-    SStrCopy(s_dynamicPOINames[2], name, sizeof(s_dynamicPOINames[2]));
+    s_dynamicPOIs[DYNAMIC_POI_CORPSE].m_pos[0] = x;
+    s_dynamicPOIs[DYNAMIC_POI_CORPSE].m_pos[1] = y;
+    s_dynamicPOIs[DYNAMIC_POI_CORPSE].m_flags = AREA_POI_FLAG_SHOW_MINIMAP_ICON;
+    s_dynamicPOIs[DYNAMIC_POI_CORPSE].m_continentID = s_mapId;
+    s_dynamicPOIs[DYNAMIC_POI_CORPSE].m_icon[0] = 8;
+    s_dynamicPOIs[DYNAMIC_POI_CORPSE].m_importance = -1;
+    SStrCopy(s_dynamicPOINames[DYNAMIC_POI_CORPSE], name, sizeof(s_dynamicPOINames[DYNAMIC_POI_CORPSE]));
     UpdatePointsOfInterest();
     s_closestPOIsChanged = 1;
 }
@@ -951,13 +992,13 @@ void MinimapSetCorpsePOI(float x, float y) {
 // OFFSET: 0x007F4A00
 void MinimapSetSpiritHealerPOI(float x, float y) {
     const char* name = FrameScript_GetText("SPIRIT_HEALER_RELEASE_RED", -1, GENDER_NOT_APPLICABLE);
-    s_dynamicPOIs[3].m_pos[0] = x;
-    s_dynamicPOIs[3].m_pos[1] = y;
-    s_dynamicPOIs[3].m_flags = 2;
-    s_dynamicPOIs[3].m_continentID = s_mapId;
-    s_dynamicPOIs[3].m_icon[0] = 8;
-    s_dynamicPOIs[3].m_importance = -1;
-    SStrCopy(s_dynamicPOINames[3], name, sizeof(s_dynamicPOINames[3]));
+    s_dynamicPOIs[DYNAMIC_POI_SPIRIT_HEALER].m_pos[0] = x;
+    s_dynamicPOIs[DYNAMIC_POI_SPIRIT_HEALER].m_pos[1] = y;
+    s_dynamicPOIs[DYNAMIC_POI_SPIRIT_HEALER].m_flags = AREA_POI_FLAG_SHOW_MINIMAP_ICON;
+    s_dynamicPOIs[DYNAMIC_POI_SPIRIT_HEALER].m_continentID = s_mapId;
+    s_dynamicPOIs[DYNAMIC_POI_SPIRIT_HEALER].m_icon[0] = 8;
+    s_dynamicPOIs[DYNAMIC_POI_SPIRIT_HEALER].m_importance = -1;
+    SStrCopy(s_dynamicPOINames[DYNAMIC_POI_SPIRIT_HEALER], name, sizeof(s_dynamicPOINames[DYNAMIC_POI_SPIRIT_HEALER]));
     UpdatePointsOfInterest();
     s_closestPOIsChanged = 1;
 }
@@ -1041,10 +1082,10 @@ void MinimapInitialize(int32_t mapId) {
 
         uint32_t count = 0;
 
-        for (int32_t i = g_areaPOIDB.m_numRecords - 1; i >= 0; i--) {
+        for (int32_t i = g_areaPOIDB.GetNumRecords() - 1; i >= 0; i--) {
             AreaPOIRec* rec = g_areaPOIDB.GetRecordByIndex(i);
 
-            if (rec->m_continentID == mapId && (rec->m_flags & 1)) {
+            if (rec->m_continentID == mapId && (rec->m_flags & AREA_POI_FLAG_SHOW_ON_MINIMAP)) {
                 if (pass > 0) {
                     s_pois.m_data[count] = rec;
                 }
@@ -1053,11 +1094,11 @@ void MinimapInitialize(int32_t mapId) {
             }
         }
 
-        s_numPOIs = count + 4;
+        s_numPOIs = count + NUM_DYNAMIC_POIS;
     }
 
-    for (uint32_t i = 0; i < 4; i++) {
-        s_pois.m_data[s_numPOIs - 4 + i] = &s_dynamicPOIs[i];
+    for (uint32_t i = 0; i < NUM_DYNAMIC_POIS; i++) {
+        s_pois.m_data[s_numPOIs - NUM_DYNAMIC_POIS + i] = &s_dynamicPOIs[i];
         memset(&s_dynamicPOIs[i], 0, sizeof(s_dynamicPOIs[i]));
         s_dynamicPOIs[i].m_name = s_dynamicPOINames[i];
     }
@@ -1068,7 +1109,7 @@ void MinimapInitialize(int32_t mapId) {
     s_closestPOIs[0] = -1;
     s_closestPOIs[1] = -1;
     s_closestPOIs[2] = -1;
-    s_outdoorZoom = g_minimapZoomCVar->m_intValue;
+    s_currentZoom = g_minimapZoomCVar->m_intValue;
     s_indoorZoom = g_minimapInsideZoomCVar->m_intValue;
     FrameScript_SignalEvent(SCRIPT_EVENT_MINIMAP_UPDATE_ZOOM, nullptr);
     LoadMD5Names();
@@ -1092,18 +1133,28 @@ void CGMinimapFrame::SetCompassRotation(float rotation) {
 
 // VERIFY: 7d85819d manual
 // OFFSET: 0x0057D5F0
-void MINIMAPTILE::BuildQuad(const CRect& rect, uint32_t index, const C2Vector* center, float scale, const CRect& bounds, float layoutScale, float width) {
-    float size = scale * 2.0f;
-    float inv = 1.0f / size;
-    this->m_maskCoords[0].x = (rect.minX - bounds.minX) * inv;
-    this->m_maskCoords[0].y = (rect.maxY - bounds.minY) * inv;
-    this->m_maskCoords[1].x = (rect.maxX - bounds.minX) * inv;
-    this->m_maskCoords[1].y = (rect.maxY - bounds.minY) * inv;
-    this->m_maskCoords[2].x = (rect.minX - bounds.minX) * inv;
-    this->m_maskCoords[2].y = (rect.minY - bounds.minY) * inv;
-    this->m_maskCoords[3].x = (rect.maxX - bounds.minX) * inv;
-    this->m_maskCoords[3].y = (rect.minY - bounds.minY) * inv;
+void MINIMAPTILE::BuildQuad(const CRect& rect, uint32_t index, const C2Vector* centerPoint, float radius, const CRect& maskBox, float layoutScale, float width) {
+    STORM_ASSERT((centerPoint->x + radius) <= 1.0f);  // 12213: "( centerPoint.x + radius ) <= 1.0f"
+    STORM_ASSERT((centerPoint->y + radius) <= 1.0f);  // 12213: "( centerPoint.y + radius ) <= 1.0f"
+    STORM_ASSERT(centerPoint->x >= radius);  // 12213: "centerPoint.x >= radius"
+    STORM_ASSERT(centerPoint->y >= radius);  // 12213: "centerPoint.y >= radius"
+    STORM_ASSERT(rect.minX >= maskBox.minX);  // 12213: "rect.minx >= maskBox.minx"
+    STORM_ASSERT(rect.maxX <= maskBox.maxX);  // 12213: "rect.maxx <= maskBox.maxx"
+    STORM_ASSERT(rect.minY >= maskBox.minY);  // 12213: "rect.miny >= maskBox.miny"
+    STORM_ASSERT(rect.maxY <= maskBox.maxY);  // 12213: "rect.maxy <= maskBox.maxy"
 
+    float size = radius * 2.0f;
+    float inv = 1.0f / size;
+    this->m_maskCoords[0].x = (rect.minX - maskBox.minX) * inv;
+    this->m_maskCoords[0].y = (rect.maxY - maskBox.minY) * inv;
+    this->m_maskCoords[1].x = (rect.maxX - maskBox.minX) * inv;
+    this->m_maskCoords[1].y = (rect.maxY - maskBox.minY) * inv;
+    this->m_maskCoords[2].x = (rect.minX - maskBox.minX) * inv;
+    this->m_maskCoords[2].y = (rect.minY - maskBox.minY) * inv;
+    this->m_maskCoords[3].x = (rect.maxX - maskBox.minX) * inv;
+    this->m_maskCoords[3].y = (rect.minY - maskBox.minY) * inv;
+
+    STORM_ASSERT(index < ARRSIZE(s_quads)); // 12213: "quad < MAX_QUADDATA"
     const CRect& quad = s_quads[index].m_rect;
     this->m_texCoords[0].x = (rect.minX - quad.minY) * 2.0f;
     this->m_texCoords[0].y = (rect.maxY - quad.minX) * 2.0f;
@@ -1116,10 +1167,10 @@ void MINIMAPTILE::BuildQuad(const CRect& rect, uint32_t index, const C2Vector* c
 
     float vertexInv = 1.0f / size;
     float extent = layoutScale * width;
-    float left = (rect.minX - bounds.minX) * vertexInv * extent;
-    float right = vertexInv * (rect.maxX - bounds.minX) * extent;
-    float top = extent - vertexInv * (rect.maxY - bounds.minY) * extent;
-    float bottom = extent - (rect.minY - bounds.minY) * vertexInv * extent;
+    float left = (rect.minX - maskBox.minX) * vertexInv * extent;
+    float right = vertexInv * (rect.maxX - maskBox.minX) * extent;
+    float top = extent - vertexInv * (rect.maxY - maskBox.minY) * extent;
+    float bottom = extent - (rect.minY - maskBox.minY) * vertexInv * extent;
     this->m_vertices[0].x = left;
     this->m_vertices[0].y = top;
     this->m_vertices[0].z = 0.0f;
@@ -1137,7 +1188,7 @@ void MINIMAPTILE::BuildQuad(const CRect& rect, uint32_t index, const C2Vector* c
 // VERIFY: 92f7692a auto
 // OFFSET: 0x0057E540
 void MINIMAPTILE::Render(uint32_t index, const CImVector* color) {
-    if (!(this->m_flags & 1) || !this->m_texture) {
+    if (!(this->m_flags & MINIMAPTILE::FLAGS::QUAD_BUILT) || !this->m_texture) {
         return;
     }
 
@@ -1150,7 +1201,7 @@ void MINIMAPTILE::Render(uint32_t index, const CImVector* color) {
     g_theGxDevicePtr->RsSet(GxRs_Texture0, gxTex);
     GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
-    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(s_maskTexture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(s_minimapMaskTexture, 1, nullptr));
     GxRsSet(GxRs_ColorOp1, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp1, GxTexOp_Mod);
     C3Vector normal(0.0f, 0.0f, 1.0f);
@@ -1163,7 +1214,8 @@ void MINIMAPTILE::Render(uint32_t index, const CImVector* color) {
 // VERIFY: e8182a5d manual
 // OFFSET: 0x0057E630
 void MINIMAPTILE::UpdateQuad(uint32_t index, C2Vector center, float scale, float layoutScale, float width) {
-    this->m_flags &= ~1u;
+    STORM_ASSERT(index < ARRSIZE(s_quads)); // 12213: "quad < MAX_QUADDATA"
+    this->m_flags &= ~MINIMAPTILE::FLAGS::QUAD_BUILT;
 
     if (index >= 4) {
         return;
@@ -1205,14 +1257,14 @@ void MINIMAPTILE::UpdateQuad(uint32_t index, C2Vector center, float scale, float
 
     if (quad.minX < maxY && quad.maxX > minY && maxX > quad.minY && quad.maxY > minX) {
         this->BuildQuad(rect, index, &center, scale, bounds, layoutScale, width);
-        this->m_flags |= 1;
+        this->m_flags |= MINIMAPTILE::FLAGS::QUAD_BUILT;
     }
 }
 
 // VERIFY: 2aace7b1 auto
 // OFFSET: 0x0057E780
 void CGMinimapFrame::UpdateQuads(const C2Vector& center, float scale) {
-    for (uint32_t i = 0; i < 256; i++) {
+    for (uint32_t i = 0; i < MAX_MINIMAP_TILES; i++) {
         s_tiles[i].UpdateQuad(i, center, scale, this->m_layoutScale, this->GetWidth());
     }
 }
@@ -1246,68 +1298,71 @@ static void MinimapWorldToTileCoords(const C3Vector* position, int32_t* tile) {
 
 // VERIFY: 630be33b auto
 // OFFSET: 0x007F5240
-static int32_t MinimapBuildSource(const int32_t* tile, char* path, uint32_t size) {
-    *path = 0;
+static int32_t MinimapBuildSource(const int32_t* tile, char* buffer, uint32_t size) {
+    STORM_ASSERT(buffer);
+    STORM_ASSERT(size);
+
+    *buffer = 0;
     MapRec* map = g_mapDB.GetRecord(s_mapId);
 
     if (!map || !*map->m_directory) {
-        SysMsgPrintf(SYSMSG_ERROR, 2, "NOCONTINENTNAME|%d", s_mapId);
+        SysMsgPrintf(SYSMSG_ERROR, SYSMSG_FILTER_WORLD, "NOCONTINENTNAME|%d", s_mapId);
         return 0;
     }
 
-    SStrPrintf(path, size, s_minimapTileFormat, map->m_directory, tile[0], tile[1]);
-    MINIMAPMD5NAME* name = s_md5Names.Ptr(path);
+    SStrPrintf(buffer, size, s_minimapTileFormat, map->m_directory, tile[0], tile[1]);
+    MINIMAPMD5NAME* name = s_md5Names.Ptr(buffer);
 
     if (!name) {
-        SysMsgPrintf(SYSMSG_ERROR, 2, "No minimap texture: \"%s\"", path);
-        *path = 0;
+        SysMsgPrintf(SYSMSG_ERROR, SYSMSG_FILTER_WORLD, "No minimap texture: \"%s\"", buffer);
+        *buffer = 0;
         return 0;
     }
 
-    SStrPrintf(path, size, "%s\\%s", s_minimapTexturePath, name->m_md5Name);
+    SStrPrintf(buffer, size, "%s\\%s", s_minimapTexturePath, name->m_md5Name);
     return 1;
 }
 
 // VERIFY: dd828e8c manual
 // OFFSET: 0x007F5760
 static void SetupTextureHandles(const int32_t* tile, int32_t reset, MINIMAPTILE* tiles) {
-    tiles[0].m_flags &= ~2u;
-    tiles[1].m_flags &= ~2u;
-    tiles[2].m_flags &= ~2u;
-    tiles[3].m_flags &= ~2u;
+    tiles[0].m_flags &= ~MINIMAPTILE::FLAGS::IN_USE;
+    tiles[1].m_flags &= ~MINIMAPTILE::FLAGS::IN_USE;
+    tiles[2].m_flags &= ~MINIMAPTILE::FLAGS::IN_USE;
+    tiles[3].m_flags &= ~MINIMAPTILE::FLAGS::IN_USE;
 
     if (!reset) {
         for (uint32_t i = 0; i < 4; i++) {
-            int32_t x = tile[0] + s_tileOffsets[i][0];
-            int32_t y = tile[1] + s_tileOffsets[i][1];
+            int32_t x = tile[0] + s_tileOffsets[i].x;
+            int32_t y = tile[1] + s_tileOffsets[i].y;
 
             for (uint32_t j = 0; j < 4; j++) {
-                if (tiles[j].m_x == x && tiles[j].m_y == y) {
+                if (tiles[j].m_tileCoords.x == x && tiles[j].m_tileCoords.y == y) {
                     if (j != i) {
                         if (tiles[i].m_texture) {
                             HandleClose(reinterpret_cast<HOBJECT>(tiles[i].m_texture));
                         }
 
                         tiles[i].m_texture = tiles[j].m_texture;
-                        tiles[i].m_x = x;
-                        tiles[i].m_y = y;
+                        tiles[i].m_tileCoords.x = x;
+                        tiles[i].m_tileCoords.y = y;
                         tiles[j].m_texture = nullptr;
                     }
 
-                    tiles[i].m_flags |= 2;
+                    tiles[i].m_flags |= MINIMAPTILE::FLAGS::IN_USE;
                 }
             }
         }
     }
 
     for (uint32_t i = 0; i < 4; i++) {
-        if (tiles[i].m_flags & 2) {
+        if (tiles[i].m_flags & MINIMAPTILE::FLAGS::IN_USE) {
             continue;
         }
 
         int32_t source[2];
-        source[0] = tile[0] + s_tileOffsets[i][0];
-        source[1] = tile[1] + s_tileOffsets[i][1];
+        source[0] = tile[0] + s_tileOffsets[i].x;
+        source[1] = tile[1] + s_tileOffsets[i].y;
         char path[260];
         MinimapBuildSource(source, path, sizeof(path));
 
@@ -1319,36 +1374,40 @@ static void SetupTextureHandles(const int32_t* tile, int32_t reset, MINIMAPTILE*
 
             CStatus status;
             CTexture* texture = TextureCreate(path, CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-            tiles[i].m_flags |= 2;
+            tiles[i].m_flags |= MINIMAPTILE::FLAGS::IN_USE;
             tiles[i].m_texture = texture;
-            tiles[i].m_x = source[0];
-            tiles[i].m_y = source[1];
+            tiles[i].m_tileCoords.x = source[0];
+            tiles[i].m_tileCoords.y = source[1];
         } else {
-            SysMsgPrintf(SYSMSG_ERROR, 4, "MINIMAPCHUNKNOTFOUND|%d|%d", source[0], source[1]);
+            SysMsgPrintf(SYSMSG_ERROR, SYSMSG_FILTER_UI, "MINIMAPCHUNKNOTFOUND|%d|%d", source[0], source[1]);
         }
     }
 }
 
 // VERIFY: db65bbd1 manual
 // OFFSET: 0x007F5930
-static int32_t MinimapUpdatePosition(int32_t mapId, const C3Vector* position, C2Vector* center, float* scale, MINIMAPTILE* tiles) {
+static int32_t MinimapUpdatePosition(int32_t mapId, const C3Vector* pos, C2Vector* centerPoint, float* radius, MINIMAPTILE* tiles) {
+    STORM_ASSERT(radius);
+    STORM_ASSERT(centerPoint);
+
     int32_t mapChanged = mapId != s_mapId;
-    s_playerPosition = *position;
+    s_playerPosition = *pos;
     s_mapId = mapId;
     UpdatePointsOfInterest();
 
-    C3Vector maxPosition(position->x + s_halfTile.x, position->y + s_halfTile.y, 0.0f);
-    int32_t baseTile[2];
-    MinimapWorldToTileCoords(&maxPosition, baseTile);
-    C3Vector minPosition(position->x - s_halfTile.x, position->y - s_halfTile.y, 0.0f);
+    C3Vector maxPosition(pos->x + s_halfTile.x, pos->y + s_halfTile.y, 0.0f);
+    int32_t upperLeftArea[2];
+    MinimapWorldToTileCoords(&maxPosition, upperLeftArea);
+    C3Vector minPosition(pos->x - s_halfTile.x, pos->y - s_halfTile.y, 0.0f);
     int32_t endTile[2];
     MinimapWorldToTileCoords(&minPosition, endTile);
 
     int32_t endX = endTile[0];
 
-    if (baseTile[0] == endX) {
+    if (upperLeftArea[0] == endX) {
         if (endX + 1 >= 64) {
-            baseTile[0]--;
+            STORM_ASSERT(upperLeftArea[0]); // 12213: "upperLeftArea.x"
+            upperLeftArea[0]--;
         } else {
             endX = endX + 1;
         }
@@ -1356,32 +1415,41 @@ static int32_t MinimapUpdatePosition(int32_t mapId, const C3Vector* position, C2
 
     int32_t endY = endTile[1];
 
-    if (baseTile[1] == endY) {
+    if (upperLeftArea[1] == endY) {
         if (endY + 1 >= 64) {
-            baseTile[1]--;
+            STORM_ASSERT(upperLeftArea[1]); // 12213: "upperLeftArea.y"
+            upperLeftArea[1]--;
         } else {
             endY = endY + 1;
         }
     }
 
-    if ((s_updateFlags & 1) || s_tileMinX != baseTile[0] || s_tileMinY != baseTile[1] || s_tileMaxX != endX || s_tileMaxY != endY) {
-        SetupTextureHandles(baseTile, mapChanged, tiles);
-        s_tileMinX = baseTile[0];
-        s_tileMinY = baseTile[1];
+    if ((s_updateFlags & MINIMAP_UPDATE_RELOAD) || s_tileMinX != upperLeftArea[0] || s_tileMinY != upperLeftArea[1] || s_tileMaxX != endX || s_tileMaxY != endY) {
+        SetupTextureHandles(upperLeftArea, mapChanged, tiles);
+        s_tileMinX = upperLeftArea[0];
+        s_tileMinY = upperLeftArea[1];
         s_tileMaxX = endX;
         s_tileMaxY = endY;
     }
 
-    s_updateFlags &= ~1u;
-    C3Vector origin(HALF_WORLD_SIZE - baseTile[1] * MD_AREA_POLY_SIZE, s_mapOrigin - MD_AREA_POLY_SIZE * baseTile[0], 0.0f);
+    s_updateFlags &= ~MINIMAP_UPDATE_RELOAD;
+    C3Vector origin(HALF_WORLD_SIZE - upperLeftArea[1] * MD_AREA_POLY_SIZE, s_mapOrigin - MD_AREA_POLY_SIZE * upperLeftArea[0], 0.0f);
+#if defined(WOWDECOMP_ASSERTIONS)
+    constexpr float CLOSEENOUGH = 0.013888889f;
+    STORM_ASSERT((pos->x - CLOSEENOUGH) < origin.x); // 12213: "( pos.x - CLOSEENOUGH ) < boxBoundary.t"
+    STORM_ASSERT((pos->x + CLOSEENOUGH) > origin.x - s_tileSize.x); // 12213: "( pos.x + CLOSEENOUGH ) > boxBoundary.b"
+    STORM_ASSERT((pos->y - CLOSEENOUGH) < origin.y); // 12213: "( pos.y - CLOSEENOUGH ) < boxBoundary.l"
+    STORM_ASSERT((pos->y + CLOSEENOUGH) > origin.y - s_tileSize.y); // 12213: "( pos.y + CLOSEENOUGH ) > boxBoundary.r"
+#endif
     C2Vector origin2(origin);
     float inv = 1.0f / s_tileSize.y;
-    uint32_t halfTiles = s_outdoorZoomTiles[s_outdoorZoom] >> 1;
-    float centerX = (origin2.y - position->y) * inv;
-    float centerY = (origin2.x - position->x) / s_tileSize.x;
-    *scale = inv * (halfTiles * 33.333332f);
-    center->x = centerX;
-    center->y = centerY;
+    STORM_ASSERT(static_cast<uint32_t>(s_currentZoom) < ARRSIZE(s_chunksPerSizeAtZoom)); // 12213: "s_currentZoom < ARRSIZE(s_chunksPerSizeAtZoom)"
+    uint32_t halfTiles = s_chunksPerSizeAtZoom[s_currentZoom] >> 1;
+    float centerX = (origin2.y - pos->y) * inv;
+    float centerY = (origin2.x - pos->x) / s_tileSize.x;
+    *radius = inv * (halfTiles * 33.333332f);
+    centerPoint->x = centerX;
+    centerPoint->y = centerY;
     AdditionalCheck1();
     return 1;
 }
@@ -1414,18 +1482,20 @@ static void SetupMapObjMatrices(CMapEntity* entity) {
     s_mapObjMatrix.d0 = 0.0f;
     s_mapObjMatrix.d1 = 0.0f;
     s_mapObjMatrix.d2 = 0.0f;
-    s_mapObjMatrix.RotateAroundZ(s_mapObjRotation * 0.017453292f);
+    s_mapObjMatrix.RotateAroundZ(s_mapObjRotation * DEG_TO_RAD);
 }
 
 // VERIFY: 8100c6e5 auto
 // OFFSET: 0x007F3A70
 static void MinimapSetMapObjName(CMapEntity* entity) {
-    const char* fileName = nullptr;
-    World::QueryMapObjFileName(entity, &fileName);
+    const char* wmoName = nullptr;
+    World::QueryMapObjFileName(entity, &wmoName);
 
-    if (fileName) {
-        fileName += SStrLen("World\\");
-        SStrCopy(s_mapObjName, fileName, sizeof(s_mapObjName));
+    if (wmoName) {
+        static const char kWorld[] = "World\\";
+        STORM_ASSERT(SStrCmpI(wmoName, kWorld, STORM_MAX_STR)); // 12213: "SStrCmpI(wmoName, kWorld)"
+        wmoName += SStrLen(kWorld);
+        SStrCopy(s_mapObjName, wmoName, sizeof(s_mapObjName));
     } else {
         SStrCopy(s_mapObjName, "Dont Crash!", sizeof(s_mapObjName));
     }
@@ -1440,15 +1510,15 @@ static void MinimapSetMapObjName(CMapEntity* entity) {
 // VERIFY: a165470a manual
 // OFFSET: 0x007F3CE0
 static MINIMAPTILE* MinimapFindTile(MINIMAPTILE* tiles, const MINIMAPQUADINFO* quad, int32_t currentGroup, float height) {
-    for (uint32_t i = 0; i < 256; i++) {
+    for (uint32_t i = 0; i < MAX_MINIMAP_TILES; i++) {
         MINIMAPTILE* tile = &tiles[i];
 
-        if (tile->m_groupId == quad->m_groupId && tile->m_x == quad->m_x && tile->m_y == quad->m_y) {
+        if (tile->m_groupId == quad->m_groupId && tile->m_tileCoords.x == quad->m_quad.x && tile->m_tileCoords.y == quad->m_quad.y) {
             if (tile->m_groupId == currentGroup) {
-                tile->m_flags |= 2;
-                tile->m_depth = 3.4028235e38f;
+                tile->m_flags |= MINIMAPTILE::FLAGS::IN_USE;
+                tile->m_depth = FLT_MAX;
             } else {
-                tile->m_flags |= 2;
+                tile->m_flags |= MINIMAPTILE::FLAGS::IN_USE;
                 tile->m_depth = (quad->m_bounds.t.z + quad->m_bounds.b.z) * 0.5f - height;
             }
 
@@ -1464,24 +1534,24 @@ static MINIMAPTILE* MinimapFindTile(MINIMAPTILE* tiles, const MINIMAPQUADINFO* q
 static void SetupQuad(MINIMAPTILE* tiles, const MINIMAPQUADINFO* quad, int32_t currentGroup, float height, const char* mapObjName) {
     uint32_t index = 0;
 
-    while (tiles->m_flags & 2) {
+    while (tiles->m_flags & MINIMAPTILE::FLAGS::IN_USE) {
         index++;
         tiles++;
 
-        if (index >= 256) {
+        if (index >= MAX_MINIMAP_TILES) {
             return;
         }
     }
 
-    tiles->m_flags |= 2;
+    tiles->m_flags |= MINIMAPTILE::FLAGS::IN_USE;
     char path[260];
-    SStrPrintf(path, sizeof(path), s_minimapQuadFormat, mapObjName, quad->m_groupId, quad->m_x, quad->m_y);
+    SStrPrintf(path, sizeof(path), s_minimapQuadFormat, mapObjName, quad->m_groupId, quad->m_quad.x, quad->m_quad.y);
     MINIMAPMD5NAME* name = s_md5Names.Ptr(path);
 
     if (name) {
         SStrPrintf(path, sizeof(path), "%s\\%s", s_minimapTexturePath, name->m_md5Name);
     } else {
-        SysMsgPrintf(SYSMSG_ERROR, 2, "No minimap texture: \"%s\"", path);
+        SysMsgPrintf(SYSMSG_ERROR, SYSMSG_FILTER_WORLD, "No minimap texture: \"%s\"", path);
         path[0] = 0;
     }
 
@@ -1492,20 +1562,20 @@ static void SetupQuad(MINIMAPTILE* tiles, const MINIMAPQUADINFO* quad, int32_t c
     if (path[0]) {
         CStatus status;
         CTexture* texture = TextureCreate(path, CGxTexFlags(GxTex_Linear, 0, 0, 0, 0, 0, 1), &status, 1);
-        tiles->m_flags |= 4;
+        tiles->m_flags |= MINIMAPTILE::FLAGS::TEXTURE_PENDING;
         tiles->m_texture = texture;
     } else {
-        tiles->m_flags &= ~2u;
+        tiles->m_flags &= ~MINIMAPTILE::FLAGS::IN_USE;
         tiles->m_texture = nullptr;
     }
 
-    tiles->m_x = quad->m_x;
-    tiles->m_y = quad->m_y;
+    tiles->m_tileCoords.x = quad->m_quad.x;
+    tiles->m_tileCoords.y = quad->m_quad.y;
     tiles->m_bounds = quad->m_bounds;
     tiles->m_groupId = quad->m_groupId;
 
     if (tiles->m_groupId == currentGroup) {
-        tiles->m_depth = 3.4028235e38f;
+        tiles->m_depth = FLT_MAX;
     } else {
         tiles->m_depth = (tiles->m_bounds.t.z + tiles->m_bounds.b.z) * 0.5f - height;
     }
@@ -1513,9 +1583,9 @@ static void SetupQuad(MINIMAPTILE* tiles, const MINIMAPQUADINFO* quad, int32_t c
 
 // VERIFY: e07bae80 manual
 // OFFSET: 0x007F5BA0
-int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* position, C2Vector* center, float* scale, MINIMAPTILE* tiles, MINIMAPINDOOR* indoor, int32_t force) {
-    uint8_t reload = s_updateFlags & 1;
-    bool changed = (s_updateFlags & 3) != 0;
+int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* position, C2Vector* center, float* scale, MINIMAPTILE* tiles, MINIMAPINDOOR* indoor, BOOL force) {
+    uint8_t reload = s_updateFlags & MINIMAP_UPDATE_RELOAD;
+    bool changed = (s_updateFlags & (MINIMAP_UPDATE_RELOAD | MINIMAP_UPDATE_TEXTURES_PENDING)) != 0;
     bool result = changed;
 
     if (s_worldMapRefreshTime && time(nullptr) >= static_cast<time_t>(s_worldMapRefreshTime)) {
@@ -1547,11 +1617,11 @@ int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* positio
         uint8_t indoorArea = 0;
 
         if (rootRec) {
-            if (rootRec->m_flags & 1) {
+            if (rootRec->m_flags & WMO_AREA_FLAG_RENDER_MINIMAP) {
                 outdoorArea = 1;
             }
 
-            if (rootRec->m_flags & 0x18) {
+            if (rootRec->m_flags & (WMO_AREA_FLAG_GENERATE_SINGLE_EXTERIOR_MAP | WMO_AREA_FLAG_STORMWIND)) {
                 indoorArea = 1;
             }
         }
@@ -1560,7 +1630,7 @@ int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* positio
         int32_t wmoId;
         int32_t wmoHash;
 
-        if (groupRec && (groupRec->m_flags & 0x20)) {
+        if (groupRec && (groupRec->m_flags & WMO_AREA_FLAG_CHUNK_USES_TERRAIN_FOR_MINIMAP)) {
             inside = 0;
             s_mapObjIndoorArea = 0;
         } else if ((outdoorArea || indoorArea || inside) && World::QueryMapObjIDs(entity, &wmoId, &wmoHash, &groupId)) {
@@ -1571,7 +1641,7 @@ int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* positio
                 SetupMapObjMatrices(entity);
                 MinimapSetMapObjName(entity);
 
-                for (uint32_t i = 0; i < 256; i++) {
+                for (uint32_t i = 0; i < MAX_MINIMAP_TILES; i++) {
                     tiles[i].m_groupId = -1;
                 }
 
@@ -1600,7 +1670,7 @@ int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* positio
 
     indoorChecked:
         if (s_isIndoors != indoor->m_active) {
-            s_updateFlags |= 1;
+            s_updateFlags |= MINIMAP_UPDATE_RELOAD;
             s_isIndoors = indoor->m_active;
             FrameScript_SignalEvent(SCRIPT_EVENT_MINIMAP_UPDATE_ZOOM, nullptr);
         }
@@ -1631,15 +1701,15 @@ int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* positio
             s_indoorBounds.t.y = radius + minY;
             s_indoorBounds.t.z = s_indoorBounds.b.z + half;
 
-            MINIMAPQUADINFO* buffer = static_cast<MINIMAPQUADINFO*>(alloca(256 * sizeof(MINIMAPQUADINFO)));
+            MINIMAPQUADINFO* buffer = static_cast<MINIMAPQUADINFO*>(alloca(MAX_MINIMAP_TILES * sizeof(MINIMAPQUADINFO)));
             TSStackArray<MINIMAPQUADINFO> quads(buffer, 0, 0);
             CAaBox box = s_indoorBounds;
             box.Expand(radius);
-            World::QueryMapObjMinimap(entity, &box, &quads, 256, inside != 0, s_mapObjIndoorArea);
+            World::QueryMapObjMinimap(entity, &box, &quads, MAX_MINIMAP_TILES, inside != 0, s_mapObjIndoorArea);
             C3Vector local = *position * s_mapObjInvMatrix;
 
-            for (uint32_t i = 0; i < 256; i++) {
-                tiles[i].m_flags &= ~2u;
+            for (uint32_t i = 0; i < MAX_MINIMAP_TILES; i++) {
+                tiles[i].m_flags &= ~MINIMAPTILE::FLAGS::IN_USE;
             }
 
             if (quads.m_count) {
@@ -1658,27 +1728,27 @@ int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* positio
                 }
             }
 
-            s_updateFlags = (s_updateFlags & ~1u) | 2;
+            s_updateFlags = (s_updateFlags & ~MINIMAP_UPDATE_RELOAD) | MINIMAP_UPDATE_TEXTURES_PENDING;
         }
 
-        if (s_updateFlags & 2) {
-            for (uint32_t i = 0; i < 256; i++) {
+        if (s_updateFlags & MINIMAP_UPDATE_TEXTURES_PENDING) {
+            for (uint32_t i = 0; i < MAX_MINIMAP_TILES; i++) {
                 uint32_t flags = tiles[i].m_flags;
 
-                if ((flags & 2) && (flags & 4)) {
+                if ((flags & MINIMAPTILE::FLAGS::IN_USE) && (flags & MINIMAPTILE::FLAGS::TEXTURE_PENDING)) {
                     if (tiles[i].m_texture) {
                         if (!TextureGetGxTex(tiles[i].m_texture, 0, nullptr)) {
                             goto texturesPending;
                         }
 
-                        tiles[i].m_flags &= ~4u;
+                        tiles[i].m_flags &= ~MINIMAPTILE::FLAGS::TEXTURE_PENDING;
                     } else {
-                        tiles[i].m_flags = flags & ~2u;
+                        tiles[i].m_flags = flags & ~MINIMAPTILE::FLAGS::IN_USE;
                     }
                 }
             }
 
-            s_updateFlags &= ~2u;
+            s_updateFlags &= ~MINIMAP_UPDATE_TEXTURES_PENDING;
             C3Vector boxCenter;
             boxCenter.x = (s_indoorBounds.t.x + s_indoorBounds.b.x) * 0.5f;
             indoor->m_center.x = boxCenter.x;
@@ -1694,7 +1764,7 @@ int32_t MinimapUpdate(CMapEntity* entity, int32_t mapId, const C3Vector* positio
 
     texturesPending:
         if (!reload && indoor->m_invMatrix != s_mapObjInvMatrix) {
-            bool notPending = !(s_updateFlags & 2);
+            bool notPending = !(s_updateFlags & MINIMAP_UPDATE_TEXTURES_PENDING);
             indoor->m_center.x = indoor->m_center.x + delta.x;
             indoor->m_center.y = delta.y + indoor->m_center.y;
             indoor->m_center.z = delta.z + indoor->m_center.z;
@@ -1746,7 +1816,7 @@ done:
 // VERIFY: 49439d70 manual
 // OFFSET: 0x00581E80
 void CGMinimapFrame::Render() {
-    if (!s_maskTexture || !(this->m_layoutFlags & 0x100) || !s_inWorld) {
+    if (!s_minimapMaskTexture || !(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID) || !s_inWorld) {
         return;
     }
 
@@ -1820,6 +1890,7 @@ void CGMinimapFrame::Render() {
     int32_t updated = MinimapUpdate(worldObject, CGPlayer_C::GetNewContinentID(), &position, &center, &scale, s_tiles, &s_indoor, s_scaleChanged);
 
     if ((updated || s_scaleChanged) && !s_indoor.m_active) {
+        STORM_ASSERT(scale >= 0.0f);  // 12213: "radius >= 0.0f"
         this->UpdateQuads(center, scale);
         s_scaleChanged = 0;
     }
@@ -1832,7 +1903,7 @@ void CGMinimapFrame::Render() {
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_DepthTest, 0);
     GxRsSet(GxRs_DepthWrite, 0);
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
     DayNight::DNInfo* info = DayNight::GetInfo();
@@ -2066,7 +2137,7 @@ void CGMinimapFrame::Render() {
             WOWGUID playerGuid = param.m_player->m_obj->m_guid;
             CGUnitData* unitData = vehicle->m_unit;
 
-            if (unitData->m_unitFieldFlags & 0x1000000) {
+            if (unitData->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) {
                 const WOWGUID& controller = unitData->m_unitFieldCharmedby ? unitData->m_unitFieldCharmedby : unitData->m_unitFieldCreatedby;
 
                 if (playerGuid == controller) {
@@ -2077,26 +2148,26 @@ void CGMinimapFrame::Render() {
 
             VehicleRec* vehicleRec = vehicle->m_vehicle ? vehicle->m_vehicle->m_vehicleRec : nullptr;
 
-            if (!vehicleRec || !(vehicleRec->m_flags & 0x10000000)) {
+            if (!vehicleRec || !(vehicleRec->m_flags & VehicleRec::FLAGS::BATTLEFIELD_VEHICLE)) {
                 continue;
             }
 
             TSGrowableArray<OBJINFO>* list;
 
             switch (vehicleRec->m_uiLocomotionType) {
-                case 0:
-                    list = (vehicle->m_unit->m_unitFieldFlags & 0x1000000) ? &s_objInfo[MINIMAP_VEHICLE_GROUND_OCCUPIED] : &s_objInfo[MINIMAP_VEHICLE_GROUND_UNOCCUPIED];
+                case VEHICLE_UI_LOCOMOTION_DRIVE:
+                    list = (vehicle->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) ? &s_objInfo[MINIMAP_VEHICLE_GROUND_OCCUPIED] : &s_objInfo[MINIMAP_VEHICLE_GROUND_UNOCCUPIED];
                     break;
 
-                case 1:
-                    list = (vehicle->m_unit->m_unitFieldFlags & 0x1000000) ? &s_objInfo[MINIMAP_VEHICLE_AIR_OCCUPIED] : &s_objInfo[MINIMAP_VEHICLE_AIR_UNOCCUPIED];
+                case VEHICLE_UI_LOCOMOTION_FLY:
+                    list = (vehicle->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) ? &s_objInfo[MINIMAP_VEHICLE_AIR_OCCUPIED] : &s_objInfo[MINIMAP_VEHICLE_AIR_UNOCCUPIED];
                     break;
 
-                case 3:
+                case VEHICLE_UI_LOCOMOTION_AIRSHIP_HORDE:
                     list = &s_objInfo[MINIMAP_VEHICLE_AIR_HORDE];
                     break;
 
-                case 4:
+                case VEHICLE_UI_LOCOMOTION_AIRSHIP_ALLIANCE:
                     list = &s_objInfo[MINIMAP_VEHICLE_AIR_ALLIANCE];
                     break;
 
@@ -2142,7 +2213,7 @@ void CGMinimapFrame::Render() {
             info2->m_icon = s_partyMembers[i].m_class;
         }
 
-        for (uint32_t i = 0; i < 40; i++) {
+        for (uint32_t i = 0; i < CGRaidInfo::MAX_RAID_MEMBERS; i++) {
             if (!s_raidMembers[i].m_onMap) {
                 continue;
             }
@@ -2181,7 +2252,7 @@ void CGMinimapFrame::Render() {
 // VERIFY: cabffc62 auto
 // OFFSET: 0x0057BF30
 bool CGMinimapFrame::IsTrackingTrivialQuests() {
-    return CGMinimapFrame::s_trackingInfo && CGMinimapFrame::s_trackingInfo->m_type == 3;
+    return CGMinimapFrame::s_trackingInfo && CGMinimapFrame::s_trackingInfo->m_type == TRACKING_TYPE::TRACKING_TYPE_TRIVIAL_QUESTS;
 }
 
 // VERIFY: 6d24deb9 auto
@@ -2248,12 +2319,14 @@ void CGMinimapFrame::SetPingPosition(const WOWGUID& guid, const C2Vector& positi
 // VERIFY: 7e3ce000 manual
 // OFFSET: 0x0057F7F0
 int32_t CGMinimapFrame::ObjectEnumProc(WOWGUID guid, void* param) {
+    MINIMAPENUMPARAM* info = static_cast<MINIMAPENUMPARAM*>(param);
+    STORM_ASSERT(info);
+
     if (guid == ClntObjMgrGetActivePlayer()) {
         return 1;
     }
 
-    MINIMAPENUMPARAM* data = static_cast<MINIMAPENUMPARAM*>(param);
-    CGPlayer_C* player = data->m_player;
+    CGPlayer_C* player = info->m_player;
     CGObject_C* object = ClntObjMgrObjectPtr(guid, TYPE_OBJECT, __FILE__, __LINE__);
 
     if (!object) {
@@ -2261,9 +2334,9 @@ int32_t CGMinimapFrame::ObjectEnumProc(WOWGUID guid, void* param) {
     }
 
     C3Vector position = object->GetPosition();
-    float centerX = data->m_position.x;
-    float centerY = data->m_position.y;
-    float radius = data->m_radius;
+    float centerX = info->m_position.x;
+    float centerY = info->m_position.y;
+    float radius = info->m_radius;
 
     if (radius * 0.8f * (radius * 0.8f) < (position.x - centerX) * (position.x - centerX) + (position.y - centerY) * (position.y - centerY)) {
         return 1;
@@ -2282,11 +2355,11 @@ int32_t CGMinimapFrame::ObjectEnumProc(WOWGUID guid, void* param) {
         } else {
             uint32_t status = gameObject->m_questStatus;
 
-            if (status == 10) {
+            if (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_10) {
                 type = MINIMAP_QUEST_COMPLETE;
-            } else if (status == 8 || (status == 2 && CGMinimapFrame::IsTrackingTrivialQuests())) {
+            } else if (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_8 || (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_2 && CGMinimapFrame::IsTrackingTrivialQuests())) {
                 type = MINIMAP_QUEST_AVAILABLE;
-            } else if (status == 7 || (status == 4 && CGMinimapFrame::IsTrackingTrivialQuests())) {
+            } else if (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_7 || (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_4 && CGMinimapFrame::IsTrackingTrivialQuests())) {
                 type = MINIMAP_QUEST_REPEATABLE;
             } else {
                 if (!player->CanTrackObject(gameObject)) {
@@ -2316,7 +2389,10 @@ int32_t CGMinimapFrame::ObjectEnumProc(WOWGUID guid, void* param) {
             }
 
             if (unit->IsTracked() && player->CanInteract(unit)) {
-                if (CGMinimapFrame::s_trackingInfo->m_npcFlags & 0x40) {
+                const TrackingTypeInfo* info = CGMinimapFrame::s_trackingInfo;
+                STORM_ASSERT(info);
+
+                if (info->m_npcFlags & UNIT_NPC_FLAGS::UNIT_NPC_FLAG_TRAINER_PROFESSION) {
                     tracked = 1;
                 }
 
@@ -2324,11 +2400,11 @@ int32_t CGMinimapFrame::ObjectEnumProc(WOWGUID guid, void* param) {
             } else {
                 uint32_t status = unit->m_questStatus;
 
-                if (status == 10) {
+                if (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_10) {
                     type = MINIMAP_QUEST_COMPLETE;
-                } else if (status == 8 || (status == 2 && CGMinimapFrame::IsTrackingTrivialQuests())) {
+                } else if (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_8 || (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_2 && CGMinimapFrame::IsTrackingTrivialQuests())) {
                     type = MINIMAP_QUEST_AVAILABLE;
-                } else if (status == 7 || (status == 4 && CGMinimapFrame::IsTrackingTrivialQuests())) {
+                } else if (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_7 || (status == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_4 && CGMinimapFrame::IsTrackingTrivialQuests())) {
                     type = MINIMAP_QUEST_REPEATABLE;
                 } else if (unit->m_interactIconType) {
                     type = MINIMAP_FLIGHTMASTER;
@@ -2367,19 +2443,19 @@ int32_t CGMinimapFrame::ObjectEnumProc(WOWGUID guid, void* param) {
         World::QueryMapObjIDs(object->m_worldObject, &wmoId, &wmoHash, &groupNum);
     }
 
-    if (!data->m_wmoId || (wmoId == data->m_wmoId && wmoHash == data->m_wmoHash)) {
-        OBJINFO* info = s_objInfo[type].New();
+    if (!info->m_wmoId || (wmoId == info->m_wmoId && wmoHash == info->m_wmoHash)) {
+        OBJINFO* objInfo = s_objInfo[type].New();
         C3Vector objectPosition = object->GetPosition();
-        float width = data->m_frame->GetWidth();
-        C2Vector coords = CGMinimapFrame::WorldPosToMinimapFrameCoords(data->m_position, data->m_radius, objectPosition.x, objectPosition.y, data->m_scale, width);
-        info->m_guid = guid;
-        info->m_rotated.x = coords.x;
-        info->m_rotated.y = coords.y;
-        info->m_position.y = coords.y;
-        info->m_position.x = coords.x;
-        info->m_otherFloor = wmoId != data->m_wmoId;
-        info->m_tracked = tracked;
-        info->m_questGiver = questGiver;
+        float width = info->m_frame->GetWidth();
+        C2Vector coords = CGMinimapFrame::WorldPosToMinimapFrameCoords(info->m_position, info->m_radius, objectPosition.x, objectPosition.y, info->m_scale, width);
+        objInfo->m_guid = guid;
+        objInfo->m_rotated.x = coords.x;
+        objInfo->m_rotated.y = coords.y;
+        objInfo->m_position.y = coords.y;
+        objInfo->m_position.x = coords.x;
+        objInfo->m_otherFloor = wmoId != info->m_wmoId;
+        objInfo->m_tracked = tracked;
+        objInfo->m_questGiver = questGiver;
     }
 
     return 1;
@@ -2394,7 +2470,7 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
     CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(guid, TYPE_UNIT, __FILE__, __LINE__));
 
     if (unit) {
-        if (unit->m_vehiclePassenger && unit->m_vehiclePassenger->m_state) {
+        if (unit->IsInVehicle()) {
             for (uint32_t i = 0; i < CGBattlefieldInfo::m_numVehicles; i++) {
                 WOWGUID vehicleGuid = i < CGBattlefieldInfo::m_numVehicles ? CGBattlefieldInfo::m_vehicleGuids[i] : WOWGUID();
                 CGUnit_C* vehicle = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(vehicleGuid, TYPE_UNIT, __FILE__, __LINE__));
@@ -2404,10 +2480,10 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
                 }
 
                 VehicleRec* vehicleRec = vehicle->m_vehicle ? vehicle->m_vehicle->m_vehicleRec : nullptr;
-                bool shown = vehicleRec && (vehicleRec->m_flags & 0x10000000);
+                bool shown = vehicleRec && (vehicleRec->m_flags & VehicleRec::FLAGS::BATTLEFIELD_VEHICLE);
                 CGUnitData* unitData = vehicle->m_unit;
 
-                if (unitData->m_unitFieldFlags & 0x1000000) {
+                if (unitData->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_POSSESSED) {
                     const WOWGUID& controller = unitData->m_unitFieldCharmedby ? unitData->m_unitFieldCharmedby : unitData->m_unitFieldCreatedby;
 
                     if (guid == controller && shown) {
@@ -2422,7 +2498,7 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
         dx = dx - unit->GetPosition().x;
         dy = dy - unit->GetPosition().y;
         position = unit->GetPosition();
-        member->m_class = unit->m_unit->m_unitFieldBytes0[1];
+        member->m_class = unit->m_unit->m_classID;
     } else {
         if (guid == player->m_obj->m_guid) {
             member->m_offMap = 0;
@@ -2430,7 +2506,7 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
             return;
         }
 
-        CGPartyMemberState* state = raid ? CGRaidInfo::GetRemoteStats(guid) : (index < 4 ? CGPartyInfo::GetMemberState(index) : nullptr);
+        CGPartyMemberState* state = raid ? CGRaidInfo::GetRemoteStats(guid) : (index < CGPartyInfo::MAX_PARTY_MEMBERS ? CGPartyInfo::GetMemberState(index) : nullptr);
         int32_t continentId = -1;
 
         if (!state) {
@@ -2445,7 +2521,7 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
             continentId = area->m_continentID;
         }
 
-        if (continentId != CGPlayer_C::GetNewContinentID() || !(state->m_flags & 1) || (state->m_flags & 0x20)) {
+        if (continentId != CGPlayer_C::GetNewContinentID() || !(state->m_flags & CGPartyMemberState::MEMBER_FLAG_CONNECTED) || (state->m_flags & CGPartyMemberState::MEMBER_FLAG_UNKNOWN_5)) {
             member->m_offMap = 0;
             member->m_onMap = 0;
             return;
@@ -2464,7 +2540,7 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
             }
 
             VehicleRec* vehicleRec = vehicle->m_vehicle ? vehicle->m_vehicle->m_vehicleRec : nullptr;
-            bool shown = vehicleRec && (vehicleRec->m_flags & 0x10000000);
+            bool shown = vehicleRec && (vehicleRec->m_flags & VehicleRec::FLAGS::BATTLEFIELD_VEHICLE);
 
             if (vehicle->IsPossessedBy(guid) && shown) {
                 member->m_offMap = 0;
@@ -2490,9 +2566,11 @@ static void SetMemberData(WOWGUID guid, MEMBERINFO* member, CGPlayer_C* player, 
         }
     }
 
-    float range = s_isIndoors ? s_indoorZoomRadius[s_indoorZoom] : static_cast<float>(s_outdoorZoomTiles[s_outdoorZoom]) * 0.5f * 33.333332f;
+    float minimapVisRadius = s_isIndoors ? s_indoorZoomRadius[s_indoorZoom] : static_cast<float>(s_chunksPerSizeAtZoom[s_currentZoom]) * 0.5f * 33.333332f;
 
-    if (std::sqrt(dy * dy + dx * dx) / range <= 0.8f) {
+    STORM_ASSERT(minimapVisRadius > 0.0f);
+
+    if (std::sqrt(dy * dy + dx * dx) / minimapVisRadius <= 0.8f) {
         member->m_offMap = 0;
         member->m_position.x = position.x;
         member->m_onMap = 1;
@@ -2513,7 +2591,7 @@ static void MinimapGetPartyMembers(MEMBERINFO* members) {
         return;
     }
 
-    for (uint32_t i = 0; i < 4; i++) {
+    for (uint32_t i = 0; i < CGPartyInfo::MAX_PARTY_MEMBERS; i++) {
         WOWGUID guid = GetPartyMemberGUID(i);
 
         if (guid) {
@@ -2536,7 +2614,7 @@ static void MinimapGetRaidMembers(MEMBERINFO* members) {
 
     CGRaidMember* self = CGRaidInfo::FindMemberByGuid(player->m_obj->m_guid);
 
-    for (uint32_t i = 0; i < 40; i++) {
+    for (uint32_t i = 0; i < CGRaidInfo::MAX_RAID_MEMBERS; i++) {
         CGRaidMember* raidMember;
 
         if (i < CGRaidInfo::m_numMembers && (raidMember = CGRaidInfo::m_members[i]) != nullptr && self && raidMember->m_guid && raidMember->m_subgroup != self->m_subgroup) {
@@ -2550,28 +2628,29 @@ static void MinimapGetRaidMembers(MEMBERINFO* members) {
 
 // VERIFY: f617bf0f manual
 // OFFSET: 0x007F4B60
-static int32_t MinimapBuildPOIDirectionData(TSGrowableArray<POIDIRECTIONDATA>* directions) {
+static int32_t MinimapBuildPOIDirectionData(TSGrowableArray<POIDIRECTIONDATA>* directionData) {
     if (!s_closestPOIsChanged) {
-        for (uint32_t i = 0; i < s_numClosestPOIs; i++) {
-            directions->m_data[i].m_facing = s_closestPOIFacing[i];
+        STORM_ASSERT(s_numDistantPOI == directionData->Count()); // 12213: "s_numDistantPOI == directionData.Count()"
+        for (uint32_t i = 0; i < s_numDistantPOI; i++) {
+            directionData->m_data[i].m_facing = s_closestPOIFacing[i];
         }
 
         return 0;
     }
 
-    directions->SetCount(s_numClosestPOIs);
+    directionData->SetCount(s_numDistantPOI);
     s_closestPOIsChanged = 0;
 
-    for (uint32_t i = 0; i < s_numClosestPOIs; i++) {
-        POIDIRECTIONDATA* direction = &directions->m_data[i];
+    for (uint32_t i = 0; i < s_numDistantPOI; i++) {
+        POIDIRECTIONDATA* direction = &directionData->m_data[i];
         AreaPOIRec* poi = s_pois.m_data[s_closestPOIs[i]];
         SStrCopy(direction->m_name, poi->m_name, sizeof(direction->m_name));
         direction->m_facing = s_closestPOIFacing[i];
         poi = s_pois.m_data[s_closestPOIs[i]];
-        direction->m_alwaysShow = poi == &s_dynamicPOIs[1] || poi == &s_dynamicPOIs[2] || poi == &s_dynamicPOIs[0] || (poi->m_flags & 0x100);
-        direction->m_dynamicIndex = -2;
+        direction->m_alwaysShow = poi == &s_dynamicPOIs[DYNAMIC_POI_GOSSIP] || poi == &s_dynamicPOIs[DYNAMIC_POI_CORPSE] || poi == &s_dynamicPOIs[DYNAMIC_POI_QUEST] || (poi->m_flags & AREA_POI_FLAG_SHOW_WHEN_INDOORS);
+        direction->m_dynamicIndex = DYNAMIC_POI_NONE;
 
-        for (uint32_t j = 0; j < 4; j++) {
+        for (uint32_t j = 0; j < NUM_DYNAMIC_POIS; j++) {
             if (s_pois.m_data[s_closestPOIs[i]] == &s_dynamicPOIs[j]) {
                 direction->m_dynamicIndex = j;
                 break;
@@ -2600,12 +2679,12 @@ void CGMinimapFrame::RenderOverlay(const C44Matrix& rotation) {
 
         CTexture* texture;
 
-        if (direction->m_dynamicIndex == 2) {
-            texture = s_corpseArrowTexture;
-        } else if (direction->m_dynamicIndex == -2) {
-            texture = s_staticPOIArrowTexture;
+        if (direction->m_dynamicIndex == DYNAMIC_POI_CORPSE) {
+            texture = s_arrowCorpseTexture;
+        } else if (direction->m_dynamicIndex == DYNAMIC_POI_NONE) {
+            texture = s_arrowStaticTexture;
         } else {
-            texture = s_poiArrowTexture;
+            texture = s_arrowPOITexture;
         }
 
         if (!texture) {
@@ -2670,15 +2749,15 @@ void CGMinimapFrame::RenderOverlay(const C44Matrix& rotation) {
 void CGMinimapFrame::LeaveWorld() {
     MinimapShutdown();
 
-    for (uint32_t i = 0; i < 256; i++) {
+    for (uint32_t i = 0; i < MAX_MINIMAP_TILES; i++) {
         if (s_tiles[i].m_texture) {
             HandleClose(reinterpret_cast<HOBJECT>(s_tiles[i].m_texture));
             s_tiles[i].m_texture = nullptr;
         }
 
         s_tiles[i].m_flags = 0;
-        s_tiles[i].m_x = -1;
-        s_tiles[i].m_y = -1;
+        s_tiles[i].m_tileCoords.x = -1;
+        s_tiles[i].m_tileCoords.y = -1;
     }
 
     if (s_indoor.m_texture) {
@@ -2773,7 +2852,7 @@ void CGMinimapFrame::RenderGroupBlips(const C44Matrix& rotation) {
 // VERIFY: a2aea681 manual
 // OFFSET: 0x00580380
 void CGMinimapFrame::RenderObjectBlips(const C44Matrix& rotation, bool otherFloor) {
-    if (!s_blipTexture) {
+    if (!s_objectBlipTexture) {
         return;
     }
 
@@ -2820,7 +2899,7 @@ void CGMinimapFrame::RenderObjectBlips(const C44Matrix& rotation, bool otherFloo
         return;
     }
 
-    CGxTex* gxTex = TextureGetGxTex(s_blipTexture, 0, nullptr);
+    CGxTex* gxTex = TextureGetGxTex(s_objectBlipTexture, 0, nullptr);
 
     if (!gxTex) {
         return;
@@ -2843,7 +2922,7 @@ void CGMinimapFrame::RenderObjectBlips(const C44Matrix& rotation, bool otherFloo
 // OFFSET: 0x00580720
 void CGMinimapFrame::RenderVehicleBlips(const C44Matrix& rotation) {
     for (uint32_t list = MINIMAP_VEHICLE_GROUND_UNOCCUPIED; list < MINIMAP_NUM_TYPES; list++) {
-        CTexture* texture = s_vehicleTextures[list - MINIMAP_VEHICLE_GROUND_UNOCCUPIED];
+        CTexture* texture = s_vehicleBlipTextures[list - MINIMAP_VEHICLE_GROUND_UNOCCUPIED];
 
         if (!s_objInfo[list].m_count || !texture) {
             continue;
@@ -2927,7 +3006,7 @@ void CGMinimapFrame::RenderVehicleBlips(const C44Matrix& rotation) {
 void CGMinimapFrame::RenderPartyBlips(const C44Matrix& rotation) {
     static C3Vector s_normal(0.0f, 0.0f, 1.0f);
 
-    if (!s_groupArrowTexture) {
+    if (!s_arrowPartyTexture) {
         return;
     }
 
@@ -2991,7 +3070,7 @@ void CGMinimapFrame::RenderPartyBlips(const C44Matrix& rotation) {
         return;
     }
 
-    CGxTex* gxTex = TextureGetGxTex(s_groupArrowTexture, 0, nullptr);
+    CGxTex* gxTex = TextureGetGxTex(s_arrowPartyTexture, 0, nullptr);
 
     if (!gxTex) {
         return;
@@ -3011,13 +3090,13 @@ void CGMinimapFrame::RenderPartyBlips(const C44Matrix& rotation) {
 // VERIFY: d41dccb8 manual
 // OFFSET: 0x00580EC0
 void CGMinimapFrame::RenderRaidArrows(const C44Matrix& rotation) {
-    if (!s_groupArrowTexture) {
+    if (!s_arrowPartyTexture) {
         return;
     }
 
     MinimapGetRaidMembers(s_raidMembers);
 
-    for (uint32_t i = 0; i < 40; i++) {
+    for (uint32_t i = 0; i < CGRaidInfo::MAX_RAID_MEMBERS; i++) {
         if (!s_raidMembers[i].m_offMap) {
             continue;
         }
@@ -3075,7 +3154,7 @@ void CGMinimapFrame::RenderRaidArrows(const C44Matrix& rotation) {
         return;
     }
 
-    CGxTex* gxTex = TextureGetGxTex(s_groupArrowTexture, 0, nullptr);
+    CGxTex* gxTex = TextureGetGxTex(s_arrowPartyTexture, 0, nullptr);
 
     if (!gxTex) {
         return;
@@ -3096,10 +3175,10 @@ void CGMinimapFrame::RenderRaidArrows(const C44Matrix& rotation) {
 // VERIFY: b168ac00 manual
 // OFFSET: 0x0057BD10
 void CGMinimapFrame::RenderInsideSortQuads(MINIMAPTILE** head) {
-    for (uint32_t i = 0; i < 256; i++) {
+    for (uint32_t i = 0; i < MAX_MINIMAP_TILES; i++) {
         MINIMAPTILE* tile = &s_tiles[i];
 
-        if (!(tile->m_flags & 2) || !tile->m_texture) {
+        if (!(tile->m_flags & MINIMAPTILE::FLAGS::IN_USE) || !tile->m_texture) {
             continue;
         }
 
@@ -3171,7 +3250,7 @@ void CGMinimapFrame::RenderInsideTexture(const CImVector* color) {
     GxRsSet(GxRs_Fog, 0);
     GxRsSet(GxRs_DepthTest, 0);
     GxRsSet(GxRs_DepthWrite, 0);
-    GxRsSet(GxRs_BlendingMode, 1);
+    GxRsSet(GxRs_BlendingMode, GxBlend_AlphaKey);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
     g_theGxDevicePtr->XformPush(GxXform_World);
@@ -3258,7 +3337,7 @@ void CGMinimapFrame::RenderInside(float scale, const C2Vector* center, const CIm
 
     GxXformSet(GxXform_Tex0, texMatrix);
     GxRsSet(GxRs_TextureShader1, 1);
-    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(s_maskTexture, 1, nullptr));
+    g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(s_minimapMaskTexture, 1, nullptr));
     g_theGxDevicePtr->XformPush(GxXform_Tex1);
     GxXformTranslate(GxXform_Tex1, C3Vector(0.0f, 1.0f, 0.0f));
     GxXformScale(GxXform_Tex1, C3Vector(1.0f, -1.0f, 1.0f));
@@ -3286,7 +3365,7 @@ void CGMinimapFrame::RenderInside(float scale, const C2Vector* center, const CIm
 static int32_t UpdateObjectInteractIcon(WOWGUID guid, void* param) {
     CGObject_C* object = ClntObjMgrObjectPtr(guid, TYPE_OBJECT, __FILE__, __LINE__);
 
-    if (object && (object->m_questStatus == 2 || object->m_questStatus == 3 || object->m_questStatus == 4)) {
+    if (object && (object->m_questStatus == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_2 || object->m_questStatus == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_3 || object->m_questStatus == QUEST_GIVER_STATUS::QUEST_GIVER_UNKNOWN_4)) {
         object->UpdateInteractIcon();
     }
 
@@ -3296,7 +3375,7 @@ static int32_t UpdateObjectInteractIcon(WOWGUID guid, void* param) {
 // VERIFY: b1b39bd3 auto
 // OFFSET: 0x0057E070
 void CGMinimapFrame::LoadTrackingInfo(const TrackingTypeInfo* info) {
-    bool wasQuestTracking = CGMinimapFrame::s_trackingInfo ? CGMinimapFrame::s_trackingInfo->m_type == 3 : false;
+    bool wasQuestTracking = CGMinimapFrame::s_trackingInfo ? CGMinimapFrame::s_trackingInfo->m_type == TRACKING_TYPE::TRACKING_TYPE_TRIVIAL_QUESTS : false;
     CGMinimapFrame::s_trackingInfo = info;
     CVar* var = CVar::Lookup("minimapTrackedInfo");
 
@@ -3308,7 +3387,7 @@ void CGMinimapFrame::LoadTrackingInfo(const TrackingTypeInfo* info) {
         }
     }
 
-    bool isQuestTracking = CGMinimapFrame::s_trackingInfo ? CGMinimapFrame::s_trackingInfo->m_type == 3 : false;
+    bool isQuestTracking = CGMinimapFrame::s_trackingInfo ? CGMinimapFrame::s_trackingInfo->m_type == TRACKING_TYPE::TRACKING_TYPE_TRIVIAL_QUESTS : false;
 
     if (wasQuestTracking != isQuestTracking) {
         ClntObjMgrEnumVisibleObjects(UpdateObjectInteractIcon, nullptr);
@@ -3407,7 +3486,7 @@ int32_t CGMinimapFrame::OnLayerTrackUpdate(const CMouseEvent& evt) {
 
     uint64_t raid = 0;
 
-    for (uint32_t i = 0; i < 40; i++) {
+    for (uint32_t i = 0; i < CGRaidInfo::MAX_RAID_MEMBERS; i++) {
         if (s_raidMembers[i].m_offMap && std::fabs(mouseX - (s_raidArrowPositions[i].x + rect.minX)) < tolerance && std::fabs(mouseY - (s_raidArrowPositions[i].y + rect.minY)) < tolerance) {
             raid |= 1ull << i;
         }
@@ -3490,7 +3569,7 @@ int32_t CGMinimapFrame::OnLayerTrackUpdate(const CMouseEvent& evt) {
     }
 
     if (s_hoverRaid) {
-        for (uint32_t i = 0; i < 40; i++) {
+        for (uint32_t i = 0; i < CGRaidInfo::MAX_RAID_MEMBERS; i++) {
             if (s_hoverRaid & (1ull << i)) {
                 if (!first) {
                     SStrPack(text, "\n", sizeof(text));
@@ -3554,6 +3633,7 @@ int32_t CGMinimapFrame::OnLayerTrackUpdate(const CMouseEvent& evt) {
             }
 
             if (s_objInfo[i][j].m_tracked && object) {
+                STORM_ASSERT(object->IsA(TYPE_UNIT));
                 const char* title = static_cast<CGUnit_C*>(object)->GetUnitTitle();
 
                 if (title) {
@@ -3577,12 +3657,12 @@ int32_t CGMinimapFrame::OnLayerTrackUpdate(const CMouseEvent& evt) {
 // OFFSET: 0x007F3AE0
 void MinimapSetZoom(uint32_t zoom) {
     uint8_t indoors = s_isIndoors;
-    int32_t* current = indoors ? &s_indoorZoom : &s_outdoorZoom;
+    int32_t* current = indoors ? &s_indoorZoom : &s_currentZoom;
     int32_t previous = *current;
     *current = zoom >= 5 ? 5 : zoom;
 
     if (previous != *current) {
-        s_updateFlags |= 0x1;
+        s_updateFlags |= MINIMAP_UPDATE_RELOAD;
         (indoors ? g_minimapInsideZoomCVar : g_minimapZoomCVar)->Set(*current, true, false, false, true);
     }
 }
@@ -3590,7 +3670,7 @@ void MinimapSetZoom(uint32_t zoom) {
 // VERIFY: a04b4793 auto
 // OFFSET: 0x007F3B40
 int32_t MinimapGetZoom() {
-    return s_isIndoors ? s_indoorZoom : s_outdoorZoom;
+    return s_isIndoors ? s_indoorZoom : s_currentZoom;
 }
 
 // VERIFY: 07a4c72b auto
@@ -3616,11 +3696,11 @@ void RefreshWorldStatePOIs(uint32_t state) {
 // VERIFY: ac080634 manual
 // OFFSET: 0x0057BD90
 void CGMinimapFrame::ShutdownGame() {
-    if (s_maskTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_maskTexture));
+    if (s_minimapMaskTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_minimapMaskTexture));
     }
 
-    s_maskTexture = nullptr;
+    s_minimapMaskTexture = nullptr;
 
     if (s_iconTexture) {
         HandleClose(reinterpret_cast<HOBJECT>(s_iconTexture));
@@ -3628,11 +3708,11 @@ void CGMinimapFrame::ShutdownGame() {
 
     s_iconTexture = nullptr;
 
-    if (s_blipTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_blipTexture));
+    if (s_objectBlipTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_objectBlipTexture));
     }
 
-    s_blipTexture = nullptr;
+    s_objectBlipTexture = nullptr;
 
     if (s_classBlipTexture) {
         HandleClose(reinterpret_cast<HOBJECT>(s_classBlipTexture));
@@ -3641,31 +3721,31 @@ void CGMinimapFrame::ShutdownGame() {
     s_classBlipTexture = nullptr;
 
     for (uint32_t i = 0; i < 7; i++) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_vehicleTextures[i]));
-        s_vehicleTextures[i] = nullptr;
+        HandleClose(reinterpret_cast<HOBJECT>(s_vehicleBlipTextures[i]));
+        s_vehicleBlipTextures[i] = nullptr;
     }
 
-    if (s_staticPOIArrowTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_staticPOIArrowTexture));
+    if (s_arrowStaticTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_arrowStaticTexture));
     }
 
-    s_staticPOIArrowTexture = nullptr;
+    s_arrowStaticTexture = nullptr;
 
-    if (s_poiArrowTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_poiArrowTexture));
+    if (s_arrowPOITexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_arrowPOITexture));
     }
 
-    s_poiArrowTexture = nullptr;
+    s_arrowPOITexture = nullptr;
 
-    if (s_corpseArrowTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_corpseArrowTexture));
+    if (s_arrowCorpseTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_arrowCorpseTexture));
     }
 
-    s_corpseArrowTexture = nullptr;
+    s_arrowCorpseTexture = nullptr;
 
-    if (s_groupArrowTexture) {
-        HandleClose(reinterpret_cast<HOBJECT>(s_groupArrowTexture));
+    if (s_arrowPartyTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(s_arrowPartyTexture));
     }
 
-    s_groupArrowTexture = nullptr;
+    s_arrowPartyTexture = nullptr;
 }

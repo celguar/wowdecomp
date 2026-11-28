@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Os/OsURLDownload.h"
 #include "Engine/Source/Storm/H/stpl.h"
@@ -27,6 +28,7 @@ namespace FFX {
 struct MipBits;
 class CSizeEvent;
 class FileDownload;
+enum DOWNLOAD_FAILURE_REASON : int32_t;
 class NetClient;
 struct CVar;
 
@@ -55,7 +57,7 @@ class CGlueMgr {
     static char m_currentScreen[64];
     static CSimpleTop* m_simpleTop;
     static int32_t m_reload;
-    static int32_t m_initialized;
+    static BOOL m_initialized;
     static int32_t m_suspended;
     static int32_t m_disconnectPending;
     static int32_t m_reconnect;
@@ -91,7 +93,7 @@ class CGlueMgr {
     static uint32_t m_pendingTimerAlert;
     static int32_t m_accountMsgAvailable;
     static uint32_t m_numChangedOptionWarnings;
-    static int32_t m_showedDisconnect;
+    static BOOL m_showedDisconnect;
     static Agreements m_latestAgreements;
     static TSGrowableArray<const char*> m_changedOptionWarnings;
     static uint32_t m_surveyTimer;
@@ -141,7 +143,7 @@ class CGlueMgr {
     static bool PatchDownloadExecutePrepatch(SArchive* archive);
     static bool PatchDownloadExtractCommand(SArchive* archive, const char* name);
     static void PatchDownloadFeed(const uint8_t* data, uint32_t size);
-    static void PatchFailed(int32_t reason, uint32_t data);
+    static void PatchFailed(DOWNLOAD_FAILURE_REASON reason, uint32_t data);
     static void QuitGameAndRunLauncher();
     static void SurveyDownloadFeed(const uint8_t* data, uint32_t size);
     static bool DeclineCharacter(WOWGUID guid, const char** names);
@@ -152,7 +154,7 @@ class CGlueMgr {
     static void FactionChange(WOWGUID guid, const CHARACTER_CREATE_INFO* info);
     static WOWGUID GetActive();
     static void GetCharacterList();
-    static void GetRealmList(int32_t showDialog);
+    static void GetRealmList(BOOL showDialog);
     static int32_t HandleBattlenetDisconnect();
     static int32_t NetDisconnectHandler(NetClient* client);
     static void HandleDisplaySizeChanged(const CSizeEvent& event);
@@ -182,6 +184,7 @@ class CGlueMgr {
     static void ResetQueueState();
     static void SetCurrentAccount(const char* accountName);
     static void SetLoginStateAndResult(LOGIN_STATE state, LOGIN_RESULT result, const char* addressString, const char* stateString, const char* resultString, uint16_t flags);
+    static inline void InitCursor();
     static void Resume();
     static void Shutdown();
     static void ScanDLLContinueAnyway();

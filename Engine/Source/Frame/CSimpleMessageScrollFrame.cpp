@@ -47,7 +47,7 @@ int32_t CSimpleMessageScrollFrame::GetObjectType() {
 
 // INLINED
 CSimpleMessageScrollFrameLine::CSimpleMessageScrollFrameLine() {
-    this->m_text = nullptr;
+    this->string = nullptr;
     this->m_color.b = 0xFF;
     this->m_color.g = 0xFF;
     this->m_color.r = 0xFF;
@@ -62,8 +62,8 @@ CSimpleMessageScrollFrameLine::CSimpleMessageScrollFrameLine() {
 
 // INLINED
 CSimpleMessageScrollFrameLine::~CSimpleMessageScrollFrameLine() {
-    if (this->m_text) {
-        SMemFree(this->m_text, __FILE__, __LINE__, 0);
+    if (this->string) {
+        SMemFree(this->string, __FILE__, __LINE__, 0);
     }
 }
 
@@ -156,6 +156,7 @@ int32_t CSimpleMessageScrollFrame::GetNumMessages(int32_t accessID) {
     int32_t index = this->m_currentLine - this->m_numMessages + 1;
 
     for (int32_t i = 0; i < this->m_numMessages; i++, index++) {
+        STORM_ASSERT(static_cast<uint32_t>(i) < static_cast<uint32_t>(this->m_numMessages)); // 12213: "index < (uint)m_numMessages"
         int32_t line = index < 0 ? index + this->m_maxMessages : index;
 
         if (this->m_lines[line].m_accessID == accessID) {
@@ -178,9 +179,9 @@ void CSimpleMessageScrollFrame::UpdateNode(CSimpleMessageScrollFrameDisplayNode*
 
     float height = node->m_string->GetStringHeight();
 
-    if (line->m_text) {
+    if (line->string) {
         node->m_line = line;
-        node->m_string->SetText(line->m_text, 1);
+        node->m_string->SetText(line->string, 1);
         node->m_string->SetVertexColor(line->m_color);
     } else {
         node->m_string->SetText("", 1);
@@ -224,8 +225,10 @@ CSimpleMessageScrollFrameLine* CSimpleMessageScrollFrame::GetMessageInfoByAccess
         int32_t checked = 0;
 
         for (int32_t i = this->m_currentLine - count + 1;; i++) {
+            STORM_ASSERT(static_cast<uint32_t>(checked) < static_cast<uint32_t>(this->m_numMessages)); // 12213: "index < (uint)m_numMessages"
             int32_t lineIndex = i < 0 ? i + this->m_maxMessages : i;
             CSimpleMessageScrollFrameLine* line = &this->m_lines[lineIndex];
+            STORM_ASSERT(line->string); // 12213: "line.string"
 
             if (line->m_accessID == accessID && !index--) {
                 return line;
@@ -259,10 +262,10 @@ CSimpleMessageScrollFrameDisplayNode::CSimpleMessageScrollFrameDisplayNode() {
 
     CSimpleFontStringRecord* string = this->m_string;
     uint32_t styleFlags = string->m_styleFlags;
-    string->m_settableStyleFlags &= ~0x4000u;
+    string->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES;
 
-    if ((styleFlags | 0x4000) != styleFlags) {
-        string->m_styleFlags = styleFlags | 0x4000;
+    if ((styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES) != styleFlags) {
+        string->m_styleFlags = styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES;
 
         if (string->m_string) {
             string->UpdateString();
@@ -288,6 +291,8 @@ CSimpleMessageScrollFrameDisplayNode::~CSimpleMessageScrollFrameDisplayNode() {
 // VERIFY: 3886d5f4 manual
 // OFFSET: 0x009698E0
 void CSimpleMessageScrollFrame::SetMaxLines(int32_t maxLines) {
+    STORM_ASSERT(maxLines > 0);
+
     this->m_lines.Clear();
     this->m_displayNodes.Clear();
     this->m_maxMessages = maxLines;
@@ -455,7 +460,7 @@ void CSimpleMessageScrollFrame::ScrollMessages(int32_t scroll) {
     this->m_currentScroll = scroll;
     this->m_numDisplayed = 0;
 
-    if (this->m_isVisible && !this->IsResizePending()) {
+    if (this->IsVisible() && !this->IsResizePending()) {
         int32_t reset = 0;
 
         if (this->m_currentScroll == this->m_currentLine) {
@@ -499,7 +504,7 @@ void CSimpleMessageScrollFrame::ScrollMessages(int32_t scroll) {
 
                 if (created) {
                     string->SetFrame(this, 2, 1);
-                    string->m_fontableFlags &= ~0x4u;
+                    string->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_COLOR_UPDATE;
                     string->SetFontObject(this->m_font);
                     string->SetWidth((this->m_messageFrameArea.maxX - this->m_messageFrameArea.minX) / this->m_layoutScale);
 
@@ -597,7 +602,7 @@ CSimpleMessageScrollFrame::CSimpleMessageScrollFrame(CSimpleFrame* parent, int32
 // VERIFY: 5b3fe8fd auto
 // OFFSET: 0x0096A4B0
 void CSimpleMessageScrollFrame::FontUpdated(CSimpleFontedFrameFont* font, int32_t flags) {
-    if (flags & 0x11) {
+    if (flags & (FLAG_FONT_UPDATE | FLAG_SPACING_UPDATE)) {
         for (uint32_t i = 0; i < this->m_displayNodes.Count(); i++) {
             this->m_displayNodes[i].m_string->SetFontObject(this->m_font);
         }
@@ -622,12 +627,12 @@ void CSimpleMessageScrollFrame::RemoveLinesByAccessID(int32_t accessID) {
     for (int32_t i = 0; i < this->m_numMessages; i++) {
         if (this->m_lines[src].m_accessID != accessID) {
             if (src != dst) {
-                if (this->m_lines[dst].m_text) {
-                    SMemFree(this->m_lines[dst].m_text, __FILE__, __LINE__, 0);
+                if (this->m_lines[dst].string) {
+                    SMemFree(this->m_lines[dst].string, __FILE__, __LINE__, 0);
                 }
 
                 this->m_lines[dst] = this->m_lines[src];
-                this->m_lines[src].m_text = nullptr;
+                this->m_lines[src].string = nullptr;
             }
 
             kept++;
@@ -685,7 +690,7 @@ void CSimpleMessageScrollFrame::OnScreenSizeChanged() {
 // VERIFY: 3f38cf68 manual
 // OFFSET: 0x0096A760
 void CSimpleMessageScrollFrame::UpdateRect() {
-    if (!(this->m_layoutFlags & 0x100)) {
+    if (!(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID)) {
         return;
     }
 
@@ -874,11 +879,11 @@ void CSimpleMessageScrollFrame::AddMessage(const char* text, const CImVector& co
         return;
     }
 
-    if (line->m_text) {
-        SMemFree(line->m_text, __FILE__, __LINE__, 0);
+    if (line->string) {
+        SMemFree(line->string, __FILE__, __LINE__, 0);
     }
 
-    line->m_text = SStrDupA(text, __FILE__, __LINE__);
+    line->string = SStrDupA(text, __FILE__, __LINE__);
     line->m_color = color;
     line->m_isVisible = 1;
     line->m_timeLeft = this->m_timeVisible;

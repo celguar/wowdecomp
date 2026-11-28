@@ -13,7 +13,7 @@
 #include "Engine/Source/Tempest/CImVector.h"
 
 // STATIC: 0x00D43008
-int32_t CShaderEffect::s_useAlphaRef;
+BOOL CShaderEffect::s_useAlphaRef;
 
 // STATIC: 0x00D4300C
 float CShaderEffect::s_fogMul;
@@ -31,7 +31,7 @@ uint32_t CShaderEffect::s_localLightCount;
 int32_t CShaderEffect::s_lightEnabled;
 
 // STATIC: 0x00D43020
-int32_t CShaderEffect::s_enableShaders;
+BOOL CShaderEffect::s_enableShaders;
 
 // STATIC: 0x00D43024
 CShaderEffect* CShaderEffect::s_curEffect;
@@ -129,6 +129,7 @@ void CShaderEffect::SetUsePcfFiltering(uint32_t usePcfFiltering) {
         CShaderEffect::s_usePcfFiltering = 1;
 
         if (CShaderEffect::s_enableShaders) {
+            STORM_ASSERT(GxCaps().m_rttFormat[GxTex_D24X8]);
             return;
         }
     }
@@ -180,11 +181,11 @@ void CShaderEffect::UpdateProjMatrix() {
 
 // VERIFY: 326b299e auto
 // OFFSET: 0x00872CE0
-void CShaderEffect::InitShaderSystem(int32_t enableShaders, int32_t usePcfFiltering) {
+void CShaderEffect::InitShaderSystem(BOOL enableShaders, BOOL usePcfFiltering) {
     CShaderEffect::s_enableShaders = enableShaders;
     CShaderEffect::SetUsePcfFiltering(usePcfFiltering);
     CShaderEffect::s_fogMul = 1.0f;
-    CShaderEffect::s_useAlphaRef = g_theGxDevicePtr->Caps().m_shaderAlphaRef;
+    CShaderEffect::s_useAlphaRef = GxCaps().m_shaderAlphaRef;
 }
 
 // VERIFY: fd7f8aba manual
@@ -205,7 +206,7 @@ void CShaderEffect::InitEffect(const char* vertexShader, const char* pixelShader
 // VERIFY: 9b6a2325 manual
 // OFFSET: 0x00872DE0
 uint32_t CShaderEffect::SelectShadowShader() {
-    if (!(CShaderEffect::s_fogColorAlphaRef.w > 0.0f) || (g_theGxDevicePtr->Caps().m_shaderAlphaRef && !CShaderEffect::s_shadowValue)) {
+    if (!(CShaderEffect::s_fogColorAlphaRef.w > 0.0f) || (GxCaps().m_shaderAlphaRef && !CShaderEffect::s_shadowValue)) {
         return CShaderEffect::s_shadowValue + 4 * CShaderEffect::s_usePcfFiltering;
     }
 
@@ -262,13 +263,16 @@ void CShaderEffect::SetCurrent() {
 
 // VERIFY: 0344992e manual
 // OFFSET: 0x00873060
-void CShaderEffect::SetShaders(uint32_t vertexPermute, uint32_t pixelPermute) {
-    int32_t useAlphaRef = 1;
+void CShaderEffect::SetShaders(uint32_t vsIndex, uint32_t psIndex) {
+    BOOL useAlphaRef = 1;
 
     if (CShaderEffect::s_enableShaders) {
-        g_theGxDevicePtr->RsSet(GxRs_VertexShader, CShaderEffect::s_curEffect->m_vertexShaders[vertexPermute]);
-        g_theGxDevicePtr->RsSet(GxRs_PixelShader, CShaderEffect::s_curEffect->m_pixelShaders[pixelPermute]);
-        useAlphaRef = (pixelPermute & 8) == 0;
+        STORM_ASSERT(s_curEffect);
+        STORM_ASSERT(vsIndex < VTX_SHADER_PERM_CNT); // 12213: "vsIndex >= 0 && vsIndex < VTX_SHADER_PERM_CNT"
+        STORM_ASSERT(psIndex < PIX_SHADER_PERM_CNT); // 12213: "psIndex >= 0 && psIndex < PIX_SHADER_PERM_CNT"
+        g_theGxDevicePtr->RsSet(GxRs_VertexShader, CShaderEffect::s_curEffect->m_vertexShaders[vsIndex]);
+        g_theGxDevicePtr->RsSet(GxRs_PixelShader, CShaderEffect::s_curEffect->m_pixelShaders[psIndex]);
+        useAlphaRef = (psIndex & 8) == 0;
     }
 
     if (useAlphaRef == CShaderEffect::s_useAlphaRef) {
@@ -303,7 +307,7 @@ void CShaderEffect::SetDefaultShaders(uint32_t lightCount) {
 
 // VERIFY: 71c6c864 manual
 // OFFSET: 0x008731C0
-void CShaderEffect::SetLightingEnabled(int32_t enabled) {
+void CShaderEffect::SetLightingEnabled(BOOL enabled) {
     CShaderEffect::s_lightEnabled = enabled;
 
     if (!CShaderEffect::s_enableShaders) {
@@ -325,7 +329,7 @@ void CShaderEffect::SetFogParams(float start, float end, float density, const CI
         CShaderEffect::s_fogParams.z = density;
         CShaderEffect::s_fogParams.w = 0.0f;
 
-        if (!g_theGxDevicePtr->Caps().unk_0134) {
+        if (!GxCaps().unk_0134) {
             GxShaderConstantsSet(GxSh_Pixel, 2, &CShaderEffect::s_fogColorAlphaRef.x, 1);
             return;
         }
@@ -339,12 +343,12 @@ void CShaderEffect::SetFogParams(float start, float end, float density, const CI
 
 // VERIFY: af8a3952 manual
 // OFFSET: 0x00873390
-void CShaderEffect::SetFogEnabled(int32_t enabled) {
+void CShaderEffect::SetFogEnabled(BOOL enabled) {
     if (enabled && g_theGxDevicePtr->MasterEnable(GxMasterEnable_Fog)) {
         if (CShaderEffect::s_enableShaders) {
             GxShaderConstantsSet(GxSh_Vertex, 30, &CShaderEffect::s_fogParams.x, 1);
 
-            if (!g_theGxDevicePtr->Caps().unk_0138) {
+            if (!GxCaps().unk_0138) {
                 return;
             }
         }
@@ -353,7 +357,7 @@ void CShaderEffect::SetFogEnabled(int32_t enabled) {
         return;
     }
 
-    if (!CShaderEffect::s_enableShaders || g_theGxDevicePtr->Caps().unk_0138) {
+    if (!CShaderEffect::s_enableShaders || GxCaps().unk_0138) {
         GxRsSet(GxRs_Fog, 0);
     } else {
         float fogParams[4] = { 0.0f, 1.0f, 1.0f, 0.0f };
@@ -372,7 +376,7 @@ void CShaderEffect::SetTexMtx_Identity(uint32_t stage) {
 
     GxRsSet(static_cast<EGxRenderState>(GxRs_TextureShader0 + stage), 0);
     g_theGxDevicePtr->m_xforms[stage].Identity();
-    GxRsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + stage), 0);
+    GxRsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + stage), GxTexGen_Disabled);
 }
 
 // VERIFY: ce1f9620 manual
@@ -386,7 +390,7 @@ void CShaderEffect::SetTexMtx_SphereMap(uint32_t stage) {
 
     GxRsSet(static_cast<EGxRenderState>(GxRs_TextureShader0 + stage), 0);
     g_theGxDevicePtr->m_xforms[stage].Identity();
-    GxRsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + stage), 6);
+    GxRsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + stage), GxTexGen_SphereMap);
 }
 
 // VERIFY: d55e347c manual
@@ -400,17 +404,16 @@ void CShaderEffect::SetTexMtx(const C44Matrix& matrix, uint32_t stage) {
 
     GxRsSet(static_cast<EGxRenderState>(GxRs_TextureShader0 + stage), 1);
 
-    CGxMatrixStack& stack = g_theGxDevicePtr->m_xforms[stage];
-    stack.m_dirty = 1;
-    stack.m_flags[stack.m_level] &= ~CGxMatrixStack::F_Identity;
-    stack.m_mtx[stack.m_level] = matrix;
+    GxXformSet(static_cast<EGxXform>(stage), matrix);
 
-    GxRsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + stage), 0);
+    GxRsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + stage), GxTexGen_Disabled);
 }
 
 // VERIFY: 571cb58b manual
 // OFFSET: 0x00873730
 void CShaderEffect::SetTexMtx_TexGen(EGxTexGen texGen, const C44Matrix& matrix, uint32_t stage) {
+    STORM_ASSERT(texGen == GxTexGen_World);
+
     if (CShaderEffect::s_enableShaders) {
         C44Matrix view;
         GxXformView(view);
@@ -436,10 +439,7 @@ void CShaderEffect::SetTexMtx_TexGen(EGxTexGen texGen, const C44Matrix& matrix, 
 
     GxRsSet(static_cast<EGxRenderState>(GxRs_TextureShader0 + stage), 1);
 
-    CGxMatrixStack& stack = g_theGxDevicePtr->m_xforms[stage];
-    stack.m_dirty = 1;
-    stack.m_flags[stack.m_level] &= ~CGxMatrixStack::F_Identity;
-    stack.m_mtx[stack.m_level] = matrix;
+    GxXformSet(static_cast<EGxXform>(stage), matrix);
 
     GxRsSet(static_cast<EGxRenderState>(GxRs_TexGen0 + stage), GxTexGen_World);
 }
@@ -528,7 +528,7 @@ CShaderEffect::~CShaderEffect() {
 
 // VERIFY: 17775013 manual
 // OFFSET: 0x00873CA0
-void CShaderEffect::SetLocalLighting(CM2Lighting* lighting, int32_t enabled, const C3Vector* origin) {
+void CShaderEffect::SetLocalLighting(CM2Lighting* lighting, BOOL enabled, const C3Vector* origin) {
     CShaderEffect::s_lightEnabled = enabled;
 
     if (!CShaderEffect::s_enableShaders) {
@@ -594,7 +594,7 @@ void CShaderEffect::SetLocalLighting(CM2Lighting* lighting, int32_t enabled, con
         GxShaderConstantsSet(GxSh_Vertex, 17, reinterpret_cast<const float*>(&CShaderEffect::s_localLights), sizeof(LocalLights) / sizeof(C4Vector));
     }
 
-    CShadowCache::SetShadowMapGenericInterior(lighting->m_flags & 8);
+    CShadowCache::SetShadowMapGenericInterior(lighting->m_flags & CM2Lighting::INTERIOR);
 }
 
 // VERIFY: fd00dfa0 manual

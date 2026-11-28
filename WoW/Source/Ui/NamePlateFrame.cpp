@@ -1,4 +1,7 @@
 #include "NamePlateFrame.h"
+#include "Engine/Source/Tempest/Color.h"
+#include "WoW/Source/Object/CreatureStats.h"
+#include "WoW/Common/Types.h"
 #include <new>
 #include <typeinfo>
 #include "Engine/Source/Frame/CSimpleRender.h"
@@ -25,33 +28,33 @@
 static int32_t s_greenLevelRanges[20] = { 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8 };
 
 // STATIC: 0x00B2DA0C
-static CImVector s_friendlyPlayerColor = CImVector(0xFF, 0x00, 0x00, 0xFF);
+static CImVector s_friendlyPlayerColor = CImVector(COLOR_BLUE_BGRA);
 
 // STATIC: 0x00B2DA10
-static CImVector s_friendlyColor = CImVector(0x00, 0xFF, 0x00, 0xFF);
+static CImVector s_friendlyColor = CImVector(COLOR_GREEN_BGRA);
 
 // STATIC: 0x00B2DA14
-static CImVector s_neutralColor = CImVector(0x00, 0xFF, 0xFF, 0xFF);
+static CImVector s_neutralColor = CImVector(COLOR_YELLOW_BGRA);
 
 // STATIC: 0x00B2DA18
-static CImVector s_hostileColor = CImVector(0x00, 0x00, 0xFF, 0xFF);
+static CImVector s_hostileColor = CImVector(COLOR_RED_BGRA);
 
 // STATIC: 0x00B2DA1C
-static CImVector s_levelTextColor = CImVector(0xFF, 0xFF, 0xFF, 0xFF);
+static CImVector s_levelTextColor = CImVector(COLOR_WHITE_BGRA);
 
 // STATIC: 0x00B2DA20
-static CImVector s_classColors[12] = {
-    CImVector(0x00, 0x00, 0x00, 0xFF),
+static CImVector s_classColors[NUM_CLASSES + 1] = {
+    CImVector(COLOR_BLACK_BGRA),
     CImVector(0x6D, 0x9B, 0xC6, 0xFF),
     CImVector(0xBA, 0x8C, 0xF4, 0xFF),
     CImVector(0x72, 0xD3, 0xAA, 0xFF),
     CImVector(0x68, 0xF4, 0xFF, 0xFF),
-    CImVector(0xFF, 0xFF, 0xFF, 0xFF),
+    CImVector(COLOR_WHITE_BGRA),
     CImVector(0x3A, 0x1E, 0xC4, 0xFF),
     CImVector(0xDD, 0x70, 0x00, 0xFF),
     CImVector(0xEF, 0xCC, 0x68, 0xFF),
     CImVector(0xC9, 0x82, 0x93, 0xFF),
-    CImVector(0x00, 0x00, 0x00, 0xFF),
+    CImVector(COLOR_BLACK_BGRA),
     CImVector(0x0A, 0x7C, 0xFF, 0xFF),
 };
 
@@ -101,9 +104,9 @@ static const CImVector* GetDifficultyColor(int32_t level, int32_t playerLevel) {
     static CImVector s_difficultyColors[5] = {
         CImVector(0x19, 0x19, 0xFF, 0xFF),
         CImVector(0x3F, 0x7F, 0xFF, 0xFF),
-        CImVector(0x00, 0xFF, 0xFF, 0xFF),
+        CImVector(COLOR_YELLOW_BGRA),
         CImVector(0x3F, 0xB2, 0x3F, 0xFF),
-        CImVector(0x7F, 0x7F, 0x7F, 0xFF),
+        CImVector(COLOR_GRAY_127_BGRA),
     };
 
     int32_t diff = level - playerLevel;
@@ -134,7 +137,7 @@ static const CImVector* GetDifficultyColor(int32_t level, int32_t playerLevel) {
 void CGNamePlateFrame::UpdateEliteIcon(CGUnit_C* unit) {
     uint32_t classification = unit->GetCreatureClassification();
 
-    if (unit->IsBossMob() || classification == 2 || classification == 1) {
+    if (unit->IsBossMob() || classification == CREATURE_CLASSIFICATION_RARE_ELITE || classification == CREATURE_CLASSIFICATION_ELITE) {
         this->m_eliteNameplateIcon->m_shown = 1;
         this->m_eliteNameplateIcon->ShowThis();
     } else {
@@ -146,7 +149,7 @@ void CGNamePlateFrame::UpdateEliteIcon(CGUnit_C* unit) {
 // VERIFY: 52ce0620 manual
 // OFFSET: 0x0098E740
 void CGNamePlateFrame::UpdateRaidTargetDisplay(uint32_t raidTarget) {
-    if (raidTarget < 8) {
+    if (raidTarget < CGRaidInfo::NUM_RAID_ICONS) {
         float left = static_cast<int32_t>(raidTarget & 3) * 0.25f;
         float top = static_cast<int32_t>(raidTarget >> 2) * 0.25f;
 
@@ -192,7 +195,7 @@ static int32_t GetAdjustedLevel(CGPlayer_C* player, CGUnit_C* unit) {
         return level;
     }
 
-    if (!player->m_player->m_playerBytes3[1] && !player->m_player->m_playerFakeInebriation) {
+    if (!player->m_player->inebriation && !player->m_player->m_playerFakeInebriation) {
         return level;
     }
 
@@ -324,13 +327,13 @@ void CGNamePlateFrame::OnLayerUpdate(float elapsedSec) {
     }
 
     CSimpleStatusBar* castBar = this->m_castBar;
-    float value = castBar->m_value;
+    float value = castBar->GetValue();
 
     if (this->m_channeling) {
         value -= elapsedSec;
 
-        if (value < castBar->m_minValue) {
-            value = castBar->m_minValue;
+        if (value < castBar->GetMinValue()) {
+            value = castBar->GetMinValue();
             this->m_castHoldTime = 0.0f;
             this->m_castFadeTime = 1.0f;
             color.Set(1.0f, 0.0f, 1.0f, 0.0f);
@@ -340,8 +343,8 @@ void CGNamePlateFrame::OnLayerUpdate(float elapsedSec) {
     } else {
         value += elapsedSec;
 
-        if (value > castBar->m_maxValue) {
-            value = castBar->m_maxValue;
+        if (value > castBar->GetMaxValue()) {
+            value = castBar->GetMaxValue();
             this->m_castHoldTime = 0.0f;
             this->m_castFadeTime = 1.0f;
             color.Set(1.0f, 0.0f, 1.0f, 0.0f);
@@ -358,9 +361,9 @@ void CGNamePlateFrame::OnLayerUpdate(float elapsedSec) {
 void CGNamePlateFrame::UpdateColorDisplay(CGUnit_C* unit) {
     CGUnit_C* player = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (g_ShowClassColorInNameplateCVar->m_intValue && (unit->m_obj->m_type & TYPE_PLAYER) && unit->UnitReaction(player) <= UNIT_REACTION_HOSTILE) {
-        this->m_healthBarColor = s_classColors[unit->m_unit->m_unitFieldBytes0[1]];
-    } else if (unit->UnitReaction(player) <= UNIT_REACTION_HOSTILE) {
+    if (g_ShowClassColorInNameplateCVar->m_intValue && (unit->m_obj->m_type & TYPE_PLAYER) && unit->IsHatedTowards(player)) {
+        this->m_healthBarColor = s_classColors[unit->m_unit->m_classID];
+    } else if (unit->IsHatedTowards(player)) {
         this->m_healthBarColor = s_hostileColor;
     } else if (unit->m_obj->m_type & TYPE_PLAYER) {
         this->m_healthBarColor = s_friendlyPlayerColor;
@@ -384,7 +387,7 @@ void CGNamePlateFrame::UpdateLevelDisplay(CGUnit_C* unit) {
 
     int32_t level = GetAdjustedLevel(player, unit);
 
-    if (unit->IsBossMob() || ((unit->UnitReaction(player) > UNIT_REACTION_HOSTILE || !CGPlayer_C::UnitIsTrivial(unit)) && unit->UnitReaction(player) <= UNIT_REACTION_HOSTILE && static_cast<int32_t>(player->m_unit->m_unitFieldLevel) <= level - 10)) {
+    if (unit->IsBossMob() || ((unit->UnitReaction(player) > UNIT_REACTION_HOSTILE || !CGPlayer_C::UnitIsTrivial(unit)) && unit->IsHatedTowards(player) && static_cast<int32_t>(player->m_unit->m_unitFieldLevel) <= level - 10)) {
         this->m_levelText->m_shown = 0;
         this->m_levelText->HideThis();
         this->m_targetingFrameSkull->m_shown = 1;
@@ -420,7 +423,7 @@ void CGNamePlateFrame::SetCastBarValues(float minValue, float maxValue, float va
 
     SpellRec spellRec;
 
-    if (!spellId || !g_spellDB.GetRecord(spellId, &spellRec) || (spellRec.m_attributes & 0x20)) {
+    if (!spellId || !g_spellDB.GetRecord(spellId, &spellRec) || (spellRec.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL)) {
         this->HideCastBar();
         return;
     }
@@ -480,7 +483,7 @@ void CGNamePlateFrame::SetCastBarValues(float minValue, float maxValue, float va
 // OFFSET: 0x0098F390
 void CGNamePlateFrame::Initialize(CGUnit_C* unit) {
     this->m_guid = unit->m_obj->m_guid;
-    this->m_unitNameText->SetVertexColor(CImVector(0xFF, 0xFF, 0xFF, 0xFF));
+    this->m_unitNameText->SetVertexColor(CImVector(COLOR_WHITE_BGRA));
     this->SetWidth(s_namePlateWidth);
     this->SetHeight(s_namePlateHeight);
 
@@ -527,7 +530,7 @@ void CGNamePlateFrame::Initialize(CGUnit_C* unit) {
 // OFFSET: 0x0098F790
 CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent), m_damageFeedbackTime(0) {
     this->SetProtected();
-    this->SetFrameFlag(0x40000, 1);
+    this->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_HIDE_SCRIPT_DEPTH, 1);
     this->m_guid.m_guid = 0;
     this->m_namePlateGlow = nullptr;
     this->m_targetingFrameSkull = nullptr;
@@ -551,7 +554,7 @@ CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent),
     this->m_casting = 0;
     this->m_channeling = 0;
 
-    void* flashData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* flashData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     this->m_targetingFrameFlash = flashData ? new (flashData) CSimpleTexture(this, 0, 1) : nullptr;
     this->m_targetingFrameFlash->SetBlendMode(GxBlend_Alpha);
     this->m_targetingFrameFlash->SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Flash", 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
@@ -564,7 +567,7 @@ CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent),
     texCoords.maxY = 0.6f;
     this->m_targetingFrameFlash->SetTexCoord(texCoords);
 
-    void* borderData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* borderData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     CSimpleTexture* healthBorder = borderData ? new (borderData) CSimpleTexture(this, 2, 1) : nullptr;
     healthBorder->SetAllPoints(this, 1);
     healthBorder->SetTexture("Interface\\Tooltips\\Nameplate-Border", 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
@@ -573,10 +576,10 @@ CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent),
     void* healthData = CGSimpleHealthBar::s_simpleHealthBarHeap.GetData(0, typeid(CGSimpleHealthBar).raw_name(), SLOG_OBJECT);
     this->m_healthBar = healthData ? new (healthData) CGSimpleHealthBar(this) : nullptr;
     this->m_healthBar->SetBarTexture("Interface\\TargetingFrame\\UI-TargetingFrame-BarFill", 2);
-    this->m_healthBar->SetFrameFlag(0x40000, 1);
+    this->m_healthBar->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_HIDE_SCRIPT_DEPTH, 1);
     this->m_healthBar->SetFrameLevel(this->m_level - 1, 1);
 
-    void* castBorderData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* castBorderData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     this->m_castBarBorder = castBorderData ? new (castBorderData) CSimpleTexture(this, 2, 1) : nullptr;
     this->m_castBarBorder->SetTexture("Interface\\Tooltips\\Nameplate-Border", 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
     texCoords.minX = 1.0f;
@@ -586,7 +589,7 @@ CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent),
     this->m_castBarBorder->SetTexCoord(texCoords);
     this->m_castBarBorder->SetBlendMode(GxBlend_Alpha);
 
-    void* shieldData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* shieldData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     this->m_castBarShield = shieldData ? new (shieldData) CSimpleTexture(this, 2, 1) : nullptr;
     this->m_castBarShield->SetTexture("Interface\\Tooltips\\Nameplate-CastBar-Shield", 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
     this->m_castBarShield->SetBlendMode(GxBlend_Alpha);
@@ -594,15 +597,15 @@ CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent),
     void* castBarData = CSimpleStatusBar::s_allocator.GetData(0, typeid(CSimpleStatusBar).raw_name(), SLOG_OBJECT);
     this->m_castBar = castBarData ? new (castBarData) CSimpleStatusBar(this) : nullptr;
     this->m_castBar->SetBarTexture("Interface\\TargetingFrame\\UI-TargetingFrame-BarFill", 2);
-    this->m_castBar->SetFrameFlag(0x40000, 1);
+    this->m_castBar->SetFrameFlag(CSimpleFrame::FrameFlags::FRAME_HIDE_SCRIPT_DEPTH, 1);
     this->m_castBar->SetFrameLevel(this->m_level - 1, 1);
 
-    void* iconData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* iconData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     this->m_castBarIcon = iconData ? new (iconData) CSimpleTexture(this, 3, 1) : nullptr;
     this->m_castBarIcon->SetWidth(0.01f);
     this->m_castBarIcon->SetHeight(0.01f);
 
-    void* glowData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* glowData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     this->m_namePlateGlow = glowData ? new (glowData) CSimpleTexture(this, 4, 1) : nullptr;
     this->m_namePlateGlow->SetBlendMode(GxBlend_Add);
     this->m_namePlateGlow->SetTexture("Interface\\Tooltips\\Nameplate-Glow", 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
@@ -610,21 +613,21 @@ CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent),
     this->m_namePlateGlow->m_shown = 0;
     this->m_namePlateGlow->HideThis();
 
-    void* nameData = CSimpleFontString::s_allocator.GetData(0, typeid(CSimpleFontString).raw_name(), SLOG_OBJECT);
+    void* nameData = CSimpleFontString::Allocate(sizeof(CSimpleFontString));
     this->m_unitNameText = nameData ? new (nameData) CSimpleFontString(this, 2, 1) : nullptr;
     this->m_unitNameText->SetFont(FrameScript_GetText("NAMEPLATE_FONT", -1, GENDER_NOT_APPLICABLE), 0.01f, 0, false);
-    this->m_unitNameText->AddShadow(CImVector(0x00, 0x00, 0x00, 0xFF), C2Vector(0.001f, -0.001f));
+    this->m_unitNameText->AddShadow(CImVector(COLOR_BLACK_BGRA), C2Vector(0.001f, -0.001f));
     this->m_unitNameText->SetFrame(this, 3, 1);
     this->m_unitNameText->SetPoint(FRAMEPOINT_BOTTOM, this, FRAMEPOINT_CENTER, 0.0f, 0.0f, 1);
 
-    void* levelData = CSimpleFontString::s_allocator.GetData(0, typeid(CSimpleFontString).raw_name(), SLOG_OBJECT);
+    void* levelData = CSimpleFontString::Allocate(sizeof(CSimpleFontString));
     this->m_levelText = levelData ? new (levelData) CSimpleFontString(this, 2, 1) : nullptr;
     this->m_levelText->SetFont(FrameScript_GetText("NAMEPLATE_FONT", -1, GENDER_NOT_APPLICABLE), 0.009f, 0, false);
     this->m_levelText->SetVertexColor(s_levelTextColor);
-    this->m_levelText->AddShadow(CImVector(0x00, 0x00, 0x00, 0xFF), C2Vector(0.001f, -0.001f));
+    this->m_levelText->AddShadow(CImVector(COLOR_BLACK_BGRA), C2Vector(0.001f, -0.001f));
     this->m_levelText->SetFrame(this, 3, 1);
 
-    void* skullData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* skullData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     this->m_targetingFrameSkull = skullData ? new (skullData) CSimpleTexture(this, 3, 1) : nullptr;
     this->m_targetingFrameSkull->SetBlendMode(GxBlend_Alpha);
     this->m_targetingFrameSkull->SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull", 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
@@ -632,7 +635,7 @@ CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent),
     this->m_targetingFrameSkull->SetHeight(0.01f);
     this->m_targetingFrameSkull->SetPoint(FRAMEPOINT_CENTER, this->m_levelText, FRAMEPOINT_CENTER, 0.0f, 0.0f, 1);
 
-    void* raidData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* raidData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     this->m_raidTargetingIcon = raidData ? new (raidData) CSimpleTexture(this, 2, 1) : nullptr;
     this->m_raidTargetingIcon->SetBlendMode(GxBlend_Alpha);
     this->m_raidTargetingIcon->SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons", 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
@@ -640,7 +643,7 @@ CGNamePlateFrame::CGNamePlateFrame(CSimpleFrame* parent) : CSimpleFrame(parent),
     this->m_raidTargetingIcon->SetHeight(0.02f);
     this->m_raidTargetingIcon->SetPoint(FRAMEPOINT_RIGHT, healthBorder, FRAMEPOINT_LEFT, 0.0f, 0.0f, 1);
 
-    void* eliteData = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* eliteData = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     this->m_eliteNameplateIcon = eliteData ? new (eliteData) CSimpleTexture(this, 1, 1) : nullptr;
     this->m_eliteNameplateIcon->SetTexture("Interface\\Tooltips\\EliteNameplateIcon", 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
     this->m_eliteNameplateIcon->SetWidth(0.0294f);

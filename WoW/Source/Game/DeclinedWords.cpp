@@ -26,9 +26,9 @@ void DeclinedWordsInitialize() {
     g_declinedWordDB.Load(__FILE__, __LINE__);
     g_declinedWordCasesDB.Load(__FILE__, __LINE__);
     int32_t caseIndex = 0;
-    DeclinedWordCasesRec* cases = g_declinedWordCasesDB.m_numRecords <= 0 ? nullptr : g_declinedWordCasesDB.m_records;
+    DeclinedWordCasesRec* cases = g_declinedWordCasesDB.GetNumRecords() <= 0 ? nullptr : g_declinedWordCasesDB.m_records;
 
-    for (int32_t i = 0; i < g_declinedWordDB.m_numRecords; i++) {
+    for (int32_t i = 0; i < g_declinedWordDB.GetNumRecords(); i++) {
         DeclinedWordRec* word = g_declinedWordDB.GetRecordByIndex(i);
 
         if (!cases) {
@@ -131,9 +131,9 @@ int32_t GetDeclinedWord(const char* word, int32_t declension, char* buffer, uint
             }
         }
 
-        char declensions[5][1024];
+        char declensions[NUM_DECLENSIONS][1024];
 
-        if (index <= 4 && GetNameDeclensions(s_locale, declensions[0], word, 2, 0)) {
+        if (index < NUM_DECLENSIONS && GetNameDeclensions(s_locale, declensions[0], word, 2, 0)) {
             return SStrCopy(buffer, declensions[index], bufferSize);
         }
 

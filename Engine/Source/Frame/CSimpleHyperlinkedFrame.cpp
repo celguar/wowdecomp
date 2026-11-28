@@ -25,7 +25,7 @@ void CSimpleHyperlinkButton::OnLayerCursorEnter(int32_t motion) {
 
 // VERIFY: e8af4768 auto
 // OFFSET: 0x00978570
-void CSimpleHyperlinkButton::OnLayerCursorExit(int32_t motion, int32_t a3) {
+void CSimpleHyperlinkButton::OnLayerCursorExit(int32_t motion, BOOL releaseMouse) {
     static_cast<CSimpleHyperlinkedFrame*>(this->m_parent)->OnHyperlinkLeave(this->m_linkData, this->m_linkText);
 }
 
@@ -59,15 +59,15 @@ void CSimpleHyperlinkButton::SetHyperlink(CSimpleFontString* fontString, const G
     float x = 0.0f;
     FRAMEPOINT point = FRAMEPOINT_TOPLEFT;
 
-    switch (fontString->m_styleFlags & 0x7) {
-        case 1:
+    switch (fontString->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK) {
+        case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_LEFT:
             x = left;
             break;
-        case 2:
+        case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_CENTER:
             point = FRAMEPOINT_TOP;
             x = left + (right - left) * 0.5f;
             break;
-        case 4:
+        case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_RIGHT:
             point = FRAMEPOINT_TOPRIGHT;
             x = right;
             break;

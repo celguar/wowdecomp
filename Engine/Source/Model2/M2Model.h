@@ -3,6 +3,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
+#include "Engine/Source/Model2/Types.h"
+#include "Engine/Source/Gx/CGxVertexPNT0.h"
+#include "Engine/Source/Model2/Attachment.h"
 #include <cstring>
 #include "Engine/Source/Model2/M2Light.h"
 #include "Engine/Source/Model2/M2Shared.h"
@@ -49,6 +53,55 @@ class M2ModelParticle;
 class M2ModelRibbon;
 class M2ModelTextureTransform;
 
+// Inferred names: key bone ID of a bone with no key bone (as a bone argument it addresses
+// the root bone sequence), and the sequence variation that picks a random variation.
+static const uint32_t M2_KEY_BONE_NONE = 0xFFFFFFFF;
+static const uint32_t M2_RANDOM_VARIATION = 0xFFFFFFFF;
+
+// M2 key bone IDs (M2CompBone::m_boneId and boneId arguments). Bones named after a $ model
+// marker use that marker's M2_EVENT_ID name; $CHD has no event name here.
+enum KEY_BONE_ID : uint32_t {
+    KEY_BONE_ARM_L = 0,
+    KEY_BONE_ARM_R = 1,
+    KEY_BONE_SHOULDER_L = 2,
+    KEY_BONE_SHOULDER_R = 3,
+    KEY_BONE_SPINE_LOW = 4, // "Upper Body" in anim kits; Head is used when absent.
+    KEY_BONE_WAIST = 5,
+    KEY_BONE_HEAD = 6,
+    KEY_BONE_JAW = 7,
+    KEY_BONE_INDEX_FINGER_R = 8,
+    KEY_BONE_MIDDLE_FINGER_R = 9,
+    KEY_BONE_PINKY_FINGER_R = 10,
+    KEY_BONE_RING_FINGER_R = 11,
+    KEY_BONE_THUMB_R = 12,
+    KEY_BONE_INDEX_FINGER_L = 13,
+    KEY_BONE_MIDDLE_FINGER_L = 14,
+    KEY_BONE_PINKY_FINGER_L = 15,
+    KEY_BONE_RING_FINGER_L = 16,
+    KEY_BONE_THUMB_L = 17,
+    KEY_BONE_EVENT_BREATH = 18, // $BTH
+    KEY_BONE_EVENT_MISSILE_RELEASE_RIGHT = 19, // $CSR
+    KEY_BONE_EVENT_MISSILE_RELEASE_LEFT = 20, // $CSL
+    KEY_BONE_BREATH = 21, // _Breath
+    KEY_BONE_NAME = 22, // _Name
+    KEY_BONE_NAME_MOUNT = 23, // _NameMount
+    KEY_BONE_EVENT_CHD = 24, // $CHD
+    KEY_BONE_EVENT_FISHING_POLE = 25, // $CCH
+    KEY_BONE_ROOT = 26,
+    KEY_BONE_WHEEL1 = 27,
+    KEY_BONE_WHEEL2 = 28,
+    KEY_BONE_WHEEL3 = 29,
+    KEY_BONE_WHEEL4 = 30,
+    KEY_BONE_WHEEL5 = 31,
+    KEY_BONE_WHEEL6 = 32,
+    KEY_BONE_WHEEL7 = 33,
+    KEY_BONE_WHEEL8 = 34,
+    NUM_KEY_BONES = 35,
+};
+
+// Vehicle wheel key bones KEY_BONE_WHEEL1..KEY_BONE_WHEEL8.
+constexpr int32_t NUM_WHEEL_KEY_BONES = KEY_BONE_WHEEL8 - KEY_BONE_WHEEL1 + 1;
+
 typedef void (*M2EventCallback)(CM2Model* model, uint32_t boneId, uint32_t eventId, uint32_t data, const C3Vector* position, uint32_t time, uint64_t param);
 typedef void (*M2SequenceCallback)(CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time, uint64_t param);
 
@@ -76,13 +129,18 @@ class SModelBatchLessThan {
 
 class M2ModelCallback {
     public:
-    /* 0000 */ uint32_t m_type;
+    enum TYPE : uint32_t {
+        SEQUENCE = 0,
+        EVENT = 1,
+    };
+
+    /* 0000 */ TYPE m_type; // Selects M2SequenceCallback or M2EventCallback.
     /* 0004 */ CM2Model* m_model;
     /* 0008 */ uint32_t m_boneId;
     /* 000C */ void* m_callback;
     /* 0010 */ uint32_t m_id;
     /* 0014 */ uint32_t m_value;
-    /* 0018 */ uint32_t m_args [3];
+    /* 0018 */ uint32_t m_args [3]; // Sequence: index/start time in the first two words; event: world-position float bits.
     /* 0024 */ uint32_t m_time;
     /* 0028 */ uint64_t m_param;
 };
@@ -135,11 +193,31 @@ class M2ModelOptGeo {
 
 class CM2Model {
     public:
+    // SetWorldTransform resolves this sentinel from the model file options.
+    static const uint32_t USE_MODEL_ALIGNMENT = 0xFFFFFFFFu;
+
+    enum INSTANCE_FLAGS : uint32_t {
+        // Instance interpretation of raw creation flags; names describe current behavior.
+        // Bit 1 also makes attached children use their own lighting and scale.
+        INSTANCE_DISABLE_DEPTH_SORT_AND_CHILD_INHERITANCE = 0x1,
+        // Skip the shared-load callback; initialize when an instance consumer needs it.
+        INSTANCE_INITIALIZE_ON_DEMAND = 0x20,
+    };
+
+    // Geometry a model is tested against once linked into CM2Scene's hit-test list.
+    enum HIT_TEST_MODE : uint32_t {
+        HIT_TEST_RENDER = 0, // All hit-testable render batches.
+        HIT_TEST_OPAQUE = 1, // Skips blended materials without M2Material::HIT_TEST_NON_OPAQUE.
+        HIT_TEST_NON_OPAQUE = 2, // Skips opaque materials.
+        HIT_TEST_COLLISION = 3, // Collision bounds and collision mesh.
+        HIT_TEST_UNKNOWN_4 = 4, // Set by CGWorldFrame for HIT_TEST_UNKNOWN_8000000; no reader distinguishes it from HIT_TEST_RENDER.
+    };
+
     /* 0000 */ uint32_t m_refCount;
-    /* 0004 */ uint32_t m_flags;
+    /* 0004 */ uint32_t m_creationFlags;
     /* 0008 */ CM2Model** m_scenePrev;
     /* 000C */ CM2Model* m_sceneNext;
-    /* 0010 */ uint32_t m_fFlags;
+    /* 0010 */ uint32_t m_runtimeFlags;
     /* 0014 */ uint16_t m_animListHead;
     /* 0016 */ uint16_t unused_0016;
     /* 0018 */ CM2Model** m_callbackPrev;
@@ -166,7 +244,7 @@ class CM2Model {
     /* 006C */ CM2Model* m_drawNext;
     /* 0070 */ int32_t* m_loops;
     /* 0074 */ uint32_t m_loopOrigin;
-    /* 0078 */ void* m_sequenceCallback;
+    /* 0078 */ M2SequenceCallback m_sequenceCallback;
     /* 007C */ uint32_t unused_007C;
     /* 0080 */ uint64_t m_sequenceCallbackParam;
     /* 0088 */ float m_scaleSq;
@@ -183,7 +261,7 @@ class CM2Model {
     /* 00B4 */ C44Matrix m_worldTransform;
     /* 00F4 */ C44Matrix m_matrixF4;
     /* 0134 */ C44Matrix m_frameOfReferenceMatrix;
-    /* 0174 */ void* m_frameOfReference;
+    /* 0174 */ const C44Matrix* m_frameOfReference; // Borrowed frame matrix, shared with attached models and read by emitters.
     /* 0178 */ float m_fadeAlpha;
     /* 017C */ float m_baseAlpha;
     /* 0180 */ float m_diffuseTintR;
@@ -199,7 +277,7 @@ class CM2Model {
     /* 01B8 */ float unk_01B8;
     /* 01BC */ void (*m_drawCallback)(CM2Model*, const CM2Lighting*, void*);
     /* 01C0 */ void* m_drawArg;
-    /* 01C4 */ void* m_eventCallback;
+    /* 01C4 */ M2EventCallback m_eventCallback;
     /* 01C8 */ uint64_t m_eventCallbackParam;
     /* 01D0 */ M2ModelLight* m_lights;
     /* 01D4 */ CM2Lighting m_lighting;
@@ -214,20 +292,46 @@ class CM2Model {
     /* 02C8 */ CM2Model** m_particlePrev;
     /* 02CC */ CM2Model* m_particleNext;
     /* 02D0 */ M2ModelOptGeo* m_optGeo;
-    /* 02D4 */ uint32_t m_hitTestMode;
+    /* 02D4 */ uint32_t m_hitTestMode; // HIT_TEST_MODE
     /* 02D8 */ CM2Model** m_hitTestPrev;
     /* 02DC */ CM2Model* m_hitTestNext;
     /* 02E0 */ void* m_hitTestOwner;
-    /* 02E4 */ uint32_t m_hitTestGroup;
+    /* 02E4 */ uint32_t m_hitTestGroup; // Hit priority; the higher value wins among overlapping hits.
     /* 02E8 */ uint32_t m_handle;
     /* 02EC */ uint32_t unused_02EC;
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug feature: which bounds the model shows (0.5.3 CModelBase::m_boundsModel, with m_flags bit 1 telling a
+    // sphere from a box). Appended after the 3.3.5 layout.
+    enum DEBUG_BOUNDS : uint32_t {
+        DEBUG_BOUNDS_NONE = 0,
+        DEBUG_BOUNDS_SPHERE = 1,
+        DEBUG_BOUNDS_BOX = 2,
+    };
+    DEBUG_BOUNDS m_debugBounds;
+    // Debug feature: collision displays (0.5.3 CModelBase::m_collideModel and m_aaBoxCustGeoId).
+    enum DEBUG_COLLISION : uint32_t {
+        DEBUG_COLLISION_MESH = 0x1, // collision triangles and face normals
+        DEBUG_COLLISION_AABOX = 0x2, // collision bounds box
+        DEBUG_HIT_TEST = 0x4, // the geometry object picking tests (ShowHitTestGeometry); per model only
+        DEBUG_UNSELECTABLE = 0x8, // the geometry object picking skips (ShowUnselectable); per model only
+    };
+    uint32_t m_debugCollision;
+    uint32_t m_debugUnselectableColor; // ARGB, for DEBUG_UNSELECTABLE
+    // World-wide collision displays (DEBUG_COLLISION bits), synced from CWorld::enables every frame.
+    static uint32_t s_debugWorldCollision;
+    // Debug feature: while set, SetBoneSequence calls it for every sequence a model starts, with the requested
+    // animation id and the one it plays after the fallbacks (SequenceFallbackById). The WoW layer sets it for its
+    // anim debug target (animDebug, Unit_C_Debug.cpp) and filters by model.
+    typedef void (*DebugSequenceCallback)(CM2Model* model, uint32_t boneId, uint32_t requestedId, uint32_t playedId);
+    static DebugSequenceCallback s_debugSequenceCallback;
+#endif
 
     static void (*s_transformVertices[5])(CM2Model*, M2SkinSection*, uint8_t*, int32_t);
-    static TSGrowableArray<M2ModelCallback> s_sequenceCallbacks;
+    static TSGrowableArray<M2ModelCallback> s_callbacks;
     static TSGrowableArray<C3Vector> s_collisionPositions;
     static TSGrowableArray<uint32_t> s_collisionCodes;
 
-    static int32_t __stdcall SequenceCallback(void* callback, CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time, uint32_t sequenceIndex, uint32_t startTime, uint64_t param);
+    static int32_t __stdcall SequenceCallback(M2SequenceCallback callback, CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time, uint32_t sequenceIndex, uint32_t startTime, uint64_t param);
     static void RenderModelBatchesShadowMap(const CModelBatchList& untextured, const CModelBatchList& textured);
     static void RenderModelBatchListShadowMap(int32_t untextured, const CModelBatchList& list);
     static void TransformVertices_cpp(CM2Model* model, M2SkinSection* section, uint8_t* vertices, int32_t texCoord);
@@ -238,7 +342,7 @@ class CM2Model {
 
     CM2Model();
     ~CM2Model();
-    int32_t CanUpdateNonReadyTextures();
+    BOOL CanUpdateNonReadyTextures();
     void ChangeEmittersFrameOfReference(const C44Matrix* matrix);
     void ChangeFrameOfReference(const C44Matrix* matrix);
     void ComputeLoadProgress(int64_t& loaded, int64_t& total);
@@ -249,8 +353,8 @@ class CM2Model {
     C3Vector GetAttachmentPivot(uint32_t id);
     C3Vector GetEventPivot(uint32_t id);
     uint32_t GetEventSequenceTime(uint32_t sequenceId, uint32_t eventId);
-    int32_t HasAttachment(uint32_t id);
-    int32_t HasEvent(uint32_t id);
+    BOOL HasAttachment(uint32_t id);
+    BOOL HasEvent(uint32_t id);
     void LoadSequence(uint32_t id);
     void PickRandomSequenceVariation(uint32_t* variation, uint16_t* sequenceIndex);
     M2SequenceFallback* SequenceFallbackById(M2SequenceFallback* result, uint32_t id);
@@ -275,10 +379,10 @@ class CM2Model {
     uint32_t GetSequenceVariationCount(uint32_t id);
     CAaBox GetSplitBodyBoundingBox(uint32_t boneId);
     C3Vector GetWorldPosition();
-    int32_t HasBone(uint32_t boneId);
-    int32_t HasSequence(const M2Data* data, uint32_t id);
-    int32_t HasSequence(uint32_t id);
-    int32_t IsSequenceLoaded(uint32_t id);
+    BOOL HasBone(uint32_t boneId);
+    BOOL HasSequence(const M2Data* data, uint32_t id);
+    BOOL HasSequence(uint32_t id);
+    BOOL IsSequenceLoaded(uint32_t id);
     uint32_t ResolveSequenceFallback(uint32_t id);
     void SetBoneFlags(uint32_t boneId, uint32_t flags, uint32_t mask);
     void UnoptimizeVisibleGeometry();
@@ -306,7 +410,7 @@ class CM2Model {
     void ForceAnimate();
     uint32_t ProcessEventCallbacks(uint32_t boneIndex, uint32_t sequenceIndex, uint32_t timeOffset, uint32_t period, uint32_t startTime, uint32_t endTime, uint32_t callbackTime);
     void AnimateParticlesMT();
-    int32_t HasDeferredSequence(uint16_t boneIndex, bool primary);
+    BOOL HasDeferredSequence(uint16_t boneIndex, bool primary);
     uint32_t ProcessSequenceCallback(uint32_t boneIndex, uint32_t frame, uint32_t time, uint32_t lastFrame);
     void AnimateTextureTransformsMT();
     void FreeInternalResources();
@@ -315,46 +419,63 @@ class CM2Model {
     uint32_t GetNumBatches();
     void GetSequenceInfo(uint32_t id, uint32_t variation, M2SequenceInfo& info);
     void OptimizeVisibleGeometry();
-    void SetGeometryVisible(uint32_t first, uint32_t last, int32_t visible);
-    void SetGeosetVisibilityRange(uint32_t first, uint32_t last, int32_t visible);
+    void SetGeometryVisible(uint32_t first, uint32_t last, BOOL visible);
+    void SetGeosetVisibilityRange(uint32_t first, uint32_t last, BOOL visible);
     void FindKey(M2ModelBoneSeq* sequence, const M2TrackBase& track, uint32_t& key0, uint32_t& key1, float& ratio);
     void FreeExternalResources();
     CCamera* GetCameraById(uint32_t id);
     uint32_t GetNumCombinableDoodadBatches();
     uint32_t GetNumGeometryBatches();
     uint32_t GetNumPrimitives();
-    int32_t HasCamera(uint32_t id);
-    void SetEmittersEnabled(int32_t enabled);
-    void* GetCameraByIndex(uint32_t index);
+    BOOL HasCamera(uint32_t id);
+    void SetEmittersEnabled(BOOL enabled);
+    CCamera* GetCameraByIndex(uint32_t cameraIndex); // Borrowed camera-service handle; the model retains ownership.
     uint32_t GetCurrentLightCount();
     uint32_t GetInstanceCountMax();
-    int32_t HasLiveParticles();
-    int32_t HasLiveRibbons();
-    uint32_t IsLoaded(int32_t wait, int32_t recursive);
+    BOOL HasLiveParticles();
+    BOOL HasLiveRibbons();
+    uint32_t IsLoaded(BOOL wait = 0, int32_t attachments = 0);
+
+    // INLINED
+    CM2Model* GetParent() const {
+        return this->m_attachParent;
+    }
     void LinkToAsyncHead(int32_t textures);
     void LinkToAsyncHeadRecursive(int32_t textures);
     void ReplaceParticleColor(uint32_t id, CImVector color0, CImVector color1, CImVector color2);
     void ReplaceTexture(uint32_t type, CTexture* texture);
     void SetAnimating(int32_t animating);
-    void SetEventCallback(void* callback, uint64_t param);
-    void SetLightEnabled(uint32_t index, uint32_t enabled);
+    void SetEventCallback(M2EventCallback callback, uint64_t param);
+    void SetLightEnabled(uint32_t lightIndex, uint32_t enabled);
     void SetLoadedCallback(void (*callback)(CM2Model*, void*), void* arg);
     void SetRibbonsEnabled(uint32_t enabled);
-    void SetSequenceCallback(void* callback, uint64_t param);
+    void SetSequenceCallback(M2SequenceCallback callback, uint64_t param);
     void SetWorldTransform(const C44Matrix& matrix);
     void SetWorldTransform(const C3Vector& position, float rotation, float scale);
-    void SetWorldTransform(const C3Vector& position, float rotation, float scale, const C3Vector& up, uint32_t flags);
+    void SetWorldTransform(const C3Vector& position, float rotation, float scale, const C3Vector& up, uint32_t modelFlags);
     void UpdateLoaded();
     void WaitForLoad(const char* reason);
-    void AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C3Vector& emissive, float alpha, float alpha2);
-    void AnimateMTSimple(const C44Matrix* view, const C3Vector& diffuse, const C3Vector& emissive, float alpha, float alpha2);
+    // INLINED: blocks until the model's shared data is loaded and it is initialized.
+    void EnsureInitialized() {
+        if (!(this->m_runtimeFlags & M2_FLAGS::M2_INITIALIZED)) {
+            this->WaitForLoad(nullptr);
+        }
+    }
+    // INLINED (name inferred): 12213 M2Model.inl emitter accessor.
+    CParticleEmitter2* GetParticleEmitter(uint32_t particleIndex) {
+        this->EnsureInitialized();
+        STORM_ASSERT(particleIndex < m_shared->m_data->m_particles.m_count); // 12213: "particleIndex < m_shared->m_data->particles.count"
+        return this->m_particleEmitters[particleIndex];
+    }
+    void AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C3Vector& emissive, float parentEffectiveAlpha, float parentAlpha);
+    void AnimateMTSimple(const C44Matrix* view, const C3Vector& diffuse, const C3Vector& emissive, float parentEffectiveAlpha, float parentAlpha);
     void AnimateParticleST(float deltaTime, uint32_t index);
     void AnimateST();
     int32_t GetRegionBounds(M2SkinSection* section, CAaBox& box, C44Matrix& matrix);
     int32_t Initialize(CM2Scene* scene, CM2Shared* shared, CM2Model* source, uint32_t flags);
     int32_t InitializeLoaded();
-    int32_t IsBatchDoodadCompatible(M2Batch* batch);
-    int32_t IsDrawable(int32_t a, int32_t b);
+    BOOL IsBatchDoodadCompatible(M2Batch* batch);
+    BOOL IsDrawable(int32_t a, int32_t b);
     void LinkToCallbackListTail();
     int32_t OnSequenceInterrupted(uint32_t boneId, uint16_t boneIndex);
     void ProcessCallbacksRecursive();
@@ -365,19 +486,61 @@ class CM2Model {
     void SetPrimaryBoneSequence(uint16_t sequenceIndex, uint16_t boneIndex, M2SequenceFallback fallback, uint32_t time, float speed, int32_t blend);
     void SetSecondaryBoneSequence(uint16_t sequenceIndex, uint16_t boneIndex, M2SequenceFallback fallback, uint32_t time, float speed);
     void SetupLighting();
-    int32_t SetVertices(int32_t optimized, M2SkinSection* section, int32_t texCoord);
-    int32_t SetVerticesMultiSample(int32_t optimized, M2SkinSection* section);
+    int32_t SetVertices(int32_t optimized, M2SkinSection* skinSection, int32_t texCoord);
+    int32_t SetVerticesMultiSample(int32_t optimized, M2SkinSection* skinSection);
     void UnlinkFromCallbackList();
+
+#ifdef WOWDECOMP_DEBUG_FEATURES
+    // Debug features (M2Model_Debug.cpp): 0.5.3 Model* debug display, stripped from the 3.3.5 release build.
+    static int32_t AnimateLogToggle(const char* fileName);
+    static int32_t RenderSceneLogToggle(const char* fileName);
+    void HideBounds();
+    void ShowBoundingBox();
+    void ShowBoundingSphere();
+    BOOL IsShowingBoundingBox() const;
+    BOOL IsShowingBoundingSphere() const;
+    void DebugDraw(const C44Matrix& viewInv) const;
+    static void SetDebugWorldCollision(BOOL mesh, BOOL aaBox);
+    void ShowCollision(BOOL show);
+    void ShowCollisionAaBox(BOOL show);
+    void ShowHitTestGeometry();
+    void HideHitTestGeometry();
+    BOOL IsShowingHitTestGeometry() const;
+    void ShowMaterialLayer(uint32_t material, uint32_t layer, BOOL show);
+    void ShowUnselectable(uint8_t red, uint8_t green, uint8_t blue);
+    void HideUnselectable();
+    BOOL IsShowingUnselectable() const;
+#endif
 };
 
 class M2SequenceFallback {
     public:
+    enum Mode : uint16_t {
+        MODE_NORMAL = 0,
+        MODE_REVERSE = 1,
+        MODE_FREEZE = 2,
+        MODE_REVERSE_FREEZE = 3,
+    };
+
+    enum KeyPacking : int32_t {
+        MODE_KEY_SHIFT = 16,
+    };
+
     /* 0000 */ uint16_t m_id;
-    /* 0002 */ uint16_t m_mode;
+    /* 0002 */ Mode m_mode;
 };
 
 class CM2SequencePlayBack : public TSLinkedNode<CM2SequencePlayBack> {
     public:
+    // Deferred request flags; distinct from M2Sequence flags and retained as a raw 16-bit word.
+    enum FLAGS : uint16_t {
+        NONE = 0,
+        BLEND = 1,
+        PRIMARY = 2,
+        PICK_RANDOM_VARIATION = 4,
+        CANCELED = 8,
+    };
+
     /* 0008 */ CM2Model* m_model;
     /* 000C */ uint16_t m_boneIndex;
     /* 000E */ uint16_t m_flags;
@@ -425,7 +588,7 @@ class M2ModelBone {
     /* 008C */ uint32_t m_flags;
     /* 0090 */ uint32_t m_sequenceId;
     /* 0094 */ uint16_t m_variationIndex;
-    /* 0096 */ uint16_t m_animListNext;
+    /* 0096 */ uint16_t activeNext;
     /* 0098 */ uint16_t* m_animListPrev;
     /* 009C */ uint32_t m_blendEndTime;
     /* 00A0 */ float m_invBlendDuration;

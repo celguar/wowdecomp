@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/UIUtil/Types.h"
 
@@ -17,6 +18,8 @@ struct lua_State;
 
 struct MOUSELOOKBINDING : public TSHashObject<MOUSELOOKBINDING, HASHKEY_STRI> {
     /* 0018 */ char* m_binding;
+
+    ~MOUSELOOKBINDING();
 };
 
 class CMouseEvent;
@@ -25,6 +28,14 @@ class CFocusEvent;
 
 class CGInputControl {
     public:
+    // Runtime joystick mouse gating; distinct from cursor-mode flags.
+    enum JOYSTICK_MOUSE_FLAGS : int32_t {
+        JOYSTICK_MOUSE_NONE = 0,
+        JOYSTICK_MOUSE_ACTIVE = 0x1,
+        JOYSTICK_MOUSE_ALLOWED = 0x2,
+        JOYSTICK_MOUSE_INITIAL_FLAGS = 3,
+    };
+
     void SetMouselookOverrideBindings();
     void CameraTurnPlayer(uint32_t time, float facing);
     void SetPlayerPitch(CGUnit_C* unit, uint32_t time, float pitch);
@@ -33,13 +44,13 @@ class CGInputControl {
     static CGInputControl* s_inputControl;
 
     static int32_t CameraCanPitchPlayer();
-    static int32_t __stdcall CanControl(CGUnit_C* unit);
-    static int32_t __stdcall CanMove(CGUnit_C* unit);
-    static int32_t __stdcall CanTurn(CGUnit_C* unit);
+    static BOOL __stdcall CanControl(CGUnit_C* unit);
+    static BOOL __stdcall CanMove(CGUnit_C* unit);
+    static BOOL __stdcall CanTurn(CGUnit_C* unit);
     static void Destroy();
     static CGInputControl* GetActive();
     static float GetUIVehiclePower();
-    int32_t IsVehicleSeatFlagSet(uint32_t flags) const;
+    BOOL IsVehicleSeatFlagSet(uint32_t flags) const;
     static void SendUIVehicleAngleUpdate(float angle);
     static int32_t WowMouseEnabled();
 
@@ -66,27 +77,27 @@ class CGInputControl {
     CGInputControl();
     ~CGInputControl();
     int32_t CameraCanTurnPlayer() const;
-    int32_t CanSyncFreeLookFacing(CGUnit_C* unit) const;
-    int32_t IsIdle() const;
-    int32_t IsMouseDrag(uint32_t time) const;
-    int32_t IsMouseDragMoving() const;
-    int32_t IsMouseDragging() const;
+    BOOL CanSyncFreeLookFacing(CGUnit_C* unit) const;
+    BOOL IsIdle() const;
+    BOOL IsMouseDrag(uint32_t time) const;
+    BOOL IsMouseDragMoving() const;
+    BOOL IsMouseDragging() const;
     void OnPitchToAngleStop();
     void SetMouselookOverrideBinding(const char* key, const char* binding);
     void SetMouseCVarHandler(bool enable);
     void UpdateJoystickMouseMode();
     void UpdateHalted();
-    void UpdateMouseMode(int32_t force);
+    void UpdateMouseMode(BOOL force);
     void EnterWorld();
     void OnFocusChange(const CFocusEvent& event);
     int32_t WowMouseConnected();
     bool DetectWowMouse();
     void VehicleAimChange(uint32_t time, float delta);
     void UpdateMoveStopped();
-    void UpdatePlayer(uint32_t time, int32_t a2);
-    void ToggleControlBit(uint32_t bit, int32_t enable, uint32_t time, int32_t keepSmoothing);
+    void UpdatePlayer(uint32_t time, BOOL canControl);
+    void ToggleControlBit(uint32_t bit, BOOL enable, uint32_t time, BOOL keepSmoothing);
     int32_t SetControlBit(uint32_t bit, uint32_t time);
-    int32_t UnsetControlBit(uint32_t bit, uint32_t time, int32_t keepSmoothing);
+    int32_t UnsetControlBit(uint32_t bit, uint32_t time, BOOL keepSmoothing);
     void OnTurnToAngleStop();
     void Reset();
     void MovePlayer(uint32_t time, CGUnit_C* unit);

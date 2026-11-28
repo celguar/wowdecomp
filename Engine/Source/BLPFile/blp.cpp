@@ -30,7 +30,7 @@ static uint32_t s_fourBitAlphaShift[2] = { 2, 6 };
 static TSGrowableArray<uint8_t> s_blpFileLoadBuffer;
 
 // INLINED
-static BlitFormat GetBlitFormat(PIXEL_FORMAT format) {
+static BlitFormat GetBlitFormat(PIXEL_FORMAT pixelFormat) {
     // STATIC: 0x00AD91BC
     static BlitFormat blitFmt[NUM_PIXEL_FORMATS] = {
         BlitFormat_Dxt1,
@@ -45,7 +45,8 @@ static BlitFormat GetBlitFormat(PIXEL_FORMAT format) {
         BlitFormat_Unknown,
     };
 
-    return blitFmt[format];
+    STORM_ASSERT(pixelFormat < NUM_PIXEL_FORMATS);
+    return blitFmt[pixelFormat];
 }
 
 // VERIFY: 57cc221c manual
@@ -73,7 +74,7 @@ uint32_t CBLPFile::HasMips() const {
 }
 
 // INLINED
-int32_t CBLPFile::IsValidMip(uint32_t mipLevel) const {
+BOOL CBLPFile::IsValidMip(uint32_t mipLevel) const {
     return !mipLevel || (this->HasMips() && mipLevel < this->m_numLevels);
 }
 
@@ -97,12 +98,14 @@ int32_t CBLPFile::ValidateHeader(const BLPHeader& header) {
 
 // VERIFY: ec3a562c manual
 // OFFSET: 0x006AE900
-int32_t CBLPFile::Source(void* data) {
+int32_t CBLPFile::Source(void* fileBits) {
+    STORM_ASSERT(fileBits);
+
     this->Close();
 
     this->m_inMemoryNeedsFree = 0;
-    this->m_inMemoryImage = data;
-    memcpy(&this->m_header, data, sizeof(this->m_header));
+    this->m_inMemoryImage = fileBits;
+    memcpy(&this->m_header, fileBits, sizeof(this->m_header));
 
     if (!CBLPFile::ValidateHeader(this->m_header)) {
         return 0;
@@ -430,6 +433,8 @@ void CBLPFile::DecompPalARGB1555DitherFloydSteinberg(uint8_t* out, const void* i
 // VERIFY: 87e7bd46 manual
 // OFFSET: 0x006AF140
 void CBLPFile::DecompPalARGB565DitherFloydSteinberg(uint8_t* out, const void* in, uint32_t width, uint32_t height) {
+    STORM_ASSERT(width <= 1024);
+
     // STATIC: 0x00C6D5B0
     static int32_t s_errors[2][1026][3];
 
@@ -496,6 +501,8 @@ void CBLPFile::DecompPalARGB565DitherFloydSteinberg(uint8_t* out, const void* in
 // VERIFY: 696ab781 manual
 // OFFSET: 0x006AF340
 void CBLPFile::DecompPalARGB2565DitherFloydSteinberg(uint8_t* out, const void* in, uint32_t width, uint32_t height) {
+    STORM_ASSERT(width <= 1024);
+
     // STATIC: 0x00C735E0
     static int32_t s_errors[2][1026][3];
 

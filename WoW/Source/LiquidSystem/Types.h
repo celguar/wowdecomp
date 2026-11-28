@@ -3,6 +3,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "Engine/Source/Tempest/CRange.h"
+
+// On-disk MH2O vertex formats; runtime caches retain their native DWORD carriers.
+enum LIQUID_VERTEX_FORMAT : uint16_t {
+    LIQUID_VERTEX_HEIGHT_DEPTH = 0,
+    LIQUID_VERTEX_HEIGHT_TEXCOORD = 1,
+    LIQUID_VERTEX_DEPTH_ONLY = 2,
+};
 
 struct SMLiquidChunkDesc {
     /* 0000 */ uint32_t m_offsetInstances;
@@ -12,15 +20,14 @@ struct SMLiquidChunkDesc {
 
 struct SMLiquidInstance {
     /* 0000 */ uint16_t m_liquidType;
-    /* 0002 */ uint16_t m_vertexFormat;
-    /* 0004 */ float m_minHeight;
-    /* 0008 */ float m_maxHeight;
+    /* 0002 */ LIQUID_VERTEX_FORMAT m_vertexFormat;
+    /* 0004 */ CRange m_heightRange;
     /* 000C */ uint8_t m_xOffset;
     /* 000D */ uint8_t m_yOffset;
     /* 000E */ uint8_t m_width;
     /* 000F */ uint8_t m_height;
     /* 0010 */ uint32_t m_offsetExistsBitmap;
-    /* 0014 */ uint32_t m_offsetVertexData;
+    /* 0014 */ uint32_t vtxOffset;
 };
 
 #endif

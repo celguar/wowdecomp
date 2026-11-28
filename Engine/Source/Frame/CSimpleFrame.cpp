@@ -38,13 +38,13 @@ int32_t CSimpleFrame::s_metatable = LUA_NOREF;
 int32_t CSimpleFrame::s_objectType;
 
 // STATIC: 0x00AC1260
-const char* CSimpleFrame::s_objectTypeName = "Frame";
+const char* const CSimpleFrame::s_objectTypeName = "Frame";
 
 // STATIC: 0x00B49980
 int32_t CSimpleFrame::s_frameCount;
 
 // STATIC: 0x00B49988
-CDataAllocator CSimpleFrame::s_allocator(sizeof(CSimpleFrame), 100);
+CDataAllocator CSimpleFrame::s_simpleFrameHeap(sizeof(CSimpleFrame), 100);
 
 // STATIC: 0x00AC1264
 static float s_dragThreshold = 0.0001f;
@@ -172,7 +172,7 @@ int32_t CSimpleFrame::GetObjectType() {
 // INLINED
 void CSimpleFrame::operator delete(void* ptr) {
     if (ptr) {
-        CSimpleFrame::s_allocator.PutData(ptr, nullptr, 0);
+        CSimpleFrame::s_simpleFrameHeap.PutData(ptr, nullptr, 0);
     }
 }
 
@@ -191,12 +191,12 @@ CSimpleFrame::CSimpleFrame(CSimpleFrame* parent) {
     this->m_ignoreDepth = 0;
     this->m_strata = FRAME_STRATA_MEDIUM;
     this->m_level = 0;
-    this->m_enabledEventsBitmask = 0;
+    this->m_eventmask = 0;
     this->m_isVisible = 0;
     this->m_alpha = 0xFF;
     this->m_parentAlpha = 0xFF;
     this->m_animSavedAlpha = 0xFF;
-    this->m_lifecycleState = 1;
+    this->m_initialized_state = INITIALIZED_STATE::STATE_INITIALIZED;
     this->m_hitRect = { 0.0f, 0.0f, 0.0f, 0.0f };
     this->m_hitRectInsets = { 0.0f, 0.0f, 0.0f, 0.0f };
     this->m_clampRectInsets = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -206,7 +206,7 @@ CSimpleFrame::CSimpleFrame(CSimpleFrame* parent) {
     this->m_isMouseDragging = 0;
     this->m_mousePosition.x = 0.0f;
     this->m_mousePosition.y = 0.0f;
-    this->m_isLoading = 0;
+    this->m_loading = 0;
     this->m_backdropGenerator = nullptr;
     this->m_batchDirty = 0;
 
@@ -234,7 +234,7 @@ CSimpleFrame::CSimpleFrame(CSimpleFrame* parent) {
 // VERIFY: e1a5b71b manual
 // OFFSET: [0x00492770, 0x004926B0, 0x00492E40]
 CSimpleFrame::~CSimpleFrame() {
-    this->m_lifecycleState = 3;
+    this->m_initialized_state = INITIALIZED_STATE::STATE_DELETED;
     this->m_simpleTop->UnregisterFrame(this);
     this->m_simpleTop->ValidateDeletedFrame(this);
     this->m_simpleTop = nullptr;
@@ -460,20 +460,20 @@ void CSimpleFrame::SetFrameAlpha(uint8_t alpha) {
 
 // VERIFY: ee3b3c89 auto
 // OFFSET: 0x0048EA40
-void CSimpleFrame::RegisterForEvents(int32_t a2) {
+void CSimpleFrame::RegisterForEvents(BOOL reregister) {
     for (uint32_t i = 0; i < NUM_SIMPLE_EVENTS; i++) {
-        if ((1 << i) & this->m_enabledEventsBitmask) {
-            this->m_simpleTop->RegisterForEvent(this, static_cast<CSimpleEventType>(i), a2, -1);
+        if ((1 << i) & this->m_eventmask) {
+            this->m_simpleTop->RegisterForEvent(this, static_cast<CSimpleEventType>(i), reregister, -1);
         }
     }
 }
 
 // VERIFY: 68083be0 auto
 // OFFSET: 0x0048EA80
-void CSimpleFrame::UnregisterForEvents(int32_t a2) {
+void CSimpleFrame::UnregisterForEvents(BOOL reregister) {
     for (uint32_t i = 0; i < NUM_SIMPLE_EVENTS; i++) {
-        if ((1 << i) & this->m_enabledEventsBitmask) {
-            this->m_simpleTop->UnregisterForEvent(this, static_cast<CSimpleEventType>(i), a2);
+        if ((1 << i) & this->m_eventmask) {
+            this->m_simpleTop->UnregisterForEvent(this, static_cast<CSimpleEventType>(i), reregister);
         }
     }
 }
@@ -569,12 +569,12 @@ void CSimpleFrame::RunOnAttributeChangedScript(const char* name, int32_t luaRef)
 
 // VERIFY: 0a1a8e02 manual
 // OFFSET: 0x0048ECF0
-void CSimpleFrame::AllowAttributeChanges(int32_t allow) {
+void CSimpleFrame::AllowAttributeChanges(BOOL allow) {
     if (allow) {
-        this->m_frameFlags |= 0x8000;
+        this->m_frameFlags |= FrameFlags::FRAME_ALLOW_ATTRIBUTE_CHANGES;
         this->m_simpleTop->RegisterForCleanup(this);
     } else {
-        this->m_frameFlags &= ~0x8000u;
+        this->m_frameFlags &= ~FrameFlags::FRAME_ALLOW_ATTRIBUTE_CHANGES;
     }
 }
 
@@ -582,7 +582,7 @@ void CSimpleFrame::AllowAttributeChanges(int32_t allow) {
 // OFFSET: 0x0048ED30
 int32_t CSimpleFrame::AttributeChangesAllowed() {
     for (CSimpleFrame* frame = this; frame; frame = frame->m_parent) {
-        if (frame->m_frameFlags & 0x8000) {
+        if (frame->m_frameFlags & FrameFlags::FRAME_ALLOW_ATTRIBUTE_CHANGES) {
             return 1;
         }
     }
@@ -604,6 +604,8 @@ void CSimpleFrame::RunOnSizeChangedScript(float width, float height) {
 // VERIFY: f5dfec34 auto
 // OFFSET: 0x0048F0F0
 void CSimpleFrame::RunOnEnterScript(int32_t motion) {
+    STORM_ASSERT(!m_loading);
+
     if (this->m_onCursorEnter.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushboolean(L, motion);
@@ -614,6 +616,8 @@ void CSimpleFrame::RunOnEnterScript(int32_t motion) {
 // VERIFY: f2d2ba21 auto
 // OFFSET: 0x0048F130
 void CSimpleFrame::RunOnLeaveScript(int32_t motion) {
+    STORM_ASSERT(!m_loading);
+
     if (this->m_onCursorExit.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushboolean(L, motion);
@@ -624,6 +628,8 @@ void CSimpleFrame::RunOnLeaveScript(int32_t motion) {
 // VERIFY: ab9ac4fe auto
 // OFFSET: 0x0048F170
 void CSimpleFrame::RunOnMouseWheelScript(int32_t delta) {
+    STORM_ASSERT(!m_loading);
+
     if (this->m_onMouseWheel.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushnumber(L, delta);
@@ -634,6 +640,8 @@ void CSimpleFrame::RunOnMouseWheelScript(int32_t delta) {
 // VERIFY: 4eba352f auto
 // OFFSET: 0x0048F1B0
 void CSimpleFrame::RunOnKeyUpScript(const char* key) {
+    STORM_ASSERT(!m_loading);
+
     if (this->m_onKeyUp.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushstring(L, key);
@@ -758,8 +766,8 @@ void CSimpleFrame::LoadXMLInheritance(XMLNode* node, CStatus* status) {
 // VERIFY: 08c5569f auto
 // OFFSET: 0x0048F550
 void CSimpleFrame::NotifyDelayedLoad() {
-    if (this->m_frameFlags & 0x2000) {
-        this->m_batchDirty |= 0x20;
+    if (this->m_frameFlags & FrameFlags::FRAME_BEING_SCROLLED) {
+        this->m_batchDirty |= BATCH_DIRTY_DELAYED_LOAD;
     } else if (this->m_simpleTop && this->m_isVisible) {
         this->m_simpleTop->NotifyFrameDelayedLoad(this);
     }
@@ -791,9 +799,7 @@ bool CSimpleFrame::SetFrameDepth(float depth, bool force) {
 // OFFSET: 0x0048F620
 int32_t CSimpleFrame::Hide() {
     if (!this->ProtectedFunctionsAllowed()) {
-        if (this->m_simpleTop->m_actionBlockedCallback) {
-            this->m_simpleTop->m_actionBlockedCallback(nullptr);
-        }
+        this->m_simpleTop->NotifyActionBlocked(nullptr);
 
         return 0;
     }
@@ -806,9 +812,7 @@ int32_t CSimpleFrame::Hide() {
 // OFFSET: 0x0048F660
 int32_t CSimpleFrame::Show() {
     if (!this->ProtectedFunctionsAllowed()) {
-        if (this->m_simpleTop->m_actionBlockedCallback) {
-            this->m_simpleTop->m_actionBlockedCallback(nullptr);
-        }
+        this->m_simpleTop->NotifyActionBlocked(nullptr);
 
         return 0;
     }
@@ -819,22 +823,24 @@ int32_t CSimpleFrame::Show() {
 
 // VERIFY: ec84450f auto
 // OFFSET: 0x0048F6A0
-void CSimpleFrame::EnableEvent(CSimpleEventType eventType, int32_t priority) {
-    if ((1 << eventType) & this->m_enabledEventsBitmask) {
+void CSimpleFrame::EnableEvent(CSimpleEventType event, int32_t priority) {
+    STORM_ASSERT(event < sizeof(this->m_eventmask) * 8);
+
+    if ((1 << event) & this->m_eventmask) {
         return;
     }
 
     if (this->m_isVisible) {
-        this->m_simpleTop->RegisterForEvent(this, eventType, 0, priority);
+        this->m_simpleTop->RegisterForEvent(this, event, 0, priority);
     }
 
-    this->m_enabledEventsBitmask |= 1 << eventType;
+    this->m_eventmask |= 1 << event;
 }
 
 // VERIFY: 219cc709 auto
 // OFFSET: 0x0048F6F0
 void CSimpleFrame::DisableEvent(CSimpleEventType eventType) {
-    if (!((1 << eventType) & this->m_enabledEventsBitmask)) {
+    if (!((1 << eventType) & this->m_eventmask)) {
         return;
     }
 
@@ -842,17 +848,17 @@ void CSimpleFrame::DisableEvent(CSimpleEventType eventType) {
         this->m_simpleTop->UnregisterForEvent(this, eventType, 0);
     }
 
-    this->m_enabledEventsBitmask &= ~(1 << eventType);
+    this->m_eventmask &= ~(1 << eventType);
 }
 
 // VERIFY: bbfb8171 manual
 // OFFSET: 0x0048F730
 int32_t CSimpleFrame::TestHitRect(const C2Vector& pt) {
-    if (!(this->m_layoutFlags & 0x100)) {
+    if (!(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID)) {
         return 0;
     }
 
-    if (!(this->m_frameFlags & 0x2000)) {
+    if (!(this->m_frameFlags & FrameFlags::FRAME_BEING_SCROLLED)) {
         return this->m_hitRect.IsPointInside(pt);
     }
 
@@ -862,7 +868,7 @@ int32_t CSimpleFrame::TestHitRect(const C2Vector& pt) {
         return 0;
     }
 
-    while (scrollFrame->m_frameFlags & 0x2000) {
+    while (scrollFrame->m_frameFlags & FrameFlags::FRAME_BEING_SCROLLED) {
         scrollFrame = scrollFrame->m_parent;
 
         if (!scrollFrame) {
@@ -892,7 +898,7 @@ void CSimpleFrame::SetHitRectInsets(float left, float right, float top, float bo
 // VERIFY: 8c2d9ec9 manual
 // OFFSET: 0x0048F890
 int32_t CSimpleFrame::GetHitRect(CRect& rect) {
-    if (!(this->m_layoutFlags & 0x100)) {
+    if (!(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID)) {
         return 0;
     }
 
@@ -914,10 +920,7 @@ void CSimpleFrame::AddAnimAlpha(int16_t alpha) {
         newAlpha = static_cast<uint8_t>(value);
     }
 
-    if (newAlpha != this->m_alpha) {
-        this->m_alpha = newAlpha;
-        this->UpdateAlpha();
-    }
+    this->SetFrameAlpha(newAlpha);
 }
 
 // VERIFY: de9aeb94 auto
@@ -992,11 +995,7 @@ int32_t CSimpleFrame::OnLayerChar(const CCharEvent& evt) {
     char text[8];
     sputu8(evt.m_data.m_ch, text);
 
-    if (this->m_onChar.m_luaRef) {
-        lua_State* L = FrameScript_GetContext();
-        lua_pushstring(L, text);
-        this->RunScript(this->m_onChar, 1, nullptr);
-    }
+    this->RunOnCharScript(text);
 
     return 1;
 }
@@ -1010,6 +1009,7 @@ int32_t CSimpleFrame::OnLayerKeyDown(const CKeyEvent& evt) {
 
     const char* key = KeyCodeToString(evt.m_data.m_key);
 
+    STORM_ASSERT(!m_loading);
     if (this->m_onKeyDown.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushstring(L, key);
@@ -1047,6 +1047,7 @@ int32_t CSimpleFrame::OnLayerMouseDown(const CMouseEvent& evt, const char* btn) 
     const char* savedButton = this->m_simpleTop->m_mouseButtonName;
     this->m_simpleTop->m_mouseButtonName = btn;
 
+    STORM_ASSERT(!m_loading);
     if (this->m_onMouseDown.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushstring(L, btn);
@@ -1084,6 +1085,7 @@ int32_t CSimpleFrame::OnLayerMouseUp(const CMouseEvent& evt, const char* btn) {
     const char* savedButton = this->m_simpleTop->m_mouseButtonName;
     this->m_simpleTop->m_mouseButtonName = btn;
 
+    STORM_ASSERT(!m_loading);
     if (this->m_onMouseUp.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushstring(L, btn);
@@ -1117,6 +1119,7 @@ void CSimpleFrame::OnDragStart(const CMouseEvent& evt) {
         }
     }
 
+    STORM_ASSERT(!m_loading);
     if (this->m_onDragStart.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushstring(L, GetMouseButtonName(button));
@@ -1127,6 +1130,8 @@ void CSimpleFrame::OnDragStart(const CMouseEvent& evt) {
 // VERIFY: 445a6cbe auto
 // OFFSET: 0x0048FE60
 void CSimpleFrame::OnDragStop(const CMouseEvent& evt) {
+    STORM_ASSERT(!m_loading);
+
     if (this->m_onDragStop.m_luaRef) {
         this->RunScript(this->m_onDragStop, 0, nullptr);
     }
@@ -1135,6 +1140,8 @@ void CSimpleFrame::OnDragStop(const CMouseEvent& evt) {
 // VERIFY: 7c9a0de0 auto
 // OFFSET: 0x0048FE80
 void CSimpleFrame::OnReceiveDrag(const CMouseEvent& evt) {
+    STORM_ASSERT(!m_loading);
+
     if (this->m_onReceiveDrag.m_luaRef) {
         this->RunScript(this->m_onReceiveDrag, 0, nullptr);
     }
@@ -1143,20 +1150,21 @@ void CSimpleFrame::OnReceiveDrag(const CMouseEvent& evt) {
 // VERIFY: 703bbed0 auto
 // OFFSET: 0x0048FEA0
 void CSimpleFrame::NotifyScrollParent() {
-    if (!(this->m_frameFlags & 0x2000) || !this->m_isVisible) {
+    if (!(this->m_frameFlags & FrameFlags::FRAME_BEING_SCROLLED) || !this->m_isVisible) {
         return;
     }
 
     CSimpleFrame* frame = this;
 
-    while (!(frame->m_frameFlags & 0x4000)) {
+    while (!(frame->m_frameFlags & FrameFlags::FRAME_SCROLL_CHILD)) {
         frame = frame->m_parent;
     }
 
-    CSimpleScrollFrame* scrollFrame = static_cast<CSimpleScrollFrame*>(frame->m_parent);
+    CSimpleFrame* parent = frame->m_parent;
 
-    if (scrollFrame && scrollFrame->m_lifecycleState != 3) {
-        scrollFrame->m_scrollChildUpdate = 1;
+    if (parent && parent->m_initialized_state != INITIALIZED_STATE::STATE_DELETED) {
+        STORM_ASSERT(parent->IsA(CSimpleScrollFrame::GetObjectType()));
+        static_cast<CSimpleScrollFrame*>(parent)->m_scrollChildUpdate = 1;
     }
 }
 
@@ -1215,36 +1223,36 @@ void CSimpleFrame::LoadXML_Scripts(XMLNode* node, CStatus* status) {
 
         script->m_tainted = nullptr;
 
-        if (!SStrCmpI(child->m_name.m_str, "OnChar", STORM_MAX_STR) && !(this->m_enabledEventsBitmask & (1 << SIMPLE_EVENT_CHAR))) {
+        if (!SStrCmpI(child->m_name.m_str, "OnChar", STORM_MAX_STR) && !(this->m_eventmask & (1 << SIMPLE_EVENT_CHAR))) {
             if (this->m_isVisible) {
                 this->m_simpleTop->RegisterForEvent(this, SIMPLE_EVENT_CHAR, 0, -1);
             }
 
-            this->m_enabledEventsBitmask |= 1 << SIMPLE_EVENT_CHAR;
+            this->m_eventmask |= 1 << SIMPLE_EVENT_CHAR;
         }
 
-        if ((!SStrCmpI(child->m_name.m_str, "OnKeyDown", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnKeyUp", STORM_MAX_STR)) && !(this->m_enabledEventsBitmask & (1 << SIMPLE_EVENT_KEY))) {
+        if ((!SStrCmpI(child->m_name.m_str, "OnKeyDown", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnKeyUp", STORM_MAX_STR)) && !(this->m_eventmask & (1 << SIMPLE_EVENT_KEY))) {
             if (this->m_isVisible) {
                 this->m_simpleTop->RegisterForEvent(this, SIMPLE_EVENT_KEY, 0, -1);
             }
 
-            this->m_enabledEventsBitmask |= 1 << SIMPLE_EVENT_KEY;
+            this->m_eventmask |= 1 << SIMPLE_EVENT_KEY;
         }
 
-        if ((!SStrCmpI(child->m_name.m_str, "OnEnter", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnLeave", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnMouseDown", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnMouseUp", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnDragStart", STORM_MAX_STR)) && !(this->m_enabledEventsBitmask & (1 << SIMPLE_EVENT_MOUSE))) {
+        if ((!SStrCmpI(child->m_name.m_str, "OnEnter", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnLeave", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnMouseDown", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnMouseUp", STORM_MAX_STR) || !SStrCmpI(child->m_name.m_str, "OnDragStart", STORM_MAX_STR)) && !(this->m_eventmask & (1 << SIMPLE_EVENT_MOUSE))) {
             if (this->m_isVisible) {
                 this->m_simpleTop->RegisterForEvent(this, SIMPLE_EVENT_MOUSE, 0, -1);
             }
 
-            this->m_enabledEventsBitmask |= 1 << SIMPLE_EVENT_MOUSE;
+            this->m_eventmask |= 1 << SIMPLE_EVENT_MOUSE;
         }
 
-        if (!SStrCmpI(child->m_name.m_str, "OnMouseWheel", STORM_MAX_STR) && !(this->m_enabledEventsBitmask & (1 << SIMPLE_EVENT_MOUSEWHEEL))) {
+        if (!SStrCmpI(child->m_name.m_str, "OnMouseWheel", STORM_MAX_STR) && !(this->m_eventmask & (1 << SIMPLE_EVENT_MOUSEWHEEL))) {
             if (this->m_isVisible) {
                 this->m_simpleTop->RegisterForEvent(this, SIMPLE_EVENT_MOUSEWHEEL, 0, -1);
             }
 
-            this->m_enabledEventsBitmask |= 1 << SIMPLE_EVENT_MOUSEWHEEL;
+            this->m_eventmask |= 1 << SIMPLE_EVENT_MOUSEWHEEL;
         }
     }
 }
@@ -1252,7 +1260,7 @@ void CSimpleFrame::LoadXML_Scripts(XMLNode* node, CStatus* status) {
 // VERIFY: 784118ad auto
 // OFFSET: 0x00490270
 void CSimpleFrame::NotifyDrawLayerChanged(uint32_t drawLayer) {
-    if (this->m_frameFlags & 0x2000) {
+    if (this->m_frameFlags & FrameFlags::FRAME_BEING_SCROLLED) {
         this->m_batchDirty |= 1 << drawLayer;
     } else if (this->m_simpleTop && this->m_isVisible) {
         this->m_simpleTop->NotifyFrameLayerChanged(this, drawLayer);
@@ -1264,7 +1272,7 @@ void CSimpleFrame::NotifyDrawLayerChanged(uint32_t drawLayer) {
 // VERIFY: 5d917b41 auto
 // OFFSET: 0x004902D0
 void CSimpleFrame::OnLayerShow() {
-    if (this->m_onShow.m_luaRef && !this->m_isLoading) {
+    if (this->m_onShow.m_luaRef && !this->m_loading) {
         this->RunScript(this->m_onShow, 0, nullptr);
     }
 
@@ -1274,7 +1282,7 @@ void CSimpleFrame::OnLayerShow() {
 // VERIFY: 68810318 auto
 // OFFSET: 0x00490300
 void CSimpleFrame::OnLayerHide() {
-    if (this->m_onHide.m_luaRef && !this->m_isLoading) {
+    if (this->m_onHide.m_luaRef && !this->m_loading) {
         this->RunScript(this->m_onHide, 0, nullptr);
     }
 
@@ -1307,7 +1315,7 @@ void CSimpleFrame::PreLoadXML(XMLNode* node, CStatus* status) {
         }
     }
 
-    this->m_isLoading = 1;
+    this->m_loading = 1;
     this->SetDeferredResize(1);
 
     if (this->m_titleRegion) {
@@ -1322,7 +1330,7 @@ void CSimpleFrame::PreLoadXML(XMLNode* node, CStatus* status) {
 // VERIFY: b8ec6f00 manual
 // OFFSET: 0x00490410
 void CSimpleFrame::PostLoadXML(XMLNode* node, CStatus* status) {
-    this->m_isLoading = 0;
+    this->m_loading = 0;
 
     if (this->m_isVisible) {
         this->SetDeferredResize(0);
@@ -1354,11 +1362,12 @@ void CSimpleFrame::PostLoadXML(XMLNode* node, CStatus* status) {
         }
     }
 
+    STORM_ASSERT(!m_loading);
     if (this->m_onLoad.m_luaRef) {
         this->RunScript(this->m_onLoad, 0, nullptr);
     }
 
-    if (this->m_isVisible && this->m_onShow.m_luaRef && !this->m_isLoading) {
+    if (this->m_isVisible && this->m_onShow.m_luaRef && !this->m_loading) {
         this->RunScript(this->m_onShow, 0, nullptr);
     }
 }
@@ -1387,9 +1396,11 @@ void CSimpleFrame::EnableDrawLayer(uint32_t drawLayer) {
 
 // VERIFY: 65896940 manual
 // OFFSET: 0x00490620
-void CSimpleFrame::DisableDrawLayer(uint32_t drawLayer) {
-    this->m_drawLayerEnabled[drawLayer] = 0;
-    this->NotifyDrawLayerChanged(drawLayer);
+void CSimpleFrame::DisableDrawLayer(uint32_t drawlayer) {
+    STORM_ASSERT(drawlayer < NUM_SIMPLEFRAME_DRAWLAYERS);
+
+    this->m_drawLayerEnabled[drawlayer] = 0;
+    this->NotifyDrawLayerChanged(drawlayer);
 }
 
 // VERIFY: 0670b415 manual
@@ -1434,6 +1445,8 @@ void CSimpleFrame::RemoveFrameRegion(CSimpleRegion* region, uint32_t drawLayer) 
 // VERIFY: 787b525f auto
 // OFFSET: 0x00490770
 void CSimpleFrame::OnLayerUpdate(float elapsedSec) {
+    STORM_ASSERT(!m_loading);
+
     if (this->m_onUpdate.m_luaRef) {
         lua_State* L = FrameScript_GetContext();
         lua_pushnumber(L, elapsedSec);
@@ -1456,6 +1469,8 @@ void CSimpleFrame::OnLayerUpdate(float elapsedSec) {
 // VERIFY: b0a0345a manual
 // OFFSET: 0x00490840
 void CSimpleFrame::OnFrameRender(CRenderBatch* batch, uint32_t layer) {
+    STORM_ASSERT(layer < NUM_SIMPLEFRAME_DRAWLAYERS);
+
     if (!this->m_drawLayerEnabled[layer]) {
         return;
     }
@@ -1481,8 +1496,7 @@ void CSimpleFrame::OnLayerCursorEnter(int32_t motion) {
     }
 
     if (!this->m_highlightLocked) {
-        this->m_drawLayerEnabled[DRAWLAYER_HIGHLIGHT] = 1;
-        this->NotifyDrawLayerChanged(DRAWLAYER_HIGHLIGHT);
+        this->EnableDrawLayer(DRAWLAYER_HIGHLIGHT);
     }
 
     this->RunOnEnterScript(motion);
@@ -1490,17 +1504,16 @@ void CSimpleFrame::OnLayerCursorEnter(int32_t motion) {
 
 // VERIFY: ebe4e67e manual
 // OFFSET: 0x00490980
-void CSimpleFrame::OnLayerCursorExit(int32_t motion, int32_t a3) {
+void CSimpleFrame::OnLayerCursorExit(int32_t motion, BOOL releaseMouse) {
     if (this->m_hoverFrame) {
         this->m_hoverFrame->Hide();
     }
 
     if (!this->m_highlightLocked) {
-        this->m_drawLayerEnabled[DRAWLAYER_HIGHLIGHT] = 0;
-        this->NotifyDrawLayerChanged(DRAWLAYER_HIGHLIGHT);
+        this->DisableDrawLayer(DRAWLAYER_HIGHLIGHT);
     }
 
-    if (a3) {
+    if (releaseMouse) {
         this->m_isMouseDown = 0;
         this->m_isMouseDragging = 0;
     }
@@ -1518,18 +1531,16 @@ void CSimpleFrame::LockHighlight(int32_t lock) {
     this->m_highlightLocked = lock;
 
     if (lock) {
-        this->m_drawLayerEnabled[DRAWLAYER_HIGHLIGHT] = 1;
-        this->NotifyDrawLayerChanged(DRAWLAYER_HIGHLIGHT);
+        this->EnableDrawLayer(DRAWLAYER_HIGHLIGHT);
     } else if (this->m_simpleTop->m_mouseFocus != this) {
-        this->m_drawLayerEnabled[DRAWLAYER_HIGHLIGHT] = 0;
-        this->NotifyDrawLayerChanged(DRAWLAYER_HIGHLIGHT);
+        this->DisableDrawLayer(DRAWLAYER_HIGHLIGHT);
     }
 }
 
 // VERIFY: 95d4bac7 manual
 // OFFSET: 0x00490C70
 void CSimpleFrame::ParentFrame(CSimpleFrame* child) {
-    SIMPLEFRAMENODE* node = this->m_children.NewNode(2, 0, 0);
+    SIMPLEFRAMENODE* node = this->m_children.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     node->m_frame = child;
 }
 
@@ -1565,7 +1576,7 @@ void CSimpleFrame::GetScriptTime(lua_State* L, double* time, uint32_t* count, in
 
 // VERIFY: c1ad0fe4 manual
 // OFFSET: 0x00490F60
-void CSimpleFrame::SetBeingScrolled(int32_t scrolled, int32_t a3) {
+void CSimpleFrame::SetBeingScrolled(int32_t scrolled, int32_t scrollChild) {
     uint32_t visible = this->m_isVisible;
 
     if (visible) {
@@ -1573,25 +1584,25 @@ void CSimpleFrame::SetBeingScrolled(int32_t scrolled, int32_t a3) {
     }
 
     if (scrolled) {
-        this->m_frameFlags |= 0x2000;
+        this->m_frameFlags |= FrameFlags::FRAME_BEING_SCROLLED;
     } else {
-        this->m_frameFlags &= ~0x2000u;
+        this->m_frameFlags &= ~FrameFlags::FRAME_BEING_SCROLLED;
     }
 
-    if (a3 >= 0) {
-        if (a3) {
-            this->m_frameFlags |= 0x4000;
+    if (scrollChild >= 0) {
+        if (scrollChild) {
+            this->m_frameFlags |= FrameFlags::FRAME_SCROLL_CHILD;
         } else {
-            this->m_frameFlags &= ~0x4000u;
+            this->m_frameFlags &= ~FrameFlags::FRAME_SCROLL_CHILD;
         }
     }
 
     if (scrolled) {
-        this->m_batchDirty |= 0x1F;
+        this->m_batchDirty |= BATCH_DIRTY_ALL_DRAWLAYERS;
     }
 
     for (SIMPLEFRAMENODE* node = this->m_children.Head(); node; node = this->m_children.Next(node)) {
-        if (!(node->m_frame->m_frameFlags & 0x4000)) {
+        if (!(node->m_frame->m_frameFlags & FrameFlags::FRAME_SCROLL_CHILD)) {
             node->m_frame->SetBeingScrolled(scrolled, -1);
         }
     }
@@ -1705,7 +1716,7 @@ void CSimpleFrame::SetParent(CSimpleFrame* parent) {
             this->UpdateAlpha();
         }
 
-        this->SetBeingScrolled((this->m_parent->m_frameFlags >> 13) & 1, -1);
+        this->SetBeingScrolled((this->m_parent->m_frameFlags >> 13) & (FrameFlags::FRAME_BEING_SCROLLED >> 13), -1);
     } else {
         this->SetFrameStrata(FRAME_STRATA_MEDIUM);
         this->SetFrameLevel(0, 1);
@@ -1733,7 +1744,7 @@ void CSimpleFrame::SetParent(CSimpleFrame* parent) {
 // OFFSET: 0x00491350
 int32_t CSimpleFrame::AreChildrenProtected(int32_t& deferred) {
     for (SIMPLEFRAMENODE* node = this->m_children.Head(); node; node = this->m_children.Next(node)) {
-        if (node->m_frame->m_frameFlags & 0x800) {
+        if (node->m_frame->m_frameFlags & FrameFlags::FRAME_DEFER_PROTECTION_QUERY) {
             deferred = 1;
         } else if (node->m_frame->IsProtected()) {
             return 1;
@@ -1864,7 +1875,7 @@ int32_t CSimpleFrame::HideThis() {
         return 1;
     }
 
-    if (!this->m_isLoading) {
+    if (!this->m_loading) {
         this->SetDeferredResize(1);
 
         if (this->m_titleRegion) {
@@ -1898,7 +1909,7 @@ int32_t CSimpleFrame::ShowThis() {
         return 1;
     }
 
-    if (!this->m_isLoading) {
+    if (!this->m_loading) {
         this->SetDeferredResize(0);
 
         if (this->m_titleRegion) {
@@ -1917,7 +1928,7 @@ int32_t CSimpleFrame::ShowThis() {
         node->m_frame->ShowThis();
     }
 
-    if (this->m_frameFlags & 0x1) {
+    if (this->m_frameFlags & FrameFlags::FRAME_TOPLEVEL) {
         this->m_simpleTop->RaiseFrame(this, 1);
     }
 
@@ -1941,7 +1952,7 @@ void CSimpleFrame::StopAnimating() {
 
 // VERIFY: 8b0118ef manual
 // OFFSET: 0x00491A70
-void CSimpleFrame::AnimActivated(CSimpleAnimGroup* group, int32_t first, int32_t hasAlpha) {
+void CSimpleFrame::AnimActivated(CSimpleAnimGroup* group, int32_t first, BOOL hasAlpha) {
     if (first && (!this->m_playingAnimGroups || !this->m_playingAnimGroups->Head())) {
         this->StoreAnimPosition();
     }
@@ -2051,7 +2062,7 @@ void CSimpleFrame::OnFrameRender() {
             }
         }
 
-        if (this->m_batchDirty & 0x20) {
+        if (this->m_batchDirty & BATCH_DIRTY_DELAYED_LOAD) {
             for (uint32_t layer = 0; layer < NUM_SIMPLEFRAME_DRAWLAYERS; layer++) {
                 this->m_batchDirty |= 1 << layer;
             }
@@ -2067,7 +2078,7 @@ void CSimpleFrame::OnFrameRender() {
     for (SIMPLEFRAMENODE* node = this->m_children.Head(); node; node = this->m_children.Next(node)) {
         CSimpleFrame* child = node->m_frame;
 
-        if (child->m_isVisible && !(child->m_frameFlags & 0x4000)) {
+        if (child->m_isVisible && !(child->m_frameFlags & FrameFlags::FRAME_SCROLL_CHILD)) {
             child->OnFrameRender();
         }
     }
@@ -2237,25 +2248,25 @@ void CSimpleFrame::LoadXML(XMLNode* node, CStatus* status) {
     const char* toplevel = node->GetAttributeByName("toplevel");
 
     if (toplevel && *toplevel) {
-        this->SetFrameFlag(0x1, StringToBOOL(toplevel));
+        this->SetFrameFlag(FrameFlags::FRAME_TOPLEVEL, StringToBOOL(toplevel));
     }
 
     const char* movable = node->GetAttributeByName("movable");
 
     if (movable && *movable) {
-        this->SetFrameFlag(0x100, StringToBOOL(movable));
+        this->SetFrameFlag(FrameFlags::FRAME_MOVABLE, StringToBOOL(movable));
     }
 
     const char* dontSavePosition = node->GetAttributeByName("dontSavePosition");
 
     if (dontSavePosition && *dontSavePosition) {
-        this->SetFrameFlag(0x80000, StringToBOOL(dontSavePosition));
+        this->SetFrameFlag(FrameFlags::FRAME_DONT_SAVE_POSITION, StringToBOOL(dontSavePosition));
     }
 
     const char* resizable = node->GetAttributeByName("resizable");
 
     if (resizable && *resizable) {
-        this->SetFrameFlag(0x200, StringToBOOL(resizable));
+        this->SetFrameFlag(FrameFlags::FRAME_RESIZABLE, StringToBOOL(resizable));
     }
 
     const char* frameStrata = node->GetAttributeByName("frameStrata");
@@ -2339,7 +2350,7 @@ void CSimpleFrame::LoadXML(XMLNode* node, CStatus* status) {
             titleRegion->SetParent(this);
             titleRegion->LoadXML(child, status);
             this->m_titleRegion = titleRegion;
-            titleRegion->SetDeferredResize((this->m_layoutFlags >> 8) & 2);
+            titleRegion->SetDeferredResize((this->m_layoutFlags >> 8) & (CLayoutFrame::LayoutFlags::LAYOUT_DEFERRED_RESIZE >> 8));
         } else if (!SStrCmpI(child->m_name.m_str, "ResizeBounds", STORM_MAX_STR)) {
             float minWidth = 0.0f;
             float minHeight = 0.0f;

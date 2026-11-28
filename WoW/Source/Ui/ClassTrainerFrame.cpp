@@ -183,7 +183,7 @@ int32_t CGClassTrainer::GetSkillLineIndexFromService(uint32_t index) {
 
 // VERIFY: b36e2c37 manual
 // OFFSET: 0x00594300
-int32_t CGClassTrainer::IsCollapsedHeader(uint32_t index) {
+BOOL CGClassTrainer::IsCollapsedHeader(uint32_t index) {
     if (index >= CGClassTrainer::m_numServices) {
         return 0;
     }
@@ -214,7 +214,7 @@ static int32_t QSortServices_General(const void* a, const void* b) {
             return 0;
         }
 
-        return 2 * (serviceB->m_visible != 0) - 1;
+        return serviceB->m_visible ? 1 : -1;
     }
 
     if (CGClassTrainer::m_numSkillLines) {
@@ -232,12 +232,12 @@ static int32_t QSortServices_General(const void* a, const void* b) {
         }
 
         if (lineA != lineB) {
-            return 2 * (lineA > lineB) - 1;
+            return lineA > lineB ? 1 : -1;
         }
     }
 
     if (serviceA->m_spellID < 0 || serviceB->m_spellID < 0) {
-        return 2 * (serviceA->m_spellID >= 0) - 1;
+        return serviceA->m_spellID >= 0 ? 1 : -1;
     }
 
     SpellRec spellA;
@@ -275,15 +275,15 @@ static int32_t QSortServices_Tradeskill(const void* a, const void* b) {
             return 0;
         }
 
-        return 2 * (serviceB->m_visible != 0) - 1;
+        return serviceB->m_visible ? 1 : -1;
     }
 
     if (serviceA->m_skillLine != serviceB->m_skillLine) {
-        return 2 * (serviceA->m_skillLine > serviceB->m_skillLine) - 1;
+        return serviceA->m_skillLine > serviceB->m_skillLine ? 1 : -1;
     }
 
     if (serviceA->m_spellID < 0 || serviceB->m_spellID < 0) {
-        return 2 * (serviceA->m_spellID >= 0) - 1;
+        return serviceA->m_spellID >= 0 ? 1 : -1;
     }
 
     SpellRec spellA;
@@ -307,7 +307,7 @@ void CGClassTrainer::FilterAndSortServices() {
     int32_t filter = g_serviceTypeFilterCVar->m_intValue;
 
     for (uint32_t i = 0; i < static_cast<uint32_t>(CGClassTrainer::m_numSkillLines); i++) {
-        int32_t visible = 0;
+        BOOL visible = 0;
 
         for (uint32_t state = 0; state < NUM_TRAINER_SERVICE_TYPES; state++) {
             if (((1 << state) & filter) && CGClassTrainer::m_skillLines.m_data[i]->m_stateCounts[state]) {
@@ -414,7 +414,7 @@ void CGClassTrainer::RefreshList() {
         int32_t total = 0;
         int32_t known = 0;
 
-        for (uint32_t e = 0; e < 3; e++) {
+        for (uint32_t e = 0; e < NUM_SPELL_EFFECTS; e++) {
             int32_t effect = spell.m_effect[e];
 
             if (!effect) {
@@ -427,11 +427,11 @@ void CGClassTrainer::RefreshList() {
                 Spell_C_GetMinMaxPoints(&spell, e, &minPoints, &maxPoints, 0, 0, 0, 0);
                 total++;
 
-                for (int32_t i = 0; i < 128; i++) {
-                    uint16_t skillId = player->m_obj->m_guid == ClntObjMgrGetActivePlayer() ? player->m_player->m_playerSkillInfo[i].m_skillId : 0;
+                for (int32_t i = 0; i < NUM_PLAYER_SKILLS; i++) {
+                    uint16_t skillId = player->IsActivePlayer() ? player->m_player->m_playerSkillInfo[i].m_skillId : 0;
 
                     if (skillId == spell.m_effectMiscValue[e]) {
-                        uint16_t step = player->m_obj->m_guid == ClntObjMgrGetActivePlayer() ? player->m_player->m_playerSkillInfo[i].m_step : 0;
+                        uint16_t step = player->IsActivePlayer() ? player->m_player->m_playerSkillInfo[i].m_step : 0;
 
                         if (step >= maxPoints) {
                             known++;
@@ -446,7 +446,7 @@ void CGClassTrainer::RefreshList() {
 
             int32_t spellId;
 
-            if (effect == SPELL_EFFECT_LEARN_SPELL && spell.m_implicitTargetA[e] != 5) {
+            if (effect == SPELL_EFFECT_LEARN_SPELL && spell.m_implicitTargetA[e] != SPELL_IMPLICIT_TARGET::TARGET_UNIT_PET) {
                 spellId = spell.m_effectTriggerSpell[e];
                 teaches = true;
             } else {
@@ -479,11 +479,11 @@ void CGClassTrainer::RefreshList() {
         if (CGClassTrainer::m_services.m_data[s]->m_skillReq) {
             int32_t maxRank = 0;
 
-            for (int32_t i = 0; i < 128; i++) {
-                uint16_t skillId = player->m_obj->m_guid == ClntObjMgrGetActivePlayer() ? player->m_player->m_playerSkillInfo[i].m_skillId : 0;
+            for (int32_t i = 0; i < NUM_PLAYER_SKILLS; i++) {
+                uint16_t skillId = player->IsActivePlayer() ? player->m_player->m_playerSkillInfo[i].m_skillId : 0;
 
                 if (skillId == CGClassTrainer::m_services.m_data[s]->m_skillReq) {
-                    if (player->m_obj->m_guid == ClntObjMgrGetActivePlayer()) {
+                    if (player->IsActivePlayer()) {
                         maxRank = player->m_player->m_playerSkillInfo[i].m_maxRank;
 
                         if (maxRank > 0) {
@@ -504,7 +504,7 @@ void CGClassTrainer::RefreshList() {
             SpellRec stepSpell;
 
             if (g_spellDB.GetRecord(CGClassTrainer::m_services.m_data[s]->m_stepSpellID, &stepSpell)) {
-                for (uint32_t e = 0; e < 3; e++) {
+                for (uint32_t e = 0; e < NUM_SPELL_EFFECTS; e++) {
                     if (stepSpell.m_effect[e] == SPELL_EFFECT_SKILL_STEP && stepSpell.m_effectMiscValue[e] == CGClassTrainer::m_services.m_data[s]->m_skillReq) {
                         int32_t minPoints;
                         int32_t maxPoints;
@@ -553,7 +553,7 @@ void CGClassTrainer::RefreshList() {
             line->m_stateCounts[state] = 0;
         }
 
-        line->unk_0024 = 1;
+        line->m_allServicesCostPoints = 1;
     }
 
     for (uint32_t s = 0; s < CGClassTrainer::m_numServices; s++) {
@@ -698,8 +698,8 @@ static int32_t QSortSkillLines(const void* a, const void* b) {
         return 0;
     }
 
-    if (infoA->unk_0024 != infoB->unk_0024) {
-        return infoA->unk_0024 ? 1 : -1;
+    if (infoA->m_allServicesCostPoints != infoB->m_allServicesCostPoints) {
+        return infoA->m_allServicesCostPoints ? 1 : -1;
     }
 
     SkillLineRec* lineA = g_skillLineDB.GetRecord(infoA->m_skillLine);
@@ -723,8 +723,8 @@ static int32_t GetSkillLineFromService(int32_t spellId) {
 
     int32_t effect = -1;
 
-    for (int32_t i = 0; i < 3; i++) {
-        if (spell.m_effect[i] == SPELL_EFFECT_LEARN_SPELL && spell.m_implicitTargetA[i] != 5) {
+    for (int32_t i = 0; i < NUM_SPELL_EFFECTS; i++) {
+        if (spell.m_effect[i] == SPELL_EFFECT_LEARN_SPELL && spell.m_implicitTargetA[i] != SPELL_IMPLICIT_TARGET::TARGET_UNIT_PET) {
             effect = i;
             break;
         }
@@ -776,10 +776,10 @@ void CGClassTrainer::AddServices(uint32_t count, const int32_t* spellIds, const 
             SpellRec spell;
 
             if (g_spellDB.GetRecord(info->m_spellID, &spell)) {
-                if (spell.m_attributes & 0x40) {
+                if (spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_PASSIVE) {
                     skillLine = 3;
                 } else {
-                    for (int32_t j = 0; j < 3; j++) {
+                    for (int32_t j = 0; j < NUM_SPELL_EFFECTS; j++) {
                         if (spell.m_effect[j] == SPELL_EFFECT_SKILL_STEP) {
                             skillLine = 1;
                             break;
@@ -808,8 +808,8 @@ void CGClassTrainer::AddServices(uint32_t count, const int32_t* spellIds, const 
 
             lineInfo->m_stateCounts[info->m_state]++;
 
-            if (lineInfo->unk_0024) {
-                lineInfo->unk_0024 = info->m_talentCost || info->m_professionCost;
+            if (lineInfo->m_allServicesCostPoints) {
+                lineInfo->m_allServicesCostPoints = info->m_talentCost || info->m_professionCost;
             }
 
             break;
@@ -831,9 +831,9 @@ void CGClassTrainer::AddServices(uint32_t count, const int32_t* spellIds, const 
             lineInfo->m_stateCounts[k] = 0;
         }
 
-        lineInfo->unk_0024 = 1;
+        lineInfo->m_allServicesCostPoints = 1;
         lineInfo->m_stateCounts[info->m_state]++;
-        lineInfo->unk_0024 = info->m_talentCost || info->m_professionCost;
+        lineInfo->m_allServicesCostPoints = info->m_talentCost || info->m_professionCost;
         CGClassTrainer::m_numSkillLines++;
     }
 

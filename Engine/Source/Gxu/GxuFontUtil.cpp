@@ -18,7 +18,7 @@
 
 // VERIFY: f6a00a90 manual
 // OFFSET: 0x006C02F0
-static int32_t CanWrapBetween(uint32_t previous, uint32_t next) {
+static BOOL CanWrapBetween(uint32_t previous, uint32_t next) {
     if (!previous) {
         return 0;
     }
@@ -152,7 +152,7 @@ static float GetCharacterWidth(const char* text, uint32_t flags, uint32_t code, 
         text += advance;
 
         if (quotedCode == CODE_INVALIDCODE) {
-            width = flags & 0x10 ? face->ComputeStepFixedWidth(code, wide) : face->ComputeStep(code, wide);
+            width = flags & EGxStringFlags::EGxStringFlags_FixedWidth ? face->ComputeStepFixedWidth(code, wide) : face->ComputeStep(code, wide);
 
             if (0.0f != width) {
                 return width;
@@ -169,7 +169,7 @@ static float GetCharacterWidth(const char* text, uint32_t flags, uint32_t code, 
     CHARCODEDESC* desc = face->NewCodeDesc(code);
 
     if (desc) {
-        width = face->GetGlyphBearing(desc, (flags >> 7) & 1, fontHeight) + desc->m_bitmapData.m_glyphCellWidth;
+        width = face->GetGlyphBearing(desc, (flags >> 7) & 1, fontHeight) + desc->bitmapData.m_glyphCellWidth;
     }
 
     return width;
@@ -192,6 +192,8 @@ void FreeTypeFree(FT_Memory memory, void* block) {
 // VERIFY: 326bf207 manual
 // OFFSET: 0x006C0AA0
 void* FreeTypeRealloc(FT_Memory memory, long curSize, long newSize, void* block) {
+    STORM_ASSERT(newSize > 0);
+
     return SMemReAlloc(block, newSize, __FILE__, __LINE__, 0);
 }
 
@@ -304,7 +306,7 @@ bool ParseEmbeddedTexture(const char* text, GXUEMBEDDEDTEXTUREINFO* info, float 
     info->m_pathLength = 0;
     info->m_hasTexCoords = 0;
 
-    const char* start = text + g_quotedCodeLengths[CODE_TEXTURESTART];
+    const char* start = text + g_quotedCodeLengths[CODE_EMBEDDEDTEXTURESTART];
     const char* end = SStrChr(start, '|');
 
     if (!end || start >= end || end[1] != 't') {
@@ -509,7 +511,7 @@ void InternalGetTextExtent(CGxFont* face, const char* text, uint32_t numBytes, f
         return;
     }
 
-    if (0.0f == fontHeight || (flags & 4)) {
+    if (0.0f == fontHeight || (flags & EGxStringFlags::EGxStringFlags_FixedSize)) {
         fontHeight = GxuFontGetOneToOneHeight(face);
     }
 
@@ -520,9 +522,9 @@ void InternalGetTextExtent(CGxFont* face, const char* text, uint32_t numBytes, f
         width = ceil(static_cast<double>(CMath::fint_n(shadowPixels)));
     }
 
-    if (face->m_fontFlags & 8) {
+    if (face->GetFontFlags() & CGxFont::FONT_FLAGS::FONT_THICK_OUTLINE) {
         width = width + 4.0;
-    } else if (face->m_fontFlags & 1) {
+    } else if (face->GetFontFlags() & CGxFont::FONT_FLAGS::FONT_OUTLINE) {
         width = width + 2.0;
     }
 
@@ -542,13 +544,13 @@ void InternalGetTextExtent(CGxFont* face, const char* text, uint32_t numBytes, f
             case CODE_COLORRESTORE:
             case CODE_HYPERLINKSTART:
             case CODE_HYPERLINKSTOP:
-            case CODE_TEXTURESTOP: {
+            case CODE_EMBEDDEDTEXTURESTOP: {
                 break;
             }
 
-            case CODE_TEXTURESTART: {
+            case CODE_EMBEDDEDTEXTURESTART: {
                 GXUEMBEDDEDTEXTUREINFO info;
-                float fontPixelHeight = ScreenToPixelHeight(flags & 0x80, fontHeight);
+                float fontPixelHeight = ScreenToPixelHeight(flags & EGxStringFlags::EGxStringFlags_Unscaled, fontHeight);
 
                 if (ParseEmbeddedTexture(text - advance, &info, fontPixelHeight, scale, fontHeight)) {
                     width = info.m_width + width;
@@ -581,7 +583,7 @@ void InternalGetTextExtent(CGxFont* face, const char* text, uint32_t numBytes, f
                 float step = 0.0f;
 
                 if (lastCode) {
-                    step = flags & 0x10 ? face->ComputeStepFixedWidth(lastCode, wide) : face->ComputeStep(lastCode, wide);
+                    step = flags & EGxStringFlags::EGxStringFlags_FixedWidth ? face->ComputeStepFixedWidth(lastCode, wide) : face->ComputeStep(lastCode, wide);
                 }
 
                 characterWidth = GetCharacterWidth(text, flags, wide, face, fontHeight);
@@ -595,13 +597,13 @@ void InternalGetTextExtent(CGxFont* face, const char* text, uint32_t numBytes, f
     float lineWidth = characterWidth + width;
     double totalWidth = maxWidth >= lineWidth ? maxWidth : lineWidth;
 
-    float fontPixelHeight = ScreenToPixelHeight(flags & 0x80, fontHeight);
+    float fontPixelHeight = ScreenToPixelHeight(flags & EGxStringFlags::EGxStringFlags_Unscaled, fontHeight);
     double pixelHeight = fontPixelHeight;
     float ratio = pixelHeight / face->GetPixelSize();
     float total = totalWidth;
     float result = ratio * total;
 
-    if (flags & 0x80) {
+    if (flags & EGxStringFlags::EGxStringFlags_Unscaled) {
         *extent = result;
     } else {
         *extent = result / g_widthPixels;
@@ -617,9 +619,9 @@ uint32_t InternalGetMaxCharsWithinWidth(CGxFont* face, const char* text, float f
     }
 
     uint32_t numChars = 0;
-    uint32_t unscaled = flags & 0x80;
+    uint32_t unscaled = flags & EGxStringFlags::EGxStringFlags_Unscaled;
 
-    if (!unscaled && (0.0f == fontHeight || (flags & 4))) {
+    if (!unscaled && (0.0f == fontHeight || (flags & EGxStringFlags::EGxStringFlags_FixedSize))) {
         fontHeight = GxuFontGetOneToOneHeight(face);
     }
 
@@ -630,9 +632,9 @@ uint32_t InternalGetMaxCharsWithinWidth(CGxFont* face, const char* text, float f
         width = ceil(static_cast<double>(CMath::fint_n(shadowPixels)));
     }
 
-    if (face->m_fontFlags & 8) {
+    if (face->GetFontFlags() & CGxFont::FONT_FLAGS::FONT_THICK_OUTLINE) {
         width = width + 4.0;
-    } else if (face->m_fontFlags & 1) {
+    } else if (face->GetFontFlags() & CGxFont::FONT_FLAGS::FONT_OUTLINE) {
         width = width + 2.0;
     }
 
@@ -670,11 +672,11 @@ uint32_t InternalGetMaxCharsWithinWidth(CGxFont* face, const char* text, float f
             break;
         }
 
-        if (code == CODE_COLORON || code == CODE_COLORRESTORE || code == CODE_HYPERLINKSTART || code == CODE_HYPERLINKSTOP || code == CODE_TEXTURESTOP) {
+        if (code == CODE_COLORON || code == CODE_COLORRESTORE || code == CODE_HYPERLINKSTART || code == CODE_HYPERLINKSTOP || code == CODE_EMBEDDEDTEXTURESTOP) {
             continue;
         }
 
-        if (code == CODE_TEXTURESTART) {
+        if (code == CODE_EMBEDDEDTEXTURESTART) {
             GXUEMBEDDEDTEXTUREINFO info;
 
             if (!ParseEmbeddedTexture(text - advance, &info, fontPixelHeight, scale, fontHeight)) {
@@ -701,7 +703,7 @@ uint32_t InternalGetMaxCharsWithinWidth(CGxFont* face, const char* text, float f
         float step = 0.0f;
 
         if (lastCode) {
-            step = flags & 0x10 ? face->ComputeStepFixedWidth(lastCode, wide) : face->ComputeStep(lastCode, wide);
+            step = flags & EGxStringFlags::EGxStringFlags_FixedWidth ? face->ComputeStepFixedWidth(lastCode, wide) : face->ComputeStep(lastCode, wide);
         }
 
         float nextCharacterWidth = GetCharacterWidth(text, flags, wide, face, fontHeight);
@@ -784,15 +786,15 @@ static void CalcWrapPointBillboarded(const char* text, uint32_t flags, CGxFont* 
             case CODE_COLORRESTORE:
             case CODE_HYPERLINKSTART:
             case CODE_HYPERLINKSTOP:
-            case CODE_TEXTURESTOP: {
+            case CODE_EMBEDDEDTEXTURESTOP: {
                 break;
             }
 
-            case CODE_TEXTURESTART: {
+            case CODE_EMBEDDEDTEXTURESTART: {
                 GXUEMBEDDEDTEXTUREINFO info;
                 float fontPixelHeight;
 
-                if (flags & 0x80) {
+                if (flags & EGxStringFlags::EGxStringFlags_Unscaled) {
                     fontPixelHeight = fontHeight;
                 } else {
                     float pixels = g_heightPixels * fontHeight;
@@ -812,7 +814,7 @@ static void CalcWrapPointBillboarded(const char* text, uint32_t flags, CGxFont* 
 
             default: {
                 if (face->NewCodeDesc(wide)) {
-                    float step = lastCode ? (flags & 0x10 ? face->ComputeStepFixedWidth(lastCode, wide) : face->ComputeStep(lastCode, wide)) : 0.0f;
+                    float step = lastCode ? (flags & EGxStringFlags::EGxStringFlags_FixedWidth ? face->ComputeStepFixedWidth(lastCode, wide) : face->ComputeStep(lastCode, wide)) : 0.0f;
                     lineWidth = step + lineWidth;
                     characterWidth = GetCharacterWidth(text + advance, flags, wide, face, fontHeight);
                     lastCode = wide;
@@ -847,7 +849,7 @@ static void CalcWrapPointBillboarded(const char* text, uint32_t flags, CGxFont* 
 // VERIFY: 0161de14 manual
 // OFFSET: 0x006C1D40
 static void CalcWrapPointNonBillboarded(const char* text, CGxFont* face, float fontHeight, float blockWidth, uint32_t* numBytes, float* width, const char** nextText, float shadowWidth, uint32_t flags, bool* wordBreak, float* height, float scale) {
-    if (0.0f == fontHeight || (flags & 4)) {
+    if (0.0f == fontHeight || (flags & EGxStringFlags::EGxStringFlags_FixedSize)) {
         fontHeight = GxuFontGetOneToOneHeight(face);
     }
 
@@ -858,9 +860,9 @@ static void CalcWrapPointNonBillboarded(const char* text, CGxFont* face, float f
         lineWidth = ceil(static_cast<double>(CMath::fint_n(shadowPixels)));
     }
 
-    if (face->m_fontFlags & 8) {
+    if (face->GetFontFlags() & CGxFont::FONT_FLAGS::FONT_THICK_OUTLINE) {
         lineWidth = lineWidth + 4.0;
-    } else if (face->m_fontFlags & 1) {
+    } else if (face->GetFontFlags() & CGxFont::FONT_FLAGS::FONT_OUTLINE) {
         lineWidth = lineWidth + 2.0;
     }
 
@@ -894,7 +896,7 @@ static void CalcWrapPointNonBillboarded(const char* text, CGxFont* face, float f
             break;
         }
 
-        if (code == CODE_TEXTURESTART) {
+        if (code == CODE_EMBEDDEDTEXTURESTART) {
             GXUEMBEDDEDTEXTUREINFO info;
 
             if (!ParseEmbeddedTexture(text, &info, fontPixelHeight, scale, fontHeight)) {
@@ -917,13 +919,13 @@ static void CalcWrapPointNonBillboarded(const char* text, CGxFont* face, float f
 
             lastCode = wide;
             advance = 0;
-        } else if (code == CODE_COLORON || code == CODE_COLORRESTORE || code == CODE_HYPERLINKSTART || code == CODE_HYPERLINKSTOP || code == CODE_TEXTURESTOP) {
+        } else if (code == CODE_COLORON || code == CODE_COLORRESTORE || code == CODE_HYPERLINKSTART || code == CODE_HYPERLINKSTOP || code == CODE_EMBEDDEDTEXTURESTOP) {
             text += advance;
             continue;
         }
 
         if (face->NewCodeDesc(wide)) {
-            float step = lastCode ? (flags & 0x10 ? face->ComputeStepFixedWidth(lastCode, wide) : face->ComputeStep(lastCode, wide)) : 0.0f;
+            float step = lastCode ? (flags & EGxStringFlags::EGxStringFlags_FixedWidth ? face->ComputeStepFixedWidth(lastCode, wide) : face->ComputeStep(lastCode, wide)) : 0.0f;
 
             if (CanWrapBetween(lastCode, wide)) {
                 if (*wordBreak || breakBytes) {
@@ -966,7 +968,7 @@ static void CalcWrapPointNonBillboarded(const char* text, CGxFont* face, float f
         return;
     }
 
-    if (breakBytes && !(flags & 2)) {
+    if (breakBytes && !(flags & EGxStringFlags::EGxStringFlags_NoWordWrap)) {
         *numBytes = breakBytes;
         *width = scaleRatio * breakWidth;
         text = start + breakBytes;
@@ -993,7 +995,7 @@ static void CalcWrapPointNonBillboarded(const char* text, CGxFont* face, float f
 // OFFSET: 0x006C21A0
 void CalcWrapPoint(CGxFont* face, const char* text, float fontHeight, float blockWidth, uint32_t* numBytes, float* width, const char** nextText, float shadowWidth, uint32_t flags, bool* wordBreak, float* height, float scale) {
     if (fontHeight >= 0.0f && blockWidth > 0.0f && text && *text) {
-        if (flags & 0x80) {
+        if (flags & EGxStringFlags::EGxStringFlags_Unscaled) {
             CalcWrapPointBillboarded(text, flags, face, fontHeight, numBytes, width, nextText, height, scale);
         } else {
             CalcWrapPointNonBillboarded(text, face, fontHeight, blockWidth, numBytes, width, nextText, shadowWidth, flags, wordBreak, height, scale);

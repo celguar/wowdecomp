@@ -1,4 +1,5 @@
 #include <cstddef>
+#include "WoW/Common/Types.h"
 #include <cstdint>
 #include <cstring>
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
@@ -18,12 +19,12 @@ static SE2SoundKitObject s_vocalErrorObject;
 void SI2::InitVocalErrorSounds(int32_t race, uint32_t sex) {
     memset(s_vocalErrorSounds, 0, sizeof(s_vocalErrorSounds));
 
-    if (sex > 1) {
+    if (sex > UNITSEX_FEMALE) {
         return;
     }
 
-    for (int32_t i = 0; i < g_vocalUISoundsDB.m_numRecords; i++) {
-        VocalUISoundsRec* rec = (i < 0 || i >= g_vocalUISoundsDB.m_numRecords) ? nullptr : &g_vocalUISoundsDB.m_records[i];
+    for (int32_t i = 0; i < g_vocalUISoundsDB.GetNumRecords(); i++) {
+        VocalUISoundsRec* rec = (i < 0 || i >= g_vocalUISoundsDB.GetNumRecords()) ? nullptr : &g_vocalUISoundsDB.m_records[i];
 
         if (rec && rec->m_vocalUienum < NUM_VOCALUISOUNDS && rec->m_raceID == race) {
             s_vocalErrorSounds[rec->m_vocalUienum] = rec->m_normalSoundID[sex];
@@ -33,7 +34,7 @@ void SI2::InitVocalErrorSounds(int32_t race, uint32_t sex) {
 
 // VERIFY: 535f9207 auto
 // OFFSET: 0x00986D00
-void SI2::PlayVocalErrorSound(int32_t error) {
+void SI2::PlayVocalErrorSound(VOCALUISOUNDS error) {
     static CVar* s_enableErrorSpeech = CVar::Lookup("Sound_EnableErrorSpeech");
 
     if (!s_enableErrorSpeech || !s_enableErrorSpeech->m_intValue || error >= static_cast<int32_t>(sizeof(s_vocalErrorSounds) / sizeof(s_vocalErrorSounds[0]))) {
@@ -47,11 +48,11 @@ void SI2::PlayVocalErrorSound(int32_t error) {
     int32_t soundKitId = s_vocalErrorSounds[error];
     SE2SoundKitProperties properties;
     properties.ResetToDefaults();
-    properties.m_group = 7;
+    properties.m_group = SI2_SOUND_GROUP_VOCAL_ERROR;
 
     CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
 
-    if (player && player->m_unit->m_unitFieldBytes0[1] == 6) {
+    if (player && player->m_unit->m_classID == CLASS_DEATH_KNIGHT) {
         properties.m_useDspChain = 1;
         SI2::DK_GetPlayerFilterName(player, properties.m_dspChainName, sizeof(properties.m_dspChainName));
     }

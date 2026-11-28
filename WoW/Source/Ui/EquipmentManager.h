@@ -2,12 +2,17 @@
 #define WOW_SOURCE_UI_EQUIPMENTMANAGER_H
 
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "WoW/Source/Net/Types.h"
 #include "Engine/Source/Storm/H/stpl.h"
+#include "WoW/Common/ComponentCore/Types.h"
 
 class CDataStore;
 struct lua_State;
+
+// FrameXML MAX_EQUIPMENT_SETS_PER_PLAYER.
+constexpr int32_t MAX_EQUIPMENT_SETS_PER_PLAYER = 10;
 
 struct EQUIPMENT_SET {
     /* 0000 */ uint32_t m_handle;
@@ -17,7 +22,7 @@ struct EQUIPMENT_SET {
     /* 0014 */ char m_icon[256];
     /* 0114 */ char m_name[128];
     /* 0194 */ uint32_t unused_0194;
-    /* 0198 */ WOWGUID m_items[19];
+    /* 0198 */ WOWGUID m_items[EQUIPPED_LAST + 1];
     /* 0230 */ uint32_t m_isNew;
 
     EQUIPMENT_SET();
@@ -39,9 +44,9 @@ class CGEquipmentManager {
     static uint8_t m_lastCanUseEquipmentSetsValue;
     static uint8_t m_loaded;
     static uint8_t m_swapPending;
-    static int32_t m_ignoredSlots[19];
+    static int32_t m_ignoredSlots[EQUIPPED_LAST + 1];
     static int32_t m_pendingSetID;
-    static int32_t CanUseEquipmentSets(bool a1);
+    static BOOL CanUseEquipmentSets(bool updateActionBar);
     static const EQUIPMENT_SET* GetSetByID(int32_t id);
     static int32_t SetContainsLockedItems(const EQUIPMENT_SET* set);
     static int32_t SetUsesLockedSlots(const EQUIPMENT_SET* set);

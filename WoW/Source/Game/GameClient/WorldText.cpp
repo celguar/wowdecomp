@@ -1,4 +1,5 @@
 #include "WorldText.h"
+#include "Engine/Source/Tempest/Color.h"
 #include <cmath>
 #include <new>
 #include <typeinfo>
@@ -33,7 +34,14 @@
 #include "WoW/Source/Ui/WorldFrame.h"
 
 // STATIC: 0x00A41618
-static float s_critHeightCurve[3][4] = {
+struct CRITHEIGHT { // (inferred)
+    float startProgress;
+    float endProgress;
+    float startScale; // (inferred)
+    float endScale; // (inferred)
+};
+
+static CRITHEIGHT s_critHeights[3] = {
     { 0.0f, 0.1f, 0.1f, 2.0f },
     { 0.1f, 0.2f, 2.0f, 1.0f },
     { 0.2f, 1.0f, 1.0f, 1.0f },
@@ -41,16 +49,16 @@ static float s_critHeightCurve[3][4] = {
 
 // STATIC: 0x00AF4748
 static WORLDTEXTTYPE s_worldTextTypes[NUM_WORLDTEXTTYPES] = {
-    { 2.0f, 150, 760, 1500, 0.018333333f, 0.018333333f, CImVector(0xFF, 0xFF, 0xFF, 0xFF) },
-    { 2.0f, 150, 90, 1500, 0.018333333f, 0.018333333f, CImVector(0xFF, 0xFF, 0xFF, 0xFF) },
-    { 0.0f, 150, 1000, 1500, 0.0f, 0.027499998f, CImVector(0xFF, 0xFF, 0xFF, 0xFF) },
-    { 2.0f, 150, 1000, 1500, 0.018333333f, 0.018333333f, CImVector(0xFF, 0xFF, 0xFF, 0xFF) },
+    { 2.0f, 150, 760, 1500, 0.018333333f, 0.018333333f, CImVector(COLOR_WHITE_BGRA) },
+    { 2.0f, 150, 90, 1500, 0.018333333f, 0.018333333f, CImVector(COLOR_WHITE_BGRA) },
+    { 0.0f, 150, 1000, 1500, 0.0f, 0.027499998f, CImVector(COLOR_WHITE_BGRA) },
+    { 2.0f, 150, 1000, 1500, 0.018333333f, 0.018333333f, CImVector(COLOR_WHITE_BGRA) },
     { 0.0f, 500, 2000, 4500, 0.018333333f, 0.018333333f, CImVector(0x8B, 0x00, 0x94, 0x80) },
     { 0.0f, 500, 2000, 4500, 0.018333333f, 0.018333333f, CImVector(0x0A, 0xCA, 0xE0, 0xFF) },
-    { 2.0f, 150, 760, 1500, 0.018333333f, 0.018333333f, CImVector(0x00, 0xFF, 0x00, 0xFF) },
-    { 0.0f, 150, 1000, 1500, 0.0f, 0.027499998f, CImVector(0x00, 0xFF, 0x00, 0xFF) },
-    { 6.0f, 150, 760, 1500, 0.027499998f, 0.027499998f, CImVector(0xFF, 0xFF, 0xFF, 0xFF) },
-    { 6.0f, 150, 760, 1500, 0.027499998f, 0.027499998f, CImVector(0x00, 0xFF, 0x00, 0xFF) },
+    { 2.0f, 150, 760, 1500, 0.018333333f, 0.018333333f, CImVector(COLOR_GREEN_BGRA) },
+    { 0.0f, 150, 1000, 1500, 0.0f, 0.027499998f, CImVector(COLOR_GREEN_BGRA) },
+    { 6.0f, 150, 760, 1500, 0.027499998f, 0.027499998f, CImVector(COLOR_WHITE_BGRA) },
+    { 6.0f, 150, 760, 1500, 0.027499998f, 0.027499998f, CImVector(COLOR_GREEN_BGRA) },
     { 2.0f, 150, 760, 1500, 0.018333333f, 0.018333333f, CImVector(0x00, 0x99, 0xFF, 0xFF) },
 };
 
@@ -131,6 +139,8 @@ float WorldTextGetAscendDistance(uint32_t type) {
 // VERIFY: 271233c4 auto
 // OFFSET: 0x007E66F0
 void WORLDTEXTSTRING::RecreateString() {
+    STORM_ASSERT(m_type < NUM_WORLDTEXTTYPES);
+
     if (this->m_string) {
         GxuFontDestroyString(this->m_string);
     }
@@ -277,8 +287,10 @@ void WORLDTEXTSTRING::CalculateTextHeight(uint32_t elapsed) {
         float scale = 1.0f;
 
         for (uint32_t i = 0; i < 3; i++) {
-            if (s_critHeightCurve[i][0] <= progress && s_critHeightCurve[i][1] > progress) {
-                scale = (progress - s_critHeightCurve[i][0]) / (s_critHeightCurve[i][1] - s_critHeightCurve[i][0]) * (s_critHeightCurve[i][3] - s_critHeightCurve[i][2]) + s_critHeightCurve[i][2];
+            STORM_ASSERT(s_critHeights[i].startProgress <= s_critHeights[i].endProgress);
+
+            if (s_critHeights[i].startProgress <= progress && s_critHeights[i].endProgress > progress) {
+                scale = (progress - s_critHeights[i].startProgress) / (s_critHeights[i].endProgress - s_critHeights[i].startProgress) * (s_critHeights[i].endScale - s_critHeights[i].startScale) + s_critHeights[i].startScale;
                 break;
             }
         }
@@ -305,6 +317,8 @@ WORLDTEXTSTRING* WorldTextCreate(uint32_t type, const C3Vector& position, const 
         return nullptr;
     }
 
+    STORM_ASSERT(type < NUM_WORLDTEXTTYPES);
+
     WORLDTEXTSTRING* string = s_freeStrings.New<WORLDTEXTSTRING>(0);
 
     if (color) {
@@ -314,7 +328,7 @@ WORLDTEXTSTRING* WorldTextCreate(uint32_t type, const C3Vector& position, const 
     }
 
     string->m_position = position;
-    string->m_type = type;
+    string->m_type = static_cast<WORLDTEXT_STYLE>(type);
     string->m_startTime = OsGetAsyncTimeMs();
     SStrCopy(string->m_text, text, sizeof(string->m_text));
 
@@ -359,7 +373,7 @@ bool WORLDTEXTSTRING::Update(uint32_t time) {
 
     position.z = this->CalculateAscendOffset(elapsed) + position.z;
 
-    CGWorldFrame* worldFrame = CGWorldFrame::s_currentWorldFrame;
+    CGWorldFrame* worldFrame = CGWorldFrame::GetActive();
     CRect frameRect;
     frameRect.minY = 0.0f;
     frameRect.minX = 0.0f;
@@ -374,7 +388,7 @@ bool WORLDTEXTSTRING::Update(uint32_t time) {
     uint32_t result = 0;
     worldFrame->GetScreenCoordinates(C3Vector(position), &screen, &result);
 
-    if (!(result & 0x1) || !(result & 0x4)) {
+    if (!(result & CGWorldFrame::SCREEN_BOUNDS_LEFT) || !(result & CGWorldFrame::SCREEN_BOUNDS_RIGHT)) {
         return false;
     }
 
@@ -488,7 +502,7 @@ void WorldTextRenderBatch() {
     g_theGxDevicePtr->RsSet(GxRs_Lighting, 0);
     g_theGxDevicePtr->RsSet(GxRs_Fog, 0);
     g_theGxDevicePtr->RsSet(GxRs_Culling, 0);
-    g_theGxDevicePtr->RsSet(GxRs_BlendingMode, 2);
+    g_theGxDevicePtr->RsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxUpdateAlphaRef(GxRs_AlphaRef);
 
     C44Matrix identity;
@@ -539,10 +553,7 @@ void WorldTextRenderBatch() {
         C44Matrix world;
         world.Translate(icon.m_position);
 
-        CGxMatrixStack& worldStack = g_theGxDevicePtr->m_xforms[GxXform_World];
-        worldStack.m_dirty = 1;
-        worldStack.m_flags[worldStack.m_level] &= ~CGxMatrixStack::F_Identity;
-        worldStack.m_mtx[worldStack.m_level] = world;
+        GxXformSet(GxXform_World, world);
 
         CGxBatch batch;
         batch.m_primType = GxPrim_Triangles;
@@ -571,6 +582,8 @@ void WorldTextRenderBatch() {
 // OFFSET: 0x007E7BB0
 void WorldTextInitialize() {
     const char* fontName = FrameScript_GetText("DAMAGE_TEXT_FONT", -1, GENDER_NOT_APPLICABLE);
+    STORM_ASSERT(fontName && *fontName);
+
     s_worldTextFont = TextBlockGenerateFont(fontName, 0, DDCToNDCHeight(0.018333333f));
     s_worldTextBatch = GxuFontCreateBatch(false, false);
 

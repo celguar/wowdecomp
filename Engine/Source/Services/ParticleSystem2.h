@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Model2/M2Data.h"
 #include "Engine/Source/Storm/H/stpl.h"
@@ -12,7 +13,7 @@
 #include "Engine/Source/Tempest/C4Quaternion.h"
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Tempest/CImVector.h"
-#include "Engine/Source/Tempest/CMemBlock.h"
+#include "Engine/Source/Tempest/cpriorityq.h"
 #include "Engine/Source/Tempest/CRandom.h"
 
 class C2Vector;
@@ -46,6 +47,15 @@ class CParticle2_Model : public CParticle2 {
 
 class CParticleMat {
     public:
+    // Positive particle material enables; M2Material uses separate inverted flags.
+    enum FLAGS : uint32_t {
+        NONE = 0,
+        LIT = 1,
+        FOGGED = 2,
+        DEPTH_WRITE = 4,
+        DEFAULT = 7,
+    };
+
     /* 0000 */ uint32_t m_blendMode;
     /* 0004 */ uint32_t m_flags;
 };
@@ -55,14 +65,9 @@ struct CSortableParticleRecord {
     /* 0004 */ CParticle2* m_particle;
 };
 
-class CSortableParticleQueue : public CMemBlock {
+class CSortableParticleQueue : public CPriorityQ<CSortableParticleRecord> {
     public:
-    /* 0014 */ uint32_t m_chunk;
-    /* 0018 */ uint32_t m_capacity;
-    /* 001C */ uint32_t m_count;
-
     CSortableParticleQueue(const uint32_t* params);
-    void Erase(uint32_t index, uint32_t count);
     CSortableParticleRecord Pop();
     void Push(float depth, CParticle2* particle);
 };
@@ -73,6 +78,11 @@ class CParticleEmitter2 {
     static const float MIN_ZSOURCE;
 
     public:
+    // First render contribution to GetNumBatches; not an M2Batch file flag.
+    enum BATCH_FLAGS : int32_t {
+        BATCH_FIRST_RENDER = 0x1,
+    };
+
     enum PARTICLE_EMITTER_TYPE : int32_t {
         PET_BASE_EMITTER = 0,
         PET_PLANE_EMITTER = 1,
@@ -80,6 +90,23 @@ class CParticleEmitter2 {
         PET_SPLINE_EMITTER = 3,
         PET_NUMS_PETS = 4,
     };
+
+    enum : uint32_t {
+        NUM_PARTICLE_KEYS = 2,
+        MAX_CHILD_EMITTERS = 4,
+    };
+
+    enum : uint32_t {
+        MAX_RECURSIVE_PARTICLES = 0x1000,
+        RND_TABLE_SIZE = 128,
+        RND_TABLE_MASK = 0x7F,
+    };
+
+    static const uint32_t VERTICES_PER_QUAD = 4;
+    static const uint32_t INDICES_PER_QUAD = 6;
+    static const uint32_t INDICES_PER_TRIANGLE = 3;
+    static const uint32_t MAX_VERTICES_PER_BATCH = 0x4000;
+    static const uint32_t INDEX_BUFFER_CAPACITY = 0x1fff8;
 
     enum PARTICLE_TYPE : uint32_t {
         PT_QUAD = 0,
@@ -115,7 +142,7 @@ class CParticleEmitter2 {
     };
 
     struct Params {
-        /* 0000 */ uint32_t m_hasModel;
+        /* 0000 */ PARTICLE_TYPE m_particleType;
         /* 0004 */ float m_emissionRate;
         /* 0008 */ float m_emissionRateVariation;
         /* 000C */ float m_life;
@@ -129,9 +156,8 @@ class CParticleEmitter2 {
         /* 002C */ float m_initialSpinVariation;
         /* 0030 */ float m_spin;
         /* 0034 */ float m_spinVariation;
-        /* 0038 */ uint32_t m_materialBlend;
-        /* 003C */ uint32_t m_materialFlags;
-        /* 0040 */ const M2PartTrack<C3Vector>* m_colorTrack;
+        /* 0038 */ CParticleMat m_material; // Same blend/flag pair accepted by SetMaterial.
+        /* 0040 */ const M2PartTrack<C3Vector>* colorTrack;
         /* 0044 */ const M2PartTrack<fixed16>* m_alphaTrack;
         /* 0048 */ const M2PartTrack<C2Vector>* m_scaleTrack;
         /* 004C */ float m_scaleVariationX;
@@ -150,7 +176,7 @@ class CParticleEmitter2 {
     static uint32_t s_initCount;
     static uint8_t s_noIndexBuffer;
     static CSortableParticleQueue s_pq;
-    static float s_rndTable[128];
+    static float s_rndTable[CParticleEmitter2::RND_TABLE_SIZE];
     static float s_viewDist;
 
     static void Destroy();
@@ -171,15 +197,21 @@ class CParticleEmitter2 {
     /* 003C */ TSGrowableArray<CParticle2_Model> m_particleModels;
     /* 004C */ TSGrowableArray<uint32_t> m_liveList;
     /* 005C */ TSGrowableArray<uint32_t> m_freeList;
+    private:
+    static void RecursiveEmitterModelLoaded(CM2Model* model, void* arg);
     /* 006C */ uint32_t m_childEmitterCount;
-    /* 0070 */ CParticleEmitter2* m_childEmitters [4];
+    /* 0070 */ CParticleEmitter2* m_childEmitters [CParticleEmitter2::MAX_CHILD_EMITTERS];
+    public:
+    uint32_t GetChildEmitterCount() const { return this->m_childEmitterCount; } // (inferred)
+    CParticleEmitter2* GetChildEmitter(uint32_t index) const { return this->m_childEmitters[index]; } // (inferred)
+
     /* 0080 */ CM2Model* m_model;
     /* 0084 */ CM2Scene* m_scene;
     /* 0088 */ CM2Model* m_childModel;
     /* 008C */ uint32_t m_vertsPerParticle;
     /* 0090 */ uint32_t m_indicesPerParticle;
     /* 0094 */ uint32_t unused_0094;
-    /* 0098 */ CParticleEmitter2::Params m_params;
+    /* 0098 */ CParticleEmitter2::Params m_particle;
     /* 0120 */ uint32_t m_textureRows;
     /* 0124 */ uint32_t m_textureCols;
     /* 0128 */ CTexture* m_texture;
@@ -216,7 +248,10 @@ class CParticleEmitter2 {
     /* 0200 */ C3Vector m_burstOffset;
     /* 020C */ C3Vector m_billboardAxis;
     /* 0218 */ CAaBox m_worldBounds;
-    /* 0230 */ uint32_t unused_0230;
+    private:
+    /* 0230 */ uint32_t m_worldEmitter; // (inferred) Windows only clears this slot.
+
+    public:
 
     virtual void Sync();
     virtual void CreateParticle(CParticle2& particle, float time, const C44Matrix& transform);
@@ -247,8 +282,11 @@ class CParticleEmitter2 {
     uint32_t GetNumParticleModels();
     uint32_t GetNumPrimitives();
     CM2Model* GetParticleModelInternal(uint32_t& index);
-    void GetReplacementColors(CImVector& color0, CImVector& color1, CImVector& color2);
-    int32_t HasLiveParticles();
+    void GetReplacementColors(CImVector& color0, CImVector& color1, CImVector& color2) const;
+    bool IsModelEmitter() const {
+        return this->m_particle.m_particleType == PT_MODEL;
+    }
+    BOOL HasLiveParticles();
     void InternalUpdate(float deltaTime, int32_t child);
     void InterpolateAllTracks(const CParticle2& particle, CImVector* color, C2Vector* scale, int32_t* headCell, int32_t* tailCell);
     void InterpolateAllTracksSimple(const CParticle2& particle, CImVector* color, C2Vector* scale, int32_t* headCell, int32_t* tailCell);
@@ -284,6 +322,40 @@ class CParticleEmitter2 {
     int32_t UpdateLiveParticle(float deltaTime, CParticle2* particle, uint32_t index);
     void UpdateXform(const C44Matrix& transform, const C3Vector& viewPos, const C44Matrix* frameOfReference);
     CAaBox& WorldBounds();
+
+    // Runtime m_flags only; distinct from material, batch and M2 file flags.
+    // UNKNOWN bits preserve verified update markers/render exclusion without
+    // assigning unsupported original identities.
+    enum RUNTIME_FLAGS : uint32_t {
+        DATA_EMITTING = 0x1,
+        USER_ENABLED = 0x2,
+        HEAD = 0x4,
+        TAIL = 0x8,
+        PROP_PARTICLE_COLOR_SET = 0x10,
+        SORT_PARTICLES = 0x20,
+        BURST_PENDING = 0x40,
+        UNKNOWN_00000080 = 0x80,
+        UNKNOWN_00000100 = 0x100,
+        LOCAL_SPACE = 0x200,
+        TRANSFORM_SCALE = 0x400,
+        INHERIT_VELOCITY = 0x800,
+        KILL_OUTWARD_PARTICLES = 0x1000,
+        EMIT_ALONG_MOTION = 0x2000,
+        USE_BILLBOARD_AXIS = 0x4000,
+        SPHERE_Z_VELOCITY = 0x8000,
+        RANDOM_SPIN_DIRECTION = 0x10000,
+        CLAMP_TAIL = 0x20000,
+        PROJECT = 0x40000,
+        FOLLOW = 0x80000,
+        RANDOM_TEXTURE = 0x100000,
+        VELOCITY_ALIGNED_HEAD = 0x200000,
+        IGNORE_DISTANCE = 0x400000,
+        SCALE_VARIATION = 0x800000,
+        SIMPLE_TRACKS = 0x1000000,
+        UNKNOWN_02000000 = 0x2000000,
+        EMISSION_ENABLED_MASK = 0x3,
+        INITIAL_FLAGS = 0x6,
+    };
 };
 
 class CPlaneParticleEmitter : public CParticleEmitter2 {
@@ -325,12 +397,12 @@ class CSphereParticleEmitter : public CParticleEmitter2 {
 
 class CSplineParticleEmitter : public CParticleEmitter2 {
     public:
-    /* 0234 */ float m_ratePerUnit;
-    /* 0238 */ float m_start;
-    /* 023C */ float m_end;
-    /* 0240 */ float m_latitude;
-    /* 0244 */ float m_longitude;
-    /* 0248 */ int32_t m_emitAtEnd;
+    /* 0234 */ float m_requestedEmissionRate; // Requested rate before multiplication by m_end.
+    /* 0238 */ float m_start; // Normalized arc-length start parameter, set by SetWidth.
+    /* 023C */ float m_end; // Normalized arc-length end parameter, set by SetHeight; also scales the requested rate.
+    /* 0240 */ float m_latitude; // Random rotation about the spline tangent is scaled by this angle in radians.
+    /* 0244 */ float m_radius; // Local-space position offset scale along the rotated direction, set by SetLongitude.
+    /* 0248 */ int32_t m_emitAtEnd; // The next particle uses m_end after SetHeight changes it.
     /* 024C */ C3Spline_Bezier3 m_spline;
 
     CSplineParticleEmitter();
@@ -341,7 +413,7 @@ class CSplineParticleEmitter : public CParticleEmitter2 {
     void SetWidth(float width) override;
     void SetHeight(float height) override;
     void SetLatitude(float latitude) override;
-    void SetLongitude(float longitude) override;
+    void SetLongitude(float radius) override;
     void SetEmissionRate(float rate) override;
     void SetSpline(const C3Vector* points, uint32_t count);
 };

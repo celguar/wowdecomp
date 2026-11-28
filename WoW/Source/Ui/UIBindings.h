@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/Status.h"
 #include "Engine/Source/Event/Types.h"
 #include "Engine/Source/Os/OsFile.h"
@@ -36,6 +37,9 @@ struct KEYCOMMAND : public TSHashObject<KEYCOMMAND, HASHKEY_STRI> {
     /* 0020 */ int32_t m_runOnUp;
     /* 0024 */ int32_t m_pressure;
     /* 0028 */ int32_t m_angle;
+
+    KEYCOMMAND();
+    ~KEYCOMMAND();
 };
 
 struct OVERRIDEKEYBINDINGENTRY : public TSLinkedNode<OVERRIDEKEYBINDINGENTRY> {
@@ -72,7 +76,7 @@ class CGUIBindings {
     static void LoadBindings();
     static void LoadBindings(BINDING_SET set, const char* data);
     static void LoadBindingsCallback(HOSFILE localFile, HOSFILE file, void* param);
-    static char* MouseEventToString(const CMouseEvent& evt, char* binding, int32_t maxLength);
+    static char* MouseEventToString(const CMouseEvent& evt, char* string, int32_t maxLength);
     static void SaveBindings();
     static void SaveBindingsCallback(HOSFILE localFile, HOSFILE file, void* param);
     static void Shutdown();
@@ -98,9 +102,9 @@ class CGUIBindings {
     int32_t Bind(BINDING_SET set, BINDING_MODE mode, const char* key, const char* command);
     void ClearOverrideBindings(void* owner, bool checkPermission);
     void CopyBindings(BINDING_SET source, BINDING_SET dest);
-    void EnableBindingMode(BINDING_MODE mode, int32_t enable);
-    int32_t ExecCommand(const char* command, int32_t isDown, float pressure, int32_t allowPressure, int32_t isPressure, int32_t isAngle, float angle, float precision, const char* taint);
-    int32_t ExecKey(uint32_t modifiers, const char* key, int32_t isDown, int32_t allowPressure, BINDING_MODE mode);
+    void EnableBindingMode(BINDING_MODE mode, BOOL enable);
+    int32_t ExecCommand(const char* command, BOOL isDown, float pressure, BOOL allowPressure, BOOL isPressure, BOOL isAngle, float angle, float precision, const char* taint);
+    int32_t ExecKey(uint32_t modifiers, const char* key, BOOL isDown, BOOL allowPressure, BINDING_MODE mode);
     void FinishLoadBindings();
     const char* GetBindingCommand(KEYBINDING* binding, BINDING_MODE mode);
     int32_t GetBindingIndex(KEYBINDING* binding, BINDING_MODE mode);
@@ -111,7 +115,7 @@ class CGUIBindings {
     const char* GetModifiedClick(int32_t index);
     int32_t GetNumCommandKeys(BINDING_SET set, BINDING_MODE mode, const char* command);
     KEYBINDING* GetReducedKeyBinding(BINDING_MODE mode, const char* key, char* reducedKey, uint32_t maxLength);
-    int32_t IsModifiedClick(const char* action);
+    BOOL IsModifiedClick(const char* action);
     int32_t Load(const char* file, MD5_CTX* md5, CStatus* status);
     void LoadBinding(const char* file, XMLNode* node, CStatus* status);
     void LoadModifiedClick(const char* file, XMLNode* node, CStatus* status);

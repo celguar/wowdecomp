@@ -3,7 +3,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
+#include "Engine/Source/Frame/Types.h"
 #include "Engine/Source/Tempest/CImVector.h"
 #include "WoW/Source/Net/Types.h"
 #include "WoW/Source/Object/WGUID.h"
@@ -148,15 +150,27 @@ class SPAMCHECK : public TSHashObject<SPAMCHECK, HASHKEY_STR> {
     public:
     /* 0018 */ bool m_filtered;
     /* 001C */ char* m_filteredText;
+
+    ~SPAMCHECK();
 };
 
 class PROFANITYCHECK : public TSHashObject<PROFANITYCHECK, HASHKEY_STR> {
     public:
     /* 0018 */ bool m_filtered;
     /* 001C */ char* m_filteredText;
+
+    ~PROFANITYCHECK();
 };
 
 struct PENDINGUSERLIST : public TSLinkedNode<PENDINGUSERLIST> {
+    enum VOICE_FLAGS : int32_t {
+        VOICE_UNSQUELCHED = 0x10,
+        VOICE_MUTED_OR_SQUELCHED = 0x20,
+        VOICE_SESSION_MEMBER = 0x40,
+        VOICE_MEMBER_STATUS = 0x80,
+        BASE_FLAGS_MASK = 0xF,
+    };
+
     /* 0008 */ WOWGUID m_guid;
     /* 0010 */ uint8_t m_flags;
     /* 0014 */ uint32_t unused_0014;
@@ -164,28 +178,63 @@ struct PENDINGUSERLIST : public TSLinkedNode<PENDINGUSERLIST> {
 
 class ChatChannel {
     public:
+    // Channel flags from the join/update packets; only this bit is tested by the client.
+    enum FLAGS : uint8_t {
+        NONE = 0x00,
+        // Toggled by VOICE_ON / VOICE_OFF channel notifications.
+        VOICE_ENABLED = 0x80,
+    };
+
     /* 0000 */ int32_t m_channelNumber;
     /* 0004 */ char m_name[128];
     /* 0084 */ TSExplicitList<PENDINGUSERLIST, 0> m_pendingUsers;
-    /* 0090 */ uint8_t m_flags;
+    /* 0090 */ uint8_t m_flags; // FLAGS
     /* 0094 */ uint32_t m_zoneChannelID;
-    /* 0098 */ int32_t m_unk98;
-    /* 009C */ int32_t m_unk9C;
-    /* 00A0 */ int32_t m_unkA0;
-    /* 00A4 */ uint8_t m_unkA4;
-    /* 00A5 */ uint8_t m_unkA5;
+    /* 0098 */ int32_t m_instanceID;
+    /* 009C */ int32_t m_left;
+    /* 00A0 */ int32_t m_removed; // Left by the player or slot freed; not listed or saved (name inferred).
+    /* 00A4 */ uint8_t m_hasVoice;
+    /* 00A5 */ uint8_t m_permanent;
 
     ChatChannel();
+    ~ChatChannel();
 };
 
 struct DisplayChannel {
+    enum TYPE : int32_t {
+        CHANNEL = 0,
+        BATTLEGROUND = 1,
+        PARTY = 2,
+        RAID = 3,
+        HEADER = 4,
+    };
+
+    enum HEADER_INDEX : int32_t {
+        NO_HEADER = -1,
+        GROUP_HEADER = 0,
+        WORLD_HEADER = 1,
+        CUSTOM_HEADER = 2,
+        NUM_HEADERS = 3,
+    };
+
+    enum : int32_t {
+        PARTY_INDEX = -1,
+        RAID_INDEX = -2,
+        BATTLEGROUND_INDEX = -3,
+    };
+
+    enum FLAGS : uint32_t {
+        NO_FLAGS = 0,
+        WORLD_CHANNEL = 1,
+    };
+
     /* 0000 */ int32_t m_channelIndex;
-    /* 0004 */ int32_t m_headerIndex;
-    /* 0008 */ int32_t m_type;
+    /* 0004 */ HEADER_INDEX m_headerIndex;
+    /* 0008 */ TYPE m_type;
     /* 000C */ int32_t m_collapsed;
-    /* 0010 */ int32_t m_enabled;
+    /* 0010 */ BOOL m_enabled;
     /* 0014 */ int32_t m_voiceEnabled;
-    /* 0018 */ uint32_t m_flags;
+    /* 0018 */ FLAGS m_flags;
     /* 001C */ int32_t m_count;
 };
 
@@ -223,28 +272,107 @@ struct ZoneChannelDefault {
     /* 0004 */ int32_t m_addedVersion;
 };
 
+// FrameXML NUM_CHAT_WINDOWS and MAX_WOW_CHAT_CHANNELS.
+constexpr int32_t NUM_CHAT_WINDOWS = 10;
+
+// Chat language sent by SendAddonMessage; the text carries "prefix	message" (inferred name).
+constexpr uint32_t LANG_ADDON = 0xFFFFFFFF;
+
+// SMSG_MESSAGECHAT sender tag. AFK/DND/GM/DEV follow the flag strings the client attaches;
+// UNKNOWN_3 blocks whispers from strangers unless the sender is also tagged GM.
+enum CHAT_TAG : uint8_t {
+    CHAT_TAG_AFK = 0x1,
+    CHAT_TAG_DND = 0x2,
+    CHAT_TAG_GM = 0x4,
+    CHAT_TAG_UNKNOWN_3 = 0x8,
+    CHAT_TAG_DEV = 0x10,
+};
+constexpr int32_t MAX_WOW_CHAT_CHANNELS = 10;
+
+// SMSG_CHAT_RESTRICTED type byte, named after the error each one displays.
+enum CHAT_RESTRICTION_TYPE : uint8_t {
+    CHAT_RESTRICTION_RESTRICTED      = 0, // ERR_CHAT_RESTRICTED
+    CHAT_RESTRICTION_THROTTLED       = 1, // ERR_CHAT_THROTTLED
+    CHAT_RESTRICTION_SQUELCHED       = 2, // ERR_USER_SQUELCHED
+    CHAT_RESTRICTION_YELL_RESTRICTED = 3, // ERR_YELL_RESTRICTED
+};
+
+// Indexes into s_chatMessageGroups, named after the group strings.
+enum CHAT_MESSAGE_GROUP {
+    CHAT_MESSAGE_GROUP_SYSTEM = 0,
+    CHAT_MESSAGE_GROUP_SYSTEM_NOMENU = 1,
+    CHAT_MESSAGE_GROUP_SAY = 2,
+    CHAT_MESSAGE_GROUP_EMOTE = 3,
+    CHAT_MESSAGE_GROUP_YELL = 4,
+    CHAT_MESSAGE_GROUP_WHISPER = 5,
+    CHAT_MESSAGE_GROUP_PARTY = 6,
+    CHAT_MESSAGE_GROUP_PARTY_LEADER = 7,
+    CHAT_MESSAGE_GROUP_RAID = 8,
+    CHAT_MESSAGE_GROUP_RAID_LEADER = 9,
+    CHAT_MESSAGE_GROUP_RAID_WARNING = 10,
+    CHAT_MESSAGE_GROUP_BATTLEGROUND = 11,
+    CHAT_MESSAGE_GROUP_BATTLEGROUND_LEADER = 12,
+    CHAT_MESSAGE_GROUP_GUILD = 13,
+    CHAT_MESSAGE_GROUP_OFFICER = 14,
+    CHAT_MESSAGE_GROUP_MONSTER_SAY = 15,
+    CHAT_MESSAGE_GROUP_MONSTER_YELL = 16,
+    CHAT_MESSAGE_GROUP_MONSTER_EMOTE = 17,
+    CHAT_MESSAGE_GROUP_MONSTER_WHISPER = 18,
+    CHAT_MESSAGE_GROUP_MONSTER_BOSS_EMOTE = 19,
+    CHAT_MESSAGE_GROUP_MONSTER_BOSS_WHISPER = 20,
+    CHAT_MESSAGE_GROUP_ERRORS = 21,
+    CHAT_MESSAGE_GROUP_AFK = 22,
+    CHAT_MESSAGE_GROUP_DND = 23,
+    CHAT_MESSAGE_GROUP_IGNORED = 24,
+    CHAT_MESSAGE_GROUP_BG_HORDE = 25,
+    CHAT_MESSAGE_GROUP_BG_ALLIANCE = 26,
+    CHAT_MESSAGE_GROUP_BG_NEUTRAL = 27,
+    CHAT_MESSAGE_GROUP_COMBAT_FACTION_CHANGE = 28,
+    CHAT_MESSAGE_GROUP_SKILL = 29,
+    CHAT_MESSAGE_GROUP_LOOT = 30,
+    CHAT_MESSAGE_GROUP_MONEY = 31,
+    CHAT_MESSAGE_GROUP_CHANNEL = 32,
+    CHAT_MESSAGE_GROUP_ACHIEVEMENT = 33,
+    CHAT_MESSAGE_GROUP_GUILD_ACHIEVEMENT = 34,
+    CHAT_MESSAGE_GROUP_TARGETICONS = 35,
+    CHAT_MESSAGE_GROUP_BN_WHISPER = 36,
+    CHAT_MESSAGE_GROUP_BN_WHISPER_INFORM = 37,
+    CHAT_MESSAGE_GROUP_BN_CONVERSATION = 38,
+    CHAT_MESSAGE_GROUP_BN_INLINE_TOAST_ALERT = 39,
+    CHAT_MESSAGE_GROUP_OPENING = 40,
+    CHAT_MESSAGE_GROUP_TRADESKILLS = 41,
+    CHAT_MESSAGE_GROUP_PET_INFO = 42,
+    CHAT_MESSAGE_GROUP_COMBAT_XP_GAIN = 43,
+    CHAT_MESSAGE_GROUP_COMBAT_HONOR_GAIN = 44,
+    CHAT_MESSAGE_GROUP_COMBAT_MISC_INFO = 45,
+    NUM_CHAT_MESSAGE_GROUPS = 46,
+};
+
+// Groups from OPENING on default to the second (combat log) window; earlier ones to the first.
+constexpr int32_t CHAT_MESSAGE_GROUP_FIRST_COMBAT_LOG = CHAT_MESSAGE_GROUP_OPENING;
+
 struct ChatMessageGroup {
     /* 0000 */ const char* m_name;
     /* 0004 */ bool m_default;
-    /* 0008 */ int32_t m_type;
+    /* 0008 */ int32_t m_addedVersion; // chat-cache ADDEDVERSION that introduced the group
 };
 
 class ChatWindowInfo {
     public:
     /* 0000 */ char m_name[128];
-    /* 0080 */ uint8_t m_messageGroups[46];
+    /* 0080 */ uint8_t m_messageGroups[NUM_CHAT_MESSAGE_GROUPS];
     /* 00B0 */ TSGrowableArray<char*> m_channels;
     /* 00C0 */ TSGrowableArray<int32_t> m_channelIDs;
-    /* 00D0 */ int32_t m_unkD0;
+    /* 00D0 */ int32_t m_fontSize; // "SIZE" in chat-cache.txt
     /* 00D4 */ CImVector m_color;
-    /* 00D8 */ uint32_t m_unkD8;
+    /* 00D8 */ BOOL m_locked; // "LOCKED" in chat-cache.txt
     /* 00DC */ int32_t m_docked;
     /* 00E0 */ uint32_t m_shown;
-    /* 00E4 */ int32_t m_unkE4;
-    /* 00E8 */ uint32_t m_unkE8;
-    /* 00EC */ float m_unkEC;
-    /* 00F0 */ float m_unkF0;
-    /* 00F4 */ uint8_t m_unkF4;
+    /* 00E4 */ BOOL m_uninteractable; // "UNINTERACTABLE" in chat-cache.txt
+    /* 00E8 */ FRAMEPOINT m_anchorPoint;
+    /* 00EC */ float m_xOffsetRatio; // Saved position ratios, not pixel offsets.
+    /* 00F0 */ float m_yOffsetRatio;
+    /* 00F4 */ uint8_t m_hasSavedLayout; // Gates saved position/dimensions; loading either record also sets it.
     /* 00F8 */ float m_width;
     /* 00FC */ float m_height;
 
@@ -261,7 +389,7 @@ struct ChatRecord {
     /* 003C */ char m_description[3000];
     /* 0BF4 */ char m_text[3000];
     /* 17AC */ int32_t m_type;
-    /* 17B0 */ uint32_t m_unk17B0;
+    /* 17B0 */ uint32_t m_zoneChannelID;
     /* 17B4 */ uint32_t m_lineID;
     /* 17B8 */ uint32_t m_time;
     /* 17BC */ uint32_t unused_17BC;
@@ -270,14 +398,116 @@ struct ChatRecord {
 struct ChatColorInfo {
     /* 0000 */ char m_name[64];
     /* 0040 */ uint8_t m_color[4];
-    /* 0044 */ int32_t m_unk44;
-    /* 0048 */ uint8_t m_unk48;
+    /* 0044 */ int32_t m_addedVersion; // chat-cache version that introduced this color (like ChatMessageGroup)
+    /* 0048 */ uint8_t m_colorNameByClass;
 };
 
 int32_t Packet_SMSG_LOG_XPGAIN(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
 
+// CMSG_CHAT_IGNORED reason byte sent by CGChat::SendIgnoredResponse.
+enum CHAT_IGNORED_REASON : uint8_t {
+    CHAT_IGNORED_REASON_IGNORED = 0, // The sender is on the ignore list.
+    // A CHAT_TAG_UNKNOWN_3 whisper from someone who is not a friend and not in the whisper history.
+    CHAT_IGNORED_REASON_UNKNOWN_1 = 1,
+};
+
+// SMSG_LOG_XPGAIN type byte. Only KILL carries the rest bonus and group multiplier; the
+// refer-a-friend quest line is shown for UNKNOWN_1 and UNKNOWN_6 (other meanings unknown).
+enum XP_GAIN_TYPE : uint8_t {
+    XP_GAIN_KILL = 0,
+    XP_GAIN_UNKNOWN_1 = 1,
+    XP_GAIN_UNKNOWN_6 = 6,
+};
+
 class CGChat {
     public:
+    enum LOG_TYPE : int32_t {
+        CHAT_LOG = 0,
+        COMBAT_LOG = 1,
+        NUM_LOG_TYPES = 2,
+    };
+
+    enum CHANNEL_NOTIFY : int32_t {
+        JOINED = 0,
+        LEFT = 1,
+        YOU_JOINED = 2,
+        YOU_LEFT = 3,
+        WRONG_PASSWORD = 4,
+        NOT_MEMBER = 5,
+        NOT_MODERATOR = 6,
+        PASSWORD_CHANGED = 7,
+        OWNER_CHANGED = 8,
+        PLAYER_NOT_FOUND = 9,
+        NOT_OWNER = 10,
+        CHANNEL_OWNER = 11,
+        FLAGS_CHANGED = 12,
+        ANNOUNCEMENTS_ON = 13,
+        ANNOUNCEMENTS_OFF = 14,
+        MODERATION_ON = 15,
+        MODERATION_OFF = 16,
+        MUTED = 17,
+        PLAYER_KICKED = 18,
+        BANNED = 19,
+        PLAYER_BANNED = 20,
+        PLAYER_UNBANNED = 21,
+        PLAYER_NOT_BANNED = 22,
+        PLAYER_ALREADY_MEMBER = 23,
+        INVITE = 24,
+        INVITE_WRONG_FACTION = 25,
+        WRONG_FACTION = 26,
+        INVALID_NAME = 27,
+        NOT_MODERATED = 28,
+        PLAYER_INVITED = 29,
+        PLAYER_INVITE_BANNED = 30,
+        THROTTLED = 31,
+        NOT_IN_AREA = 32,
+        NOT_IN_LFG = 33,
+        VOICE_ON = 34,
+        VOICE_OFF = 35,
+        VOICE_ON_SILENT = 36,
+    };
+
+    enum INSTANCE_RESET_FAILURE : int32_t {
+        GENERIC = 0,
+        OFFLINE = 1,
+        ZONING = 2,
+    };
+
+    enum COMPLAINT_PRIORITY : uint32_t {
+        WHISPER_OR_BATTLENET = 0,
+        CHANNEL_NONZERO = 1,
+        CHANNEL_ZERO = 2,
+        BATTLEGROUND_LEADER = 3,
+        BATTLEGROUND = 4,
+        RAID_LEADER = 5,
+        RAID_WARNING = 6,
+        RAID = 7,
+        PARTY_LEADER = 8,
+        PARTY = 9,
+        YELL = 10,
+        SAY = 11,
+        EMOTE = 12,
+        AFK = 13,
+        DND = 14,
+        UNSUPPORTED = 0xFFFFFFFF,
+    };
+
+    enum RAID_INSTANCE_MESSAGE : int32_t {
+        WARNING_HOURS = 1,
+        WARNING_MINUTES = 2,
+        WARNING_MINUTES_SOON = 3,
+        WELCOME = 4,
+        EXPIRED = 5,
+    };
+
+    enum CHANNEL_MEMBER_FLAGS : int32_t {
+        OWNER = 0x1,
+        MODERATOR = 0x2,
+        VOICE = 0x4,
+        SPEAK = 0x10,
+        OWNER_OR_MODERATOR = 0x3,
+    };
+
     static void InformTargetIcon(WOWGUID setter, WOWGUID target, int32_t index);
     static void JoiningParty(bool raid, int32_t pvp);
     static void SaveChatSettings();
@@ -296,13 +526,19 @@ class CGChat {
     static CImVector GetChatColor(int32_t type);
     static const char* GetChannelShortName(int32_t number, bool includeInactive);
     static uint32_t FindDisplayChannelIndex(const char* name, int32_t type);
-    static int32_t AddChatChannel(const char* name, uint32_t id, bool silent, bool a4, bool a5, uint32_t number);
-    static int32_t IsChatLogging(int32_t type);
+    static int32_t AddChatChannel(const char* name, uint32_t id, bool silent, bool hasVoice, bool permanent, uint32_t number);
+    static BOOL IsChatLogging(int32_t type);
     static void AddCombatMessage(const char* text);
     static int32_t m_afk;
-    static int32_t m_guildRecruitmentMode;
+    // Guild recruitment channel mode, saved as "STANDARD"/"AUTO".
+    enum GUILD_RECRUITMENT_MODE : int32_t {
+        GUILD_RECRUITMENT_STANDARD = 0,
+        GUILD_RECRUITMENT_AUTO = 1,
+    };
+
+    static int32_t m_guildRecruitmentMode; // GUILD_RECRUITMENT_MODE
     static int32_t m_areaID;
-    static int32_t m_paused;
+    static BOOL m_paused;
     static int32_t m_voiceChatSystemStatus;
     static ChatRecord m_chatHistory[60];
     static uint32_t m_currentChatIndex;
@@ -322,12 +558,12 @@ class CGChat {
     static int32_t ChatMessageReceived(CDataStore* msg, bool isGM);
     static void RecordWhisperSource(WOWGUID guid);
     static void RecordWhisperDest(WOWGUID guid);
-    static int32_t IsInWhisperHistory(WOWGUID guid);
-    static int32_t IsInWhisperSourceHistory(const char* name);
-    static void SendIgnoredResponse(WOWGUID guid, uint8_t a2);
+    static BOOL IsInWhisperHistory(WOWGUID guid);
+    static BOOL IsInWhisperSourceHistory(const char* name);
+    static void SendIgnoredResponse(WOWGUID guid, CHAT_IGNORED_REASON reason);
     static TSGrowableArray<ChatChannel> s_channels;
-    static int32_t m_loaded;
-    static int32_t m_registered;
+    static BOOL m_loaded;
+    static BOOL m_registered;
     static int32_t m_complaintsSystemStatus;
     static DisplayChannel s_displayChannels[20];
     static char s_activeDisplayChannelName[128];
@@ -347,7 +583,7 @@ class CGChat {
     static int32_t OnTitleEarned(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
     static int32_t OnResetFailedNotify(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
     static void OnLogXPGain(int32_t amount);
-    static void LogXPGain(CGUnit_C* unit, int32_t amount, int32_t type, int32_t bonus, float groupMult, bool referAFriend);
+    static void LogXPGain(CGUnit_C* unit, int32_t amount, int32_t type /* XP_GAIN_TYPE */, int32_t bonus, float groupMult, bool referAFriend);
     static int32_t OnDurabilityDamageDeath(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
     static int32_t OnChannelMemberCount(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
     static int32_t OnComsatReconnectAttempt(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
@@ -361,7 +597,7 @@ class CGChat {
     static int32_t OnServerFirstAchievement(void* param, NETMESSAGE msgId, uint32_t time, CDataStore* msg);
     static int32_t GetChannelID(const char* name);
     static ChatChannel* GetChannelByChatChannelID(uint32_t id);
-    static void JoinedChannel(uint32_t id, const char* name, uint32_t a3, uint8_t flags);
+    static void JoinedChannel(uint32_t id, const char* name, uint32_t instanceID, uint8_t flags);
     static void LeftChannel(uint32_t id, const char* name);
     static void ResetChannel(uint32_t id, const char* name);
     static void OnChannelsUpdated();
@@ -374,19 +610,19 @@ class CGChat {
     static void TextEmoteNameQueryCallback(int32_t id, const WOWGUID& guid, void* param, bool success);
     static void HandleFlagsChanged(WOWGUID guid, uint8_t oldFlags, uint8_t newFlags, const char* channel);
     static void InviteNameQueryCallback(int32_t id, const WOWGUID& guid, void* param, bool success);
-    static int32_t IsRecordedType(int32_t type);
-    static void RecordChat(const char* text, int32_t type, const char* senderName, WOWGUID senderGuid, uint32_t senderUnk, uint32_t a6, const char* channelName, uint32_t lineID, const CGPlayer_C* player);
-    static void QueueChatText(const char* text, int32_t type, const char* senderName, const char* targetName, uint32_t language, const char* channelName, const char* flags, int32_t queued, int32_t a9, WOWGUID senderGuid, uint32_t senderUnk, WOWGUID targetGuid, int32_t achievementID, bool isGM, const ChatConversation* conversation);
+    static BOOL IsRecordedType(int32_t type);
+    static void RecordChat(const char* text, int32_t type, const char* senderName, WOWGUID senderGuid, uint32_t senderUnk, uint32_t zoneChannelID, const char* channelName, uint32_t lineID, const CGPlayer_C* player);
+    static void QueueChatText(const char* text, int32_t type, const char* senderName, const char* targetName, uint32_t language, const char* channelName, const char* flags, int32_t queued, int32_t unknown9, WOWGUID senderGuid, uint32_t senderUnk, WOWGUID targetGuid, int32_t achievementID, bool isGM, const ChatConversation* conversation);
     static void NameQueryCallback(int32_t id, const WOWGUID& guid, void* param, bool success);
-    static void TranslateMessage(uint32_t language, uint32_t skill, const char* text, char* buffer, uint32_t size, int32_t a6, int32_t a7);
+    static void TranslateMessage(uint32_t language, uint32_t skill, const char* text, char* buffer, uint32_t size, BOOL keepTags, BOOL keepSeparators);
     static void AddWhisperThrottled(uint32_t time);
-    static int32_t IsWhisperThrottled(uint32_t time);
-    static int32_t IsChannelThrottled(const char* channel, uint32_t time);
+    static BOOL IsWhisperThrottled(uint32_t time);
+    static BOOL IsChannelThrottled(const char* channel, uint32_t time);
     static void AddChannelThrottled(const char* channel, uint32_t time);
     static void AddThrottledChat(int32_t type, uint32_t language, const char* target, const char* text);
     static int32_t GetActiveVoiceSession();
     static void SetGuildRecruitmentMode(int32_t mode, bool fromJoin);
-    static int32_t IsVoiceChatEnabled();
+    static BOOL IsVoiceChatEnabled();
     static bool CanComplain(WOWGUID guid);
     static void VoiceSessionUpdate(const char* name, int32_t type);
     static void NewVoiceSession(const char* name, int32_t type);
@@ -397,8 +633,8 @@ class CGChat {
     static void LogOpenLock(const WOWGUID& guid, const SpellRec* spell, const ItemStats_C* stats);
     static void LogOpenLock(const WOWGUID& guid, const SpellRec* spell, const GameObjectStats_C* stats);
     static const char* GetChannelStringForDisplay(int32_t session, int32_t* type);
-    static int32_t IsPaused();
-    static int32_t IsVoiceChatAllowed();
+    static BOOL IsPaused();
+    static BOOL IsVoiceChatAllowed();
     static void ProcessThrottledChat();
     static void LeaveWorld();
     static void Pause();
@@ -411,7 +647,7 @@ int32_t StringToChatType(const char* string, int32_t* type);
 int32_t StringToLanguage(const char* string, uint32_t* language);
 ChatChannel* GetChannelByName(const char* name);
 int32_t FormatTime(char* buffer, uint32_t size, int32_t seconds);
-bool InternalJoinChannel(const char* channelName, const char* password, uint32_t window, bool checkRecruitment, const char** zoneChannelName, int32_t* zoneChannelID, bool silent, int32_t a8, int32_t a9, uint32_t number);
+bool InternalJoinChannel(const char* channelName, const char* password, uint32_t window, bool checkRecruitment, const char** zoneChannelName, int32_t* zoneChannelID, bool silent, BOOL hasVoice, int32_t permanent, uint32_t number);
 int32_t InternalLeaveChannel(const char* channelName, bool clearRecruitment, bool force);
 bool ProfanityFilter(char* text, bool cache, bool force);
 ChatRecord* GetChatRecord(int32_t index);
@@ -424,11 +660,11 @@ ChatRecord* GetChatRecordEx(const char* name, const char* text, uint32_t lineID)
 void ComplainChat(const char* name, const char* text, uint32_t lineID);
 uint32_t BuildPartyDisplayList();
 uint32_t BuildRaidDisplayList(int32_t type);
-void RebuildDisplayChannelList(int32_t a1);
+void RebuildDisplayChannelList(int32_t signal);
 bool SpamFilter(char* text, bool cache);
 bool ChatParserParseText(const char* text, char* buffer, uint32_t size);
 bool InebriatedParseText(const char* text, char* buffer, uint32_t size, float drunkness);
-int32_t QuestParserParseText(const char* text, char* buffer, uint32_t size, const WOWGUID& guid, const char* name, int32_t a6);
+int32_t QuestParserParseText(const char* text, char* buffer, uint32_t size, const WOWGUID& guid, const char* name, int32_t achievement);
 
 void ChatRegisterScriptFunctions();
 void ChatUnregisterScriptFunctions();
@@ -441,19 +677,19 @@ extern uint32_t s_activeVoiceChannel;
 
 extern uint32_t s_numSavedInstances;
 
-extern uint8_t s_collapsedHeaders[3];
+extern uint8_t s_collapsedHeaders[DisplayChannel::HEADER_INDEX::NUM_HEADERS];
 
-extern ChatWindowInfo s_chatWindows[10];
+extern ChatWindowInfo s_chatWindows[NUM_CHAT_WINDOWS];
 
-extern const ChatMessageGroup s_chatMessageGroups[46];
+extern const ChatMessageGroup s_chatMessageGroups[NUM_CHAT_MESSAGE_GROUPS];
 
 extern ChatColorInfo s_chatColors[CHAT_MSG_MAX];
 
 extern TSGrowableArray<ChatColorInfo> s_channelColors;
 
-extern int32_t s_chatLogging[2];
+extern int32_t s_chatLogging[CGChat::LOG_TYPE::NUM_LOG_TYPES];
 
-extern HSLOG s_chatLog[2];
+extern HSLOG s_chatLog[CGChat::LOG_TYPE::NUM_LOG_TYPES];
 
 extern const ChatColorInfo s_chatTypeInfo[CHAT_MSG_MAX];
 

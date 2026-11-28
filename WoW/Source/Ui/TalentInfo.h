@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Storm/H/stpl.h"
 
@@ -13,6 +14,13 @@ struct lua_State;
 class TalentRec;
 class CGPlayer_C;
 class CGUnit_C;
+
+// FrameXML NUM_GLYPH_SLOTS, MAX_TALENT_GROUPS, MAX_TALENT_TABS, PLAYER_TALENTS_PER_TIER and PET_TALENTS_PER_TIER.
+constexpr uint32_t NUM_GLYPH_SLOTS = 6;
+constexpr uint32_t MAX_TALENT_GROUPS = 2;
+constexpr uint32_t MAX_TALENT_TABS = 3;
+constexpr int32_t PLAYER_TALENTS_PER_TIER = 5;
+constexpr int32_t PET_TALENTS_PER_TIER = 3;
 
 struct TalentTabInfo {
     /* 0000 */ int32_t m_tabId;
@@ -57,7 +65,7 @@ class CGTalentGroup_C {
     /* 0004 */ TSHashTable<TalentGroupItem_C, HASHKEY_NONE> m_items;
     /* 002C */ TSFixedArray<TalentGroupTab_C> m_tabs;
     /* 0038 */ uint32_t m_unspentPoints;
-    /* 003C */ uint32_t m_glyphs[6];
+    /* 003C */ uint32_t m_glyphs[NUM_GLYPH_SLOTS];
 
     CGTalentGroup_C();
     virtual ~CGTalentGroup_C();
@@ -72,7 +80,7 @@ class CGTalentGroup_C {
     void ResetPreviewTalentPoints(uint32_t tabIndex);
     void ResetAllPreviewTalentPoints();
     int32_t ValidatePreviewTalentPoints(uint32_t tabIndex, const TalentRec* talent, int32_t points, int32_t* delta, int32_t pet);
-    int32_t CanAddPreviewTalentPoints(const TalentRec* talent, int32_t points, int32_t* delta, int32_t pet);
+    BOOL CanAddPreviewTalentPoints(const TalentRec* talent, int32_t points, int32_t* delta, int32_t pet);
     void AddPreviewTalentPoints(uint32_t tabIndex, const TalentRec* talent, int32_t points, int32_t pet);
 };
 
@@ -85,7 +93,7 @@ class CGTalentInfo {
     static int32_t m_petTalentTab;
     static TSFixedArray<TalentTabInfo*> m_tabs;
     static TSFixedArray<TalentTabInfo*> m_petTabs;
-    static CGTalentGroup_C m_talentGroups[2];
+    static CGTalentGroup_C m_talentGroups[MAX_TALENT_GROUPS];
     static CGTalentGroup_C m_petTalentGroup;
     static void EnterWorld();
     static void LeaveWorld();
@@ -94,7 +102,7 @@ class CGTalentInfo {
     static uint32_t GetUnspentTalentPoints(uint32_t index, int32_t pet);
     static CGTalentGroup_C* GetTalentGroup(uint32_t index, int32_t pet);
     static TalentTabInfo* GetTab(uint32_t index, int32_t inspect, int32_t pet);
-    static int32_t IsTalentAvailableForPet(CGUnit_C* pet, const TalentRec* talent);
+    static BOOL IsTalentAvailableForPet(CGUnit_C* pet, const TalentRec* talent);
     static TalentGroupItem_C* GetTalentItem(uint32_t group, int32_t talentId, int32_t pet);
     static int32_t GetPreviewPointsSpent(uint32_t group, int32_t pet);
     static void AddPreviewTalentPoints(uint32_t group, uint32_t tab, uint32_t talentIndex, int32_t points, int32_t pet);
@@ -111,7 +119,7 @@ class CGTalentInfo {
 
 void TalentInfoRegisterScriptFunctions();
 void TalentInfoUnregisterScriptFunctions();
-int32_t TalentInfoIsSpellKnown(int32_t spellId, int32_t isInspect, int32_t isPet);
+int32_t TalentInfoIsSpellKnown(int32_t spellId, BOOL isInspect, BOOL isPet);
 uint32_t TalentInfoGetScriptGroupIndex(lua_State* L, int32_t index);
 CGTalentGroup_C* TalentInfoGetTalentGroup(uint32_t index, int32_t inspect, int32_t pet);
 TalentGroupItem_C* TalentInfoGetTalentItem(uint32_t group, int32_t talentId, int32_t inspect, int32_t pet);
@@ -123,7 +131,7 @@ class CGTalentInfo_Inspect {
     static uint32_t m_numTalentGroups;
     static int32_t m_unspentTalentPoints;
     static TSFixedArray<TalentTabInfo*> m_tabs;
-    static CGTalentGroup_C m_talentGroups[2];
+    static CGTalentGroup_C m_talentGroups[MAX_TALENT_GROUPS];
     static void EnterWorld();
     static void ShutdownGame();
     static void Reset();

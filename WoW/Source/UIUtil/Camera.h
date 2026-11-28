@@ -3,7 +3,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Tempest/C3Vector.h"
+#include "Engine/Source/Tempest/CRange.h"
 #include "Engine/Source/Tempest/C33Matrix.h"
 #include "Engine/Source/Tempest/C34Matrix.h"
 #include "Engine/Source/Storm/H/stpl.h"
@@ -74,12 +76,116 @@ class CGInputControl;
 
 class CGCamera : public CSimpleCamera {
     public:
+    // Vehicle override selector;other raw values keep the user-style fallback.
+    // cameraView values, from s_cameraViewModeNames.
+    enum VIEW_MODE : int32_t {
+        VIEW_FIRST_PERSON = 0,
+        VIEW_THIRD_PERSON_A = 1,
+        VIEW_THIRD_PERSON_B = 2,
+        VIEW_THIRD_PERSON_C = 3,
+        VIEW_THIRD_PERSON_D = 4,
+        VIEW_THIRD_PERSON_E = 5,
+        VIEW_COMMENTATOR = 6,
+        VIEW_BARBER_SHOP = 7,
+        MAX_CAMERA_VIEWS,
+    };
+
+    // SetView blendStyle (cameraViewBlendStyle). Names inferred from SetView:
+    // 1 smooths to the view, 2 snaps to it, 0 does neither.
+    enum VIEW_BLEND_STYLE : int32_t {
+        VIEW_BLEND_NONE = 0,
+        VIEW_BLEND_SMOOTH = 1,
+        VIEW_BLEND_INSTANT = 2,
+    };
+
+    // SetView transition. Names inferred from SetTelescope, the only caller
+    // passing non-zero values.
+    enum VIEW_TRANSITION : int32_t {
+        VIEW_TRANSITION_NONE = 0,
+        VIEW_TRANSITION_TELESCOPE_ENTER = 1,
+        VIEW_TRANSITION_TELESCOPE_LEAVE = 2,
+    };
+
+    enum VEHICLE_TRACKING_STYLE : uint32_t {
+        TRACKING_USER_STYLE = 0,
+        TRACKING_IGNORE_FACING = 1,
+        TRACKING_FOLLOW_FACING = 2,
+    };
+
+    enum MOTION_FLAGS : int32_t {
+        FLAG_MOTION_NONE = 0,
+        FLAG_MOVE_IN_ACTIVE = 0x1,
+        FLAG_MOVE_IN_STOP_REQUESTED = 0x2,
+        FLAG_MOVE_OUT_ACTIVE = 0x4,
+        FLAG_MOVE_OUT_STOP_REQUESTED = 0x8,
+        FLAG_MOVE_RIGHT_ACTIVE = 0x10,
+        FLAG_MOVE_RIGHT_STOP_REQUESTED = 0x20,
+        FLAG_MOVE_LEFT_ACTIVE = 0x40,
+        FLAG_MOVE_LEFT_STOP_REQUESTED = 0x80,
+        FLAG_MOVE_UP_ACTIVE = 0x100,
+        FLAG_MOVE_UP_STOP_REQUESTED = 0x200,
+        FLAG_MOVE_DOWN_ACTIVE = 0x400,
+        FLAG_MOVE_DOWN_STOP_REQUESTED = 0x800,
+        FLAG_MOVE_IN_MASK = 0x3,
+        FLAG_MOVE_OUT_MASK = 0xC,
+    };
+
+    // Reconstructed names from 3.3.5 runtime writers/readers; not packet or model-file flags.
+    enum STATE_FLAGS : uint32_t {
+        STATE_NONE                           = 0x00000000u, // No runtime state bits.
+        STATE_FREE_LOOK                      = 0x00000001u, // SetModeFreeLook / SetModeNormal.
+        STATE_UNDERWATER_INITIALIZED         = 0x00000002u, // CheckUnderwater has sampled the liquid state.
+        STATE_LOADED                         = 0x00000004u, // Target or model camera setup has finished.
+        STATE_TELESCOPE                      = 0x00000008u, // Telescope view is active.
+        STATE_INITIALIZED                    = 0x00000010u, // Constructor setup finished; cleared before destruction.
+        STATE_FREE_LOOK_DISABLED             = 0x00000020u, // DisableFreeLook gate used by custom-view smoothing.
+        STATE_VIEW_MODIFIED                  = 0x00000040u, // Mouse/zoom motion changed the current preset view.
+        STATE_HEIGHT_INITIALIZED             = 0x00000080u, // First height request snaps instead of interpolating.
+        STATE_TRACKING                       = 0x00000100u, // UpdateTrackingState is tracking a target.
+        STATE_BOBBING                        = 0x00000200u, // Movement bobbing is active.
+        STATE_UNCONTROLLED                   = 0x00001000u, // Uncontrolled target holds an ignore-facing reference.
+        STATE_TRACKING_IGNORES_FACING        = 0x00002000u, // Tracking holds its own ignore-facing reference.
+        STATE_FREE_LOOK_FACING               = 0x00004000u, // Use m_freeLookYaw when restoring target facing.
+        STATE_TELESCOPE_ENTERING             = 0x00008000u, // Telescope entry fade/FoV transition.
+        STATE_DISTANCE_COLLISION             = 0x00010000u, // World collision shortened camera distance.
+        STATE_HEIGHT_COLLISION               = 0x00020000u, // World collision shortened the vertical probe.
+        STATE_LIQUID_SURFACED                = 0x00100000u, // Target is in the shallow/surface side of the liquid test.
+        STATE_LIQUID_SUBMERGED               = 0x00200000u, // Liquid depth exceeds target height minus the margin.
+        STATE_SMOOTH_FLYING_HEIGHT           = 0x00400000u, // m_smoothFlyingHeight interpolation is active.
+        STATE_MOUNT_HEIGHT_INITIALIZED       = 0x00800000u, // Mount-height fallback has been sampled for this target.
+        STATE_SMOOTH_YAW                     = 0x01000000u, // m_smoothYaw interpolation is active.
+        STATE_SMOOTH_PITCH                   = 0x02000000u, // m_smoothPitch interpolation is active.
+        STATE_SMOOTH_DISTANCE                = 0x04000000u, // m_smoothDistance interpolation is active.
+        STATE_SMOOTH_TARGET_OFFSET           = 0x08000000u, // m_smoothTargetOffset interpolation is active.
+        STATE_SMOOTH_GROUND_TILT             = 0x10000000u, // m_smoothGroundTilt interpolation is active.
+        STATE_SMOOTH_HEIGHT                  = 0x20000000u, // m_smoothHeight interpolation is active.
+        STATE_SMOOTH_FOV                     = 0x40000000u, // m_smoothFoV interpolation is active.
+        STATE_TELESCOPE_LEAVING              = 0x80000000u, // Telescope exit fade/FoV transition.
+        // No active writer/reader for bits 10, 11, 18 or 19 in the reviewed client.
+        STATE_COLLISION_MASK = STATE_DISTANCE_COLLISION | STATE_HEIGHT_COLLISION,
+        STATE_LIQUID_MASK = STATE_LIQUID_SURFACED | STATE_LIQUID_SUBMERGED,
+        STATE_TELESCOPE_TRANSITION_MASK = STATE_TELESCOPE_ENTERING | STATE_TELESCOPE_LEAVING,
+    };
+
+    enum FLAGS : uint32_t {
+        FLAG_NONE                            = 0x00000000u, // No behavior overrides.
+        FLAG_AUTO_INTERACT                   = 0x00000001u, // Cached autoInteract setting.
+        FLAG_TARGET_FREE_LOOK                = 0x00000002u, // SetTarget requested free-look mode.
+        FLAG_PRESERVE_FREE_LOOK_FACING       = 0x00000004u, // SyncFreeLookFacing retains its free-look facing after clamping.
+        FLAG_VEHICLE_ZOOM_MIN                = 0x00000008u, // Vehicle-seat minimum zoom override is present.
+        FLAG_VEHICLE_ZOOM_MAX                = 0x00000010u, // Vehicle-seat maximum zoom override is present.
+        FLAG_VEHICLE_EXIT_ZOOM               = 0x00000020u, // Vehicle exit zoom distance override is present.
+        FLAG_ZOOM_TO_DISTANCE                = 0x00000040u, // ZoomToDistance motion is active.
+        FLAG_MOUNT_CAMERA_POSITION           = 0x00000080u, // Mount CameraPosition event supplies the target heights.
+        // The reviewed runtime uses only the low eight bits.
+    };
+
     int32_t GetCameraDistance(float& distance, const C3Vector& position, const C3Vector& target, uint32_t flags);
     void ResetView(int32_t view);
-    void SetView(int32_t view, int32_t blendStyle, int32_t transition);
+    void SetView(int32_t newView, int32_t blendStyle, int32_t transition);
     C3Vector BumpCameraPositionFromLiquid(const C3Vector& target, float distance, const C3Vector& position);
-    int32_t CanSmoothTarget();
-    int32_t CanSmoothYaw(float yawMin, float yawMax);
+    BOOL CanSmoothTarget();
+    BOOL CanSmoothYaw(float yawMin, float yawMax);
     uint32_t CollideCameraWithWorld(const C3Vector& target, float& distance, float& height, const C3Vector& offset, float liquid, float& extent);
     void RunBobs(C3Vector& offset);
     void RunShakes(const C3Vector& position, C3Vector& offset);
@@ -92,7 +198,7 @@ class CGCamera : public CSimpleCamera {
     void CalcTargetCamera(CGObject_C* target, uint32_t time);
     void FaceTarget(CGObject_C* target, uint32_t time);
     void SyncFreeLookFacing();
-    void UpdateFreeLookFacing(float x, float y, float* a3);
+    void UpdateFreeLookFacing(float x, float y, float* pitchOut);
     void SetTelescope(int32_t telescope);
     static int32_t UpdateCallback(const void* data, void* param);
     static int32_t CCommand_PitchLimit(const char* command, const char* arguments);
@@ -112,14 +218,14 @@ class CGCamera : public CSimpleCamera {
     /* 0084 */ uint32_t unused_0084;
     /* 0088 */ WOWGUID m_targetGUID;
     /* 0090 */ WOWGUID m_guid0090;
-    /* 0098 */ uint32_t m_state;
-    /* 009C */ uint32_t m_flags;
+    /* 0098 */ uint32_t m_state; // STATE_FLAGS
+    /* 009C */ uint32_t m_flags; // FLAGS
     /* 00A0 */ WOWGUID m_relativeTo;
     /* 00A8 */ float m_terrainTilt;
     /* 00AC */ int32_t m_ignoreFacingRefs;
     /* 00B0 */ int32_t m_groundTiltRefs;
     /* 00B4 */ uint32_t m_viewIndex;
-    /* 00B8 */ CameraView m_views [8];
+    /* 00B8 */ CameraView m_views [MAX_CAMERA_VIEWS];
     /* 0118 */ float m_distance;
     /* 011C */ float m_yaw;
     /* 0120 */ float m_pitch;
@@ -130,17 +236,26 @@ class CGCamera : public CSimpleCamera {
     /* 0134 */ float m_groundTilt;
     /* 0138 */ float m_targetFov;
     /* 013C */ float m_flyingMountHeight;
+    private:
     /* 0140 */ C3Vector m_bobOffset;
+
+    bool IsBobbing() const { return (this->m_state & STATE_FLAGS::STATE_BOBBING) != 0; }
+    void BeginBobbingSmooth();
+
+    public:
     /* 014C */ float m_targetHeightNear;
     /* 0150 */ float m_targetHeightFar;
     /* 0154 */ float m_targetHeightSwim;
     /* 0158 */ float m_mountHeight;
     /* 015C */ uint32_t m_heightChangedTimeMs;
+    private:
     /* 0160 */ uint32_t m_motionFlags;
     /* 0164 */ uint32_t m_motionStartTime [NUM_CAMERA_MOTIONS];
     /* 017C */ uint32_t m_motionStopTime [NUM_CAMERA_MOTIONS];
     /* 0194 */ uint32_t m_motionEndTime [NUM_CAMERA_MOTIONS];
     /* 01AC */ float m_motionSpeed [NUM_CAMERA_MOTIONS];
+
+    public:
     /* 01C4 */ C3Vector m_targetPosition;
     /* 01D0 */ float unused_01D0;
     /* 01D4 */ float m_targetFacing;
@@ -153,17 +268,19 @@ class CGCamera : public CSimpleCamera {
     /* 0240 */ CAMERA_SMOOTH m_smoothTargetOffset;
     /* 0258 */ CAMERA_SMOOTH m_smoothYaw;
     /* 0270 */ CAMERA_SMOOTH m_smoothFoV;
+    private:
     /* 0288 */ uint32_t m_bobTime;
     /* 028C */ float m_bobDuration;
     /* 0290 */ C3Vector m_bobStart;
+
+    public:
     /* 029C */ uint32_t unused_029C;
     /* 02A0 */ int32_t m_underwater;
     /* 02A4 */ uint32_t m_wasFlying;
     /* 02A8 */ CAMERA_SMOOTH m_smoothFlyingHeight;
     /* 02C0 */ float m_collideExtent;
     /* 02C4 */ uint32_t m_vehicleZoomEnabled;
-    /* 02C8 */ float m_overrideDistanceMin;
-    /* 02CC */ float m_overrideDistanceMax;
+    /* 02C8 */ CRange m_overrideDistanceRange;
     /* 02D0 */ float m_vehicleExitZoomDistance;
     /* 02D4 */ uint32_t m_vehicleYawStartTime;
     /* 02D8 */ uint32_t m_vehicleYawEndTime;
@@ -190,9 +307,8 @@ class CGCamera : public CSimpleCamera {
 
     CGCamera();
     ~CGCamera();
-    void AddShake(const C3Vector& position, int32_t type, CGCameraDir dir, float amplitude, float frequency, float duration, float timeOffset, float damping);
+    void AddShake(const C3Vector& position, CGCameraShakeType type, CGCameraDir dir, float amplitude, float frequency, float duration, float timeOffset, float damping);
     void AddShakeById(int32_t shakeId, const C3Vector* position);
-    void BeginBobbingSmooth();
     void CalcTerrainTilt(CGObject_C* target, uint32_t time);
     void CameraTeleported(float facing);
     uint32_t CanSmoothTargetFacing(CGObject_C* target);
@@ -207,25 +323,25 @@ class CGCamera : public CSimpleCamera {
     void ClearVehicleExitZoomDistance();
     void CreateViewFromCamera(uint32_t view);
     void DecIgnoreFacing();
-    void DisableFreeLook(int32_t keepSmoothing);
+    void DisableFreeLook(BOOL keepSmoothing);
     void EnableFreeLook();
     int32_t FinishLoadingTarget(CGObject_C* target);
     C3Vector GetCameraPosition(const C3Vector& target, float distance, const C3Vector& offset);
     float GetChaseFacing(CGUnit_C* unit) const;
     C3Vector GetSafeWorldPos(CGObject_C* target) const;
-    int32_t HasModelCamera();
-    int32_t HasTargetOffset();
+    BOOL HasModelCamera();
+    BOOL HasTargetOffset();
     void IncIgnoreFacing();
     void InitializeView();
     void RestoreSavedDistancePitch();
     uint32_t IsBobbingAllowed(CGObject_C* target);
-    int32_t IsCustomViewSmoothingActive();
-    int32_t IsFirstPersonView();
-    int32_t IsViewDefault(uint32_t view);
+    BOOL IsCustomViewSmoothingActive();
+    BOOL IsFirstPersonView();
+    BOOL IsViewDefault(uint32_t view);
     void LoadCameraSettings();
     void MakeRelativeTo(WOWGUID guid);
     C33Matrix ParentToWorld() const;
-    void PerformTerrainTilt(CGObject_C* target, uint32_t time, int32_t immediate);
+    void PerformTerrainTilt(CGObject_C* target, uint32_t time, BOOL immediate);
     void PickVehicleCamera();
     void OnVehicleCameraDestroyed();
     void ResetModelCamera();
@@ -249,13 +365,22 @@ class CGCamera : public CSimpleCamera {
     void SetVehicleSeatZoomMinDistance(float distance);
     void SetVehicleSeatZoomMinDistanceToDefault();
     void SetVehicleTrackingStyle(uint32_t style);
-    void SetVehicleZoomEnabled(int32_t enabled, float duration, int32_t animate);
-    int32_t ShouldSmoothPitch(float minPitch, float maxPitch);
+    void SetVehicleZoomEnabled(BOOL enabled, float duration, int32_t animate);
+    BOOL ShouldSmoothPitch(float minPitch, float maxPitch);
     int32_t SmoothSetDistance(float distance, float delay, float scale, uint32_t time);
     int32_t SmoothSetFlyingMountHeight(float height, float delay, float scale, uint32_t time);
     int32_t SmoothSetHeight(float height, float delay, float scale, uint32_t time);
     float SmoothTargetFacing(float facing, int32_t moved);
-    void StartMotion(CGCameraMotion motion, uint32_t time, uint32_t duration, float speed);
+    void StartMotion(CGCameraMotion move, uint32_t time, uint32_t duration, float speed);
+    void StopMotion(CGCameraMotion move, uint32_t time) { // (inferred)
+        STORM_ASSERT(move < NUM_CAMERA_MOTIONS);
+        const uint32_t active = 1u << (2 * move);
+
+        if (this->m_motionFlags & active) {
+            this->m_motionStopTime[move] = time;
+            this->m_motionFlags |= active << 1;
+        }
+    }
     int32_t StartSmoothDistance(float distance, float rate, uint32_t startTime);
     int32_t StartSmoothFlyingMountHeight(float height, float rate, uint32_t startTime);
     int32_t StartSmoothFoV(float offset, float rate, uint32_t startTime);
@@ -264,11 +389,11 @@ class CGCamera : public CSimpleCamera {
     int32_t StartSmoothPitch(float pitch, float rate, uint32_t startTime);
     int32_t StartSmoothTargetOffset(float offset, float rate, uint32_t startTime);
     int32_t StartSmoothYaw(float yaw, float rate, uint32_t startTime);
-    void UpdateAutoInteractState(int32_t enabled);
+    void UpdateAutoInteractState(BOOL enabled);
     void UpdateBobbingState(int32_t moving);
     void SmoothFreeLook(CGInputControl* input, int32_t idle);
     void UpdateTrackingState(int32_t tracking);
-    int32_t UpdateInebriation(float drunkness, int32_t immediate);
+    int32_t UpdateInebriation(float drunkness, BOOL immediate);
     float UpdateLiquidSurfaceStatus(CGObject_C* target);
     void UpdateMountHeightOrOffset(CGUnit_C* unit);
     void UpdateTargetFacing(CGObject_C* target, float& yaw, float& pitch, float& roll);
@@ -283,19 +408,87 @@ class CGCamera : public CSimpleCamera {
 extern float MAX_PITCH_ANGLE;
 extern float MIN_PITCH_ANGLE;
 extern int32_t s_cameraViewAngular[3];
-extern CAMERA_DEFAULTS s_cameraViewDefaults[8];
+extern const CAMERA_DEFAULTS s_cameraViewDefaults[CGCamera::MAX_CAMERA_VIEWS];
 extern const float s_terrainTiltTable[10][2];
 extern float s_targetHeightOffset;
 extern float s_cameraBobFrequency;
 extern float s_cameraBobVerticalAmplitude;
 extern float s_cameraBobHorizontalAmplitude;
 
+// Camera zoom distance bounds; ValidateCameraDistance rejects values outside them
+// ("Value out of range (%f - %f)"). Names inferred.
+constexpr float MIN_CAMERA_DIST = 0.0f;
+constexpr float MAX_CAMERA_DIST = 50.0f;
+
+// cameraSmoothStyle / cameraSmoothTrackingStyle values, from s_cameraSmoothStyleNames.
+enum CAMERA_SMOOTH_STYLE : int32_t {
+    CAMERA_SMOOTH_STYLE_NEVER = 0,
+    CAMERA_SMOOTH_STYLE_SMART = 1,
+    CAMERA_SMOOTH_STYLE_ALWAYS = 2,
+    CAMERA_SMOOTH_STYLE_SPLINE = 3,
+    CAMERA_SMOOTH_STYLE_SMARTER = 4,
+    NUM_CAMERA_SMOOTH_STYLES,
+};
+
+// From s_cameraSmoothStateNames. SmoothFreeLook collects them as (1 << state) reason bits.
+enum CAMERA_SMOOTH_STATE : int32_t {
+    CAMERA_SMOOTH_STATE_IDLE = 0,
+    CAMERA_SMOOTH_STATE_STOP = 1,
+    CAMERA_SMOOTH_STATE_TRACK = 2,
+    CAMERA_SMOOTH_STATE_MOVE = 3,
+    CAMERA_SMOOTH_STATE_STRAFE = 4,
+    CAMERA_SMOOTH_STATE_TURN = 5,
+    CAMERA_SMOOTH_STATE_FEAR = 6,
+    NUM_CAMERA_SMOOTH_STATES,
+};
+
+#define CAMERA_SMOOTH_STATE_BIT(state) (1u << (state))
+#define CAMERA_SMOOTH_STATE_ALL_BITS (CAMERA_SMOOTH_STATE_BIT(NUM_CAMERA_SMOOTH_STATES) - 1)
+
+// From s_cameraSmoothParamNames.
+enum CAMERA_SMOOTH_PARAM : int32_t {
+    CAMERA_SMOOTH_PARAM_DELAY = 0,
+    CAMERA_SMOOTH_PARAM_FACTOR = 1,
+    NUM_CAMERA_SMOOTH_PARAMS,
+};
+
+// From s_cameraViewDataNames.
+enum CAMERA_VIEW_DATA : int32_t {
+    CAMERA_VIEW_DATA_DISTANCE = 0,
+    CAMERA_VIEW_DATA_PITCH = 1,
+    CAMERA_VIEW_DATA_YAW = 2,
+    NUM_CAMERA_VIEW_DATA,
+};
+
+// From s_cameraTerrainTiltStateNames.
+enum CAMERA_TERRAIN_TILT_STATE : int32_t {
+    CAMERA_TERRAIN_TILT_STATE_FALL = 0,
+    CAMERA_TERRAIN_TILT_STATE_FEAR = 1,
+    CAMERA_TERRAIN_TILT_STATE_IDLE = 2,
+    CAMERA_TERRAIN_TILT_STATE_JUMP = 3,
+    CAMERA_TERRAIN_TILT_STATE_MOVE = 4,
+    CAMERA_TERRAIN_TILT_STATE_STRAFE = 5,
+    CAMERA_TERRAIN_TILT_STATE_SWIM = 6,
+    CAMERA_TERRAIN_TILT_STATE_TAXI = 7,
+    CAMERA_TERRAIN_TILT_STATE_TRACK = 8,
+    CAMERA_TERRAIN_TILT_STATE_TURN = 9,
+    NUM_CAMERA_TERRAIN_TILT_STATES,
+};
+
+// From s_cameraTerrainTiltParamNames.
+enum CAMERA_TERRAIN_TILT_PARAM : int32_t {
+    CAMERA_TERRAIN_TILT_PARAM_ABSORB = 0,
+    CAMERA_TERRAIN_TILT_PARAM_DELAY = 1,
+    CAMERA_TERRAIN_TILT_PARAM_FACTOR = 2,
+    NUM_CAMERA_TERRAIN_TILT_PARAMS,
+};
+
 extern CVar* s_cvCameraView;
-extern CVar* s_cvCameraViewData[8][3];
+extern CVar* s_cvCameraViewData[CGCamera::MAX_CAMERA_VIEWS][NUM_CAMERA_VIEW_DATA];
 extern CVar* s_cameraSmooth;
 extern CVar* s_cvCameraSmoothStyle;
 extern CVar* s_cvCameraTerrainTilt;
-extern CVar* s_cvCameraTerrainTiltState[5][10][3];
+extern CVar* s_cvCameraTerrainTiltState[NUM_CAMERA_SMOOTH_STYLES][NUM_CAMERA_TERRAIN_TILT_STATES][NUM_CAMERA_TERRAIN_TILT_PARAMS];
 extern CVar* s_cvCameraTerrainTiltTimeMin;
 extern CVar* s_cvCameraTerrainTiltTimeMax;
 extern CVar* s_cvCameraGroundSmoothSpeed;
@@ -332,8 +525,8 @@ extern CVar* s_cvCameraSurfacePitch;
 extern CVar* s_cvCameraDive;
 extern CVar* s_cvCameraPivotDYMin;
 extern CVar* s_cvCameraPivotDXMax;
-extern CVar* s_cvCameraSmoothViewData[5][3][2];
-extern CVar* s_cvCameraSmoothState[5][7][2];
+extern CVar* s_cvCameraSmoothViewData[NUM_CAMERA_SMOOTH_STYLES][NUM_CAMERA_VIEW_DATA][NUM_CAMERA_SMOOTH_PARAMS];
+extern CVar* s_cvCameraSmoothState[NUM_CAMERA_SMOOTH_STYLES][NUM_CAMERA_SMOOTH_STATES][NUM_CAMERA_SMOOTH_PARAMS];
 extern CVar* s_cvCameraSmoothYaw;
 extern CVar* s_cvCameraSmoothTrackingStyle;
 extern CVar* s_cvCameraViewBlendStyle;

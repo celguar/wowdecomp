@@ -3,9 +3,20 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Storm/H/stpl.h"
+#include "Engine/Source/Tempest/C2iVector.h"
 #include "WoW/Source/Object/WGUID.h"
 #include "WoW/Source/Net/Types.h"
+#include "WoW/Source/Object/Player.h"
+
+// FrameXML WatchFrame.lua MAX_WATCHABLE_QUESTS.
+constexpr uint32_t MAX_WATCHABLE_QUESTS = 25;
+
+// Inferred names: quest sort headers (one collapse-filter bit each), and quest log rows
+// (every log quest plus one header per sort type).
+constexpr uint32_t MAX_QUESTLOG_SORT_TYPES = 25;
+constexpr uint32_t MAX_QUESTLOG_ENTRIES = MAX_QUESTLOG_QUESTS + MAX_QUESTLOG_SORT_TYPES;
 
 class CGItem_C;
 class CDataStore;
@@ -17,16 +28,19 @@ class QuestLogLeaderBoardParams;
 struct QuestLogEntry {
     /* 0000 */ int32_t m_questId;
     /* 0004 */ int32_t m_logSlot;
-    /* 0008 */ int32_t m_isHeader;
+    /* 0008 */ BOOL m_isHeader;
     /* 000C */ int32_t m_expired;
 };
 
 struct QuestPOIPoint {
-    /* 0000 */ int32_t m_x;
-    /* 0004 */ int32_t m_y;
+    /* 0000 */ C2iVector m_position; // Signed POI XY used for map projection.
 };
 
 struct QuestPOIBlob {
+    enum FLAGS : int32_t {
+        F_WORLD_MAP_AREA_ONLY = 0x4, // Shown on the zone map only when it is m_worldMapAreaId.
+    };
+
     /* 0000 */ TSGrowableArray<QuestPOIPoint> m_points;
     /* 0010 */ int32_t m_centerX;
     /* 0014 */ int32_t m_centerY;
@@ -35,7 +49,7 @@ struct QuestPOIBlob {
     /* 0020 */ int32_t m_mapId;
     /* 0024 */ int32_t m_worldMapAreaId;
     /* 0028 */ int32_t m_floor;
-    /* 002C */ int32_t m_flags;
+    /* 002C */ int32_t m_flags; // FLAGS, from the POI query response
     /* 0030 */ int32_t m_priority;
 };
 
@@ -75,6 +89,13 @@ int32_t CountQuestItemDropsNeeded(int32_t questId, void (*callback)(int32_t id, 
 
 class CGQuestLog {
     public:
+    enum TRACKER_SORT_MODE : int32_t {
+        DISABLED = 0,
+        DISTANCE = 1,
+        LEVEL_DESCENDING = 2,
+        LEVEL_ASCENDING = 3,
+    };
+
     static void LeaveWorld();
     static void SaveTrackedQuests();
     static int32_t UpdateAllQuestPOI();
@@ -82,18 +103,18 @@ class CGQuestLog {
     static bool IsPOIVisibleOnDungeonMap(const int32_t* point, int32_t mapId, int32_t floor, int32_t dungeonMapId);
     static bool IsPOIOnCurrentMap(const int32_t* point, int32_t mapId, int32_t currentMapId);
     static int32_t GetQuestLogSlot(int32_t index);
-    static int32_t IsOnQuest(int32_t questId);
+    static BOOL IsOnQuest(int32_t questId);
     static int32_t FindOrFreePOISlot(int32_t questId);
     static int32_t GetQuestLeaderBoardByID(int32_t questId, QuestLogLeaderBoardParams* params);
     static int32_t GetQuestLeaderBoardForObject(int32_t questId, int32_t objectId, QuestLogLeaderBoardParams* params);
-    static int32_t m_sortTypes[25];
+    static int32_t m_sortTypes[MAX_QUESTLOG_SORT_TYPES];
     static uint32_t m_numSortTypes;
     static int32_t m_questResetTime;
     static uint8_t m_trackedQuestsLoaded;
     static void FilterAndSortQuests();
     static void LoadTrackedQuests();
     static bool HasQuestPOI(int32_t questId);
-    static int32_t IsSelectedQuestExpired();
+    static BOOL IsSelectedQuestExpired();
     static void RemoveQuestWatch(int32_t questId);
     static void ShiftQuestWatches(uint32_t from, uint32_t to);
     static CGItem_C* GetQuestSpecialItem(uint32_t index);
@@ -107,11 +128,11 @@ class CGQuestLog {
     static int32_t GetQuestIndex(int32_t questId);
     static int32_t GetQuestPOIIndex(int32_t questId);
     static QuestPOIInfo* GetQuestPOIInfo(int32_t questId);
-    static int32_t IsQuestFailed(uint32_t index);
+    static BOOL IsQuestFailed(uint32_t index);
     static bool HasNoObjectives(uint32_t index);
-    static int32_t IsQuestExpiredByID(int32_t questId);
-    static QuestLogEntry m_quests[50];
-    static QuestPOIInfo m_questPOIs[25];
+    static BOOL IsQuestExpiredByID(int32_t questId);
+    static QuestLogEntry m_quests[MAX_QUESTLOG_ENTRIES];
+    static QuestPOIInfo m_questPOIs[MAX_QUESTLOG_QUESTS];
     static int32_t m_abandonQuest;
     static uint32_t m_numQuestWatches;
     static int32_t m_timeOffset;
@@ -121,9 +142,9 @@ class CGQuestLog {
     static void SetServerTime(int32_t serverTime, int32_t resetTime);
     static int32_t SetQuestExpired(uint32_t index);
     static void UpdateQuestPOIFromUserServer();
-    static QuestWatch m_questWatches[25];
+    static QuestWatch m_questWatches[MAX_WATCHABLE_QUESTS];
     static uint32_t m_numShownQuests;
-    static void Update(int32_t a1);
+    static void Update(BOOL rebuild);
     static void EnterWorld();
     static int32_t m_numQuest;
     static int32_t m_selectedQuest;
@@ -139,7 +160,7 @@ class CGQuestLog {
     static bool GetQuestPOIIcon(int32_t questId, bool* complete, int32_t* mapId, uint32_t* mapFloor, int32_t* x, int32_t* y, int32_t* objective);
     static int32_t GetQuestLogItemDropByID(int32_t questId, QuestLogLeaderBoardParams* params);
     static int32_t GetQuestPOILeaderBoardByID(int32_t questId, QuestLogLeaderBoardParams* params);
-    static int32_t IsQuestCompleteEx(uint32_t index, int32_t a2);
+    static BOOL IsQuestCompleteEx(uint32_t index, BOOL requireObjectives);
     static int32_t SetQuestExpiredByID(int32_t questId);
     static void UpdateWatchTimers();
     static void UpdateQuestItem(int32_t itemId);

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Storm/H/stpl.h"
@@ -48,29 +49,10 @@ namespace Liquid {
         /* 0250 */ VSLight m_lights[3];
     };
 
-    struct VSWaveConstants {
-        /* 0000 */ float m_directionalPhase[4];
-        /* 0010 */ float m_circularPhase[4];
-        /* 0020 */ C4Vector m_directionalWaves[3];
-        /* 0050 */ float unk_0050[4];
-        /* 0060 */ float unk_0060[4];
-        /* 0070 */ C4Vector m_circularWaves[3];
-        /* 00A0 */ float unk_00A0[4];
-        /* 00B0 */ float unk_00B0[4];
-    };
-
     struct PSConstants {
         /* 0000 */ C44Matrix m_modelViewProj;
         /* 0040 */ C4Vector m_fogColor;
         /* 0050 */ C4Vector m_cameraPos;
-    };
-
-    struct PSProcWaterConstants {
-        /* 0000 */ C4Vector m_sunDir;
-        /* 0010 */ C4Vector m_sunAmbient;
-        /* 0020 */ C4Vector m_sunDiffuse;
-        /* 0030 */ C4Vector m_sunSpecular;
-        /* 0040 */ float m_params[8];
     };
 
     class IEnvironment {
@@ -108,15 +90,15 @@ namespace Liquid {
 
     class CMaterialProcWater : public IMaterial {
         public:
-        static int32_t s_refCount;
-        static CGxShader* s_vertexShaders[4];
-        static CGxShader* s_pixelShader;
-
         static CMaterialProcWater* Create();
 
         virtual ~CMaterialProcWater();
         virtual void Release();
         virtual void Render(IEnvironment* environment, IGeomFactory* geomFactory, IWaveManager* waveManager, const C3Vector& cameraPos, const C44Matrix* transform, const CAaSphere* bounds, CMaterialSettings* settings);
+
+        private:
+        static CGxShader* s_vertexShaders[4];
+        static CGxShader* s_pixelShader;
 
         CMaterialProcWater();
     };
@@ -131,30 +113,30 @@ namespace Liquid {
 
     class CMaterialWater : public IMaterial {
         public:
-        static int32_t s_refCount;
-        static CGxShader* s_vertexShaders[4];
-        static CGxShader* s_pixelShader;
-
         static CMaterialWater* Create();
 
         virtual ~CMaterialWater();
         virtual void Release();
         virtual void Render(IEnvironment* environment, IGeomFactory* geomFactory, IWaveManager* waveManager, const C3Vector& cameraPos, const C44Matrix* transform, const CAaSphere* bounds, CMaterialSettings* settings);
 
+        private:
+        static CGxShader* s_vertexShaders[4];
+        static CGxShader* s_pixelShader;
+
         CMaterialWater();
     };
 
     class CMaterialWaterNoSpec : public IMaterial {
         public:
-        static int32_t s_refCount;
-        static CGxShader* s_vertexShaders[4];
-        static CGxShader* s_pixelShader;
-
         static CMaterialWaterNoSpec* Create();
 
         virtual ~CMaterialWaterNoSpec();
         virtual void Release();
         virtual void Render(IEnvironment* environment, IGeomFactory* geomFactory, IWaveManager* waveManager, const C3Vector& cameraPos, const C44Matrix* transform, const CAaSphere* bounds, CMaterialSettings* settings);
+
+        private:
+        static CGxShader* s_vertexShaders[4];
+        static CGxShader* s_pixelShader;
 
         CMaterialWaterNoSpec();
     };
@@ -202,8 +184,8 @@ namespace Liquid {
 
     class CChunkVertexData : public IVertexData {
         public:
-        /* 0008 */ const uint8_t* m_data;
-        /* 000C */ uint32_t m_format;
+        /* 0008 */ const uint8_t* vtxData;
+        /* 000C */ uint32_t m_format; // LIQUID_VERTEX_FORMAT values in the native unsigned DWORD carrier.
 
         virtual float GetHeight(uint32_t index);
         virtual uint8_t GetDepth(uint32_t index);
@@ -216,8 +198,8 @@ namespace Liquid {
 
     class CInstanceVertexData : public IVertexData {
         public:
-        /* 0008 */ const uint8_t* m_data;
-        /* 000C */ const SMLiquidInstance* m_instance;
+        /* 0008 */ const uint8_t* dataPtr;
+        /* 000C */ const SMLiquidInstance* instDesc;
         /* 0010 */ uint32_t m_vertexCount;
 
         virtual float GetHeight(uint32_t index);
@@ -234,35 +216,42 @@ namespace Liquid {
         static uint16_t s_defaultTexCoord[2];
 
         /* 0000 */ uint32_t unused_0000;
-        /* 0004 */ const uint8_t* m_data;
+        /* 0004 */ const uint8_t* dataPtr;
 
         CAreaData(const void* data);
         void SetData(const void* data);
         bool HasData() const;
-        const SMLiquidChunkDesc* GetChunkDesc(uint32_t x, uint32_t y) const;
-        const SMLiquidInstance* GetInstanceDesc(const SMLiquidChunkDesc* chunk, uint32_t index) const;
-        const uint8_t* GetFishableTable(const SMLiquidChunkDesc* chunk) const;
-        const uint8_t* GetDeepTable(const SMLiquidChunkDesc* chunk) const;
-        const uint8_t* GetExistsTable(const SMLiquidInstance* instance) const;
+        const SMLiquidChunkDesc* GetChunkDesc(uint32_t cx, uint32_t cy) const;
+        const SMLiquidInstance* GetInstanceDesc(const SMLiquidChunkDesc* chunkDesc, uint32_t index) const;
+        const uint8_t* GetFishableTable(const SMLiquidChunkDesc* chunkDesc) const;
+        const uint8_t* GetDeepTable(const SMLiquidChunkDesc* chunkDesc) const;
+        const uint8_t* GetExistsTable(const SMLiquidInstance* instDesc) const;
     };
 
     class CMaterialSettings {
         public:
-        /* 0000 */ char m_textureNames[6][128];
+        enum : uint32_t {
+            INT_CNT = 4,
+            FLOAT_CNT = 18,
+            TEXTURE_CNT = 6,
+            MAX_TEXNAME_LEN = 128,
+        };
+
+        /* 0000 */ char m_textureNames[TEXTURE_CNT][MAX_TEXNAME_LEN];
         /* 0300 */ CImVector m_colors[2];
-        /* 0308 */ int32_t m_ints[4];
-        /* 0318 */ float m_floats[18];
+        /* 0308 */ int32_t m_ints[INT_CNT];
+        /* 0318 */ float m_floats[FLOAT_CNT];
         /* 0360 */ int32_t m_transparent;
-        /* 0364 */ int32_t m_texturesReady[6];
-        /* 037C */ TSGrowableArray<CTexture*> m_textures[6];
-        /* 03DC */ TSGrowableArray<CTexture*> m_pendingTextures[6];
+        /* 0364 */ int32_t m_texturesReady[TEXTURE_CNT];
+        /* 037C */ TSGrowableArray<CTexture*> m_textures[TEXTURE_CNT];
+        /* 03DC */ TSGrowableArray<CTexture*> m_pendingTextures[TEXTURE_CNT];
 
         CMaterialSettings();
         ~CMaterialSettings();
         void Destroy();
-        float GetFloat(uint32_t index) const;
-        int32_t GetInt(uint32_t index) const;
-        CGxTex* GetTexture(uint32_t index, uint32_t period);
+        float GetFloat(uint32_t floatIdx) const;
+        int32_t GetInt(uint32_t intIdx) const;
+        CGxTex* GetTexture(uint32_t texIdx, uint32_t period);
         void InitTexture();
     };
 
@@ -295,8 +284,10 @@ namespace Liquid {
         static int32_t CompareOpaque(const void* a, const void* b);
         static int32_t CompareTransparent(const void* a, const void* b);
 
-        /* 0000 */ TSGrowableArray<CInstance*> m_instances[2];
+        private:
+        /* 0000 */ TSGrowableArray<CInstance*> m_drawList[2];
 
+        public:
         ~CRenderer();
         void Draw(CInstance* instance);
         void Flush(const C3Vector& cameraPos, uint32_t pass);
@@ -304,9 +295,10 @@ namespace Liquid {
     };
 
     class CSettingsBank {
-        public:
-        static TSGrowableArray<CMaterialSettings*> s_settings;
+        static TSGrowableArray<CMaterialSettings*> m_settings;
 
+        public:
+        static inline void Initialize();
         static void Destroy();
         static CMaterialSettings* GetSettings(uint32_t liquidType);
         static void ResetTextures();
@@ -314,9 +306,10 @@ namespace Liquid {
     };
 
     class CMaterialBank {
-        public:
-        static TSGrowableArray<IMaterial*> s_materials;
+        static TSGrowableArray<IMaterial*> m_materials;
 
+        public:
+        static inline void Initialize();
         static void Destroy();
         static IMaterial* GetMaterial(uint32_t liquidType);
     };
@@ -339,39 +332,27 @@ namespace Liquid {
     extern int32_t s_useCameraRelativeCoords;
     extern int32_t s_settingsBankRefCount;
     extern int32_t s_materialBankRefCount;
-    extern uint8_t s_unk_D43B48[4];
-    extern CTexture* s_unk_D43B4C;
-    extern CTexture* s_unk_D43B50[32];
-    extern CTexture* s_wmoWaterTex;
-    extern CTexture* s_oceanDepthTex;
-    extern CTexture* s_riverDepthTex;
     extern VSConstants s_vsConstants;
-    extern VSWaveConstants s_vsWaveConstants;
     extern PSConstants s_psConstants;
-    extern PSProcWaterConstants s_psProcWaterConstants;
 
-    void CacheProceduralTextures();
     void ClearMaterials();
     void CreateProceduralTextures();
     void DestroyProceduralTextures();
-    void ExtWaterDepthTexCallback(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevel, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     const char* GetShaderSuffix();
     C44Matrix* GetTexScrollMtx(const C2Vector& speed);
-    int32_t Initialize(int32_t a1, float a2, int32_t a3, const char* a4, IDatabase<LiquidTypeRec>* liquidTypeDB, IDatabase<LiquidMaterialRec>* liquidMaterialDB);
+    int32_t Initialize(BOOL useCameraRelativeCoords, float worldCoordScale, int32_t shadersEnabled, const char* shaderPostfix, IDatabase<LiquidTypeRec>* liquidTypeDB, IDatabase<LiquidMaterialRec>* liquidMaterialDB);
     void InvalidateProceduralTextures();
-    void SetCircularWave(uint32_t index, const C2Vector& a2, const C2Vector& a3, float a4, float a5, float a6, float speed);
-    void SetDirectionalWave(uint32_t index, const C2Vector& direction, float a3, float a4, float a5, float speed);
     void SetProcWaterLighting(const CM2Lighting& lighting);
-    void SetProcWaterParams(float a1, float a2, float a3, float a4, float a5, float a6, float a7);
+    // Parameters are LiquidType.dbc m_float[11..17] (the first scaled to world coordinates).
+    void SetProcWaterParams(float liquidFloat11, float liquidFloat12, float liquidFloat13, float liquidFloat14, float liquidFloat15, float liquidFloat16, float liquidFloat17);
     void SetShaderConstants();
     void SetShaderLighting(const CM2Lighting& lighting);
     void SetShaderTransforms(const C3Vector& cameraPos, const C44Matrix& transform);
     void Shutdown();
     void UpdateProceduralTextures();
-    void SetShadersEnabled(int32_t enabled);
-    void SetSpecularEnabled(int32_t enabled);
+    void SetShadersEnabled(BOOL enabled);
+    void SetSpecularEnabled(BOOL enabled);
     int32_t UseCameraRelativeCoords();
-    void WmoWaterTexCallback(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevel, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     float WorldCoordScale();
 }
 

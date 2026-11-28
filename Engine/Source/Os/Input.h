@@ -2,11 +2,13 @@
 #define ENGINE_SOURCE_OS_INPUT_H
 
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Event/Types.h"
 
 struct tagRECT;
 
 enum OSINPUT {
+    OS_INPUT_NONE = -1, // OsInputGet result when no input is queued.
     OS_INPUT_CAPTURE_CHANGED = 0,
     OS_INPUT_CHAR = 1,
     OS_INPUT_STRING = 2,
@@ -58,7 +60,7 @@ void OsInputSetWindowResizeLock(int32_t resizeLock);
 float OsInputGetMouseSpeed();
 void OsInputInitialize();
 void OsInputDestroy();
-void OsInputEnableSecureMode(int32_t enable);
+void OsInputEnableSecureMode(BOOL enable);
 void OsInputSetEventPollProc(void (*pollProc)());
 int32_t OsInputGet(OSINPUT* id, int32_t* param0, int32_t* param1, int32_t* param2, int32_t* param3);
 void OsInputSetMouseMode(OS_MOUSE_MODE mode);
@@ -67,5 +69,10 @@ void OsInputGetMousePosition(int32_t* x, int32_t* y);
 void OsInputSetMousePosition(int32_t x, int32_t y);
 int32_t OsGetDefaultWindowRect(tagRECT* rect);
 intptr_t OsWindowProc(void* window, uint32_t message, uintptr_t wparam, intptr_t lparam);
+
+#ifdef WOWDECOMP_TOOL_FEATURES
+// Tool features (0.5.3): the procedure OsWindowProc forwards the messages it does not keep to (nullptr: DefWindowProcA).
+void OsSetWindowProc(intptr_t (*windowProc)(void* window, uint32_t message, uintptr_t wparam, intptr_t lparam));
+#endif
 
 #endif

@@ -19,6 +19,29 @@ class CDataStore;
 class CAsyncObject;
 class CObjectHeapList;
 
+// Build 12340 UI outcomes; these are descriptive names, not recovered server symbols.
+// 0/5 are silent, and 12/13/14 share NOT_FOUND; their meanings remain UNKNOWN.
+// Keep the packet carrier raw so every unrecognized byte retains default handling.
+enum TRANSFER_ABORT_REASON : int32_t {
+    TRANSFER_ABORT_UNKNOWN_0 = 0,
+    TRANSFER_ABORT_ERROR = 1,
+    TRANSFER_ABORT_MAX_PLAYERS = 2,
+    TRANSFER_ABORT_NOT_FOUND = 3,
+    TRANSFER_ABORT_TOO_MANY_INSTANCES = 4,
+    TRANSFER_ABORT_UNKNOWN_5 = 5,
+    TRANSFER_ABORT_ZONE_IN_COMBAT = 6,
+    TRANSFER_ABORT_INSUFFICIENT_EXPANSION = 7,
+    TRANSFER_ABORT_DIFFICULTY = 8,
+    TRANSFER_ABORT_UNIQUE_MESSAGE = 9,
+    TRANSFER_ABORT_TOO_MANY_REALM_INSTANCES = 10,
+    TRANSFER_ABORT_NEED_GROUP = 11,
+    TRANSFER_ABORT_UNKNOWN_12 = 12,
+    TRANSFER_ABORT_UNKNOWN_13 = 13,
+    TRANSFER_ABORT_UNKNOWN_14 = 14,
+    TRANSFER_ABORT_REALM_ONLY = 15,
+    TRANSFER_ABORT_MAP_NOT_ALLOWED = 16,
+};
+
 enum WOWCMDOPT {
     CMD_RES_800x600 = 16,
     CMD_RES_1024x768 = 17,
@@ -39,11 +62,80 @@ enum WOWCMDOPT {
     CMD_GX_OVERRIDE = 39,
 };
 
+// How OpenArchives treats each ARCHIVEINFO entry (inferred names): required
+// archives abort the client when missing, optional ones are skipped in trial
+// mode, alternate ones open ahead of the base set with patch priority, and
+// streaming ones open only in streaming mode.
+enum ARCHIVE_TYPE : int32_t {
+    ARCHIVE_REQUIRED  = 1,
+    ARCHIVE_OPTIONAL  = 2,
+    ARCHIVE_ALTERNATE = 3,
+    ARCHIVE_STREAMING = 4,
+};
+
+// Index into s_archives, named after each entry's MPQ file; base archive handles use the same
+// order starting at s_firstBaseArchive.
+enum ARCHIVE_INDEX : int32_t {
+    ARCHIVE_INDEX_ALTERNATE = 0,
+    ARCHIVE_INDEX_INTERFACE = 1,
+    ARCHIVE_INDEX_MISC = 2,
+    ARCHIVE_INDEX_MODEL = 3,
+    ARCHIVE_INDEX_TEXTURE = 4,
+    ARCHIVE_INDEX_TERRAIN = 5,
+    ARCHIVE_INDEX_WMO = 6,
+    ARCHIVE_INDEX_SOUND = 7,
+    ARCHIVE_INDEX_FONTS = 8,
+    ARCHIVE_INDEX_DBC = 9,
+    ARCHIVE_INDEX_SPEECH = 10,
+    ARCHIVE_INDEX_EXPANSION_LOC = 11,
+    ARCHIVE_INDEX_LICHKING_LOC = 12,
+    ARCHIVE_INDEX_EXPANSION_SPEECH = 13,
+    ARCHIVE_INDEX_LICHKING_SPEECH = 14,
+    ARCHIVE_INDEX_EXPANSION = 15,
+    ARCHIVE_INDEX_LICHKING = 16,
+    ARCHIVE_INDEX_COMMON = 17,
+    ARCHIVE_INDEX_COMMON_2 = 18,
+    ARCHIVE_INDEX_LOCALE = 19,
+    ARCHIVE_INDEX_SPEECH_LOCALE = 20,
+    ARCHIVE_INDEX_EXPANSION_LOCALE = 21,
+    ARCHIVE_INDEX_LICHKING_LOCALE = 22,
+    ARCHIVE_INDEX_EXPANSION_SPEECH_LOCALE = 23,
+    ARCHIVE_INDEX_LICHKING_SPEECH_LOCALE = 24,
+    ARCHIVE_INDEX_DEVELOPMENT = 25,
+    ARCHIVE_INDEX_STREAMING = 26,
+    ARCHIVE_INDEX_STREAMING_LOC = 27,
+    NUM_ARCHIVES = 28,
+};
+
 struct ARCHIVEINFO {
     /* 0000 */ const char* m_name;
-    /* 0004 */ int32_t m_unk04;
-    /* 0008 */ int32_t m_unk08;
+    /* 0004 */ ARCHIVE_TYPE m_type;
+    /* 0008 */ int32_t m_availabilityMask; // tested against CheckDataFilesExist() + 1
     /* 000C */ bool m_opened;
+};
+
+// Client and account expansion level (GlobalStrings EXPANSION_NAME0..2; CGlueMgr reports them as
+// the "CL", "BC" and "LK" account types).
+enum EXPANSION_LEVEL : uint8_t {
+    EXPANSION_CLASSIC = 0,
+    EXPANSION_BURNING_CRUSADE = 1,
+    EXPANSION_LICH_KING = 2,
+    NUM_EXPANSIONS = 3,
+};
+
+// Client locale, indexing s_iniLocaleNames/s_localeIds (names in the 0.5.3 WOW_LOCALE style;
+// the 3.3.5 order differs from 0.5.3 and from DB_LOCALE_INDEX).
+enum WOW_LOCALE : int32_t {
+    LOCALE_en_US = 0,
+    LOCALE_ko_KR = 1,
+    LOCALE_fr_FR = 2,
+    LOCALE_de_DE = 3,
+    LOCALE_zh_CN = 4,
+    LOCALE_zh_TW = 5,
+    LOCALE_es_ES = 6,
+    LOCALE_es_MX = 7,
+    LOCALE_ru_RU = 8,
+    NUM_LOCALES = 9,
 };
 
 extern CVar* g_accountListVar;
@@ -67,9 +159,9 @@ extern CVar* s_cvTextureFilteringMode;
 extern CVar* s_desktopGammaCvar;
 extern uint8_t s_expansionLevel;
 extern CVar* s_gammaCvar;
-extern int32_t s_locale;
-extern const char* s_iniLocaleNames[9];
-extern uint32_t s_localeIds[9];
+extern WOW_LOCALE s_locale;
+extern const char* s_iniLocaleNames[NUM_LOCALES];
+extern uint32_t s_localeIds[NUM_LOCALES];
 extern char s_localeCode[5];
 extern int32_t s_isPvPRealm;
 extern int32_t s_region;
@@ -82,16 +174,14 @@ int32_t CCommand_TimingInfo(const char* command, const char* arguments);
 bool CheckDataFilesExist();
 void ClientDestroyGame(int32_t charSelect, int32_t resumeGlue, int32_t worldLogin);
 void ClientInitializeGame(uint32_t mapId, C3Vector position);
-void ClientPostClose(int32_t reason);
+void ClientPostClose(STARTUP_STRING_ID reason);
 uint32_t ClientSetTimer(uint32_t delay, EVENTHANDLERFUNC handler, void* param);
 uint32_t ClientSetTimer(uint32_t delay, EVENTHANDLERGUIDFUNC handler, uint64_t guid, void* param);
 void ClientRegisterConsoleCommands();
 int32_t CommonMain();
-int32_t DestroyEngineCallback(const void* data, void* param);
 uint8_t GetClientExpansionLevel();
 const char* GetInstallLocationString();
 uint32_t GetM2CvarFlags();
-int32_t InitializeEngineCallback(const void* data, void* param);
 bool InitializeGlobal();
 bool LocaleCallback(CVar* var, const char* oldValue, const char* value, void* arg);
 int main();
@@ -130,7 +220,7 @@ extern volatile long s_additionalCheckArmed;
 
 void CheckAndSendBotDetected();
 void AdditionalCheck1();
-uint8_t AdditionalCheck1Scan(const AdditionalCheckInterface* iface, int32_t unused_a2);
+uint8_t AdditionalCheck1Scan(const AdditionalCheckInterface* iface, int32_t unused2);
 void InitTokenSeed(const uint8_t* key);
 void* Client_MemAlloc(uint32_t bytes);
 void Client_MemFree(void* ptr);

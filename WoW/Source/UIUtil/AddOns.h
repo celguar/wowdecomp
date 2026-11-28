@@ -4,8 +4,16 @@
 #include <cstddef>
 #include <cstdint>
 #include "Engine/Source/Storm/H/stpl.h"
+#include "WoW/Source/UIUtil/Types.h"
 
 class CDataStore;
+
+// GetAddOnEnableState result (GlueXML AddonList.lua: "disabled, enabled for some, enabled for all").
+enum ADDON_ENABLE_STATE : int32_t {
+    ADDON_ENABLE_STATE_DISABLED = 0,
+    ADDON_ENABLE_STATE_SOME = 1,
+    ADDON_ENABLE_STATE_ALL = 2,
+};
 
 struct UIADDON : public TSHashObject<UIADDON, HASHKEY_STRI> {
     struct METADATA : public TSHashObject<UIADDON::METADATA, HASHKEY_STRI> {
@@ -19,7 +27,7 @@ struct UIADDON : public TSHashObject<UIADDON, HASHKEY_STRI> {
     /* 001A */ uint8_t unused_001A[2];
     /* 001C */ uint32_t m_interfaceVersion;
     /* 0020 */ uint32_t m_revision;
-    /* 0024 */ uint32_t m_status;
+    /* 0024 */ UIADDON_SECURITY m_status;
     /* 0028 */ bool m_secure;
     /* 0029 */ bool m_blizzard;
     /* 002A */ bool m_signed;

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include "Engine/Source/Base/CDataStore.h"
 #include "Engine/Source/Event/Types.h"
+#include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Storm/Source/SLock.h"
 #include "WoW/Source/Net/NetClient/Types.h"
@@ -59,11 +60,12 @@ struct NETEVENTQUEUENODE : public TSLinkedNode<NETEVENTQUEUENODE> {
 };
 
 class NETEVENTQUEUE {
-    public:
+    private:
     /* 0000 */ NetClient* m_client;
     /* 0004 */ SCritSect m_critSect;
     /* 002C */ TSList<NETEVENTQUEUENODE> m_eventQueue;
 
+    public:
     NETEVENTQUEUE(NetClient* client);
     ~NETEVENTQUEUE();
     void AddEvent(EVENTID eventId, void* connection, NetClient* client, const void* data, uint32_t size);
@@ -72,7 +74,23 @@ class NETEVENTQUEUE {
 };
 
 class NetClient : public WowConnectionResponse {
-    public:
+    private:
+    friend class NETEVENTQUEUE;
+
+    // INLINED
+    int32_t AddRef() { // (inferred)
+        int32_t newval = this->m_refCount.Increment();
+        STORM_ASSERT(newval > 0);
+        return newval;
+    }
+
+    // INLINED
+    int32_t DelRef() { // (inferred)
+        int32_t newval = this->m_refCount.Decrement();
+        STORM_ASSERT(newval >= 0);
+        return newval;
+    }
+
     static uint32_t s_clientCount;
 
     struct HELDMESSAGE : public TSLinkedNode<NetClient::HELDMESSAGE> {
@@ -81,15 +99,18 @@ class NetClient : public WowConnectionResponse {
         ~HELDMESSAGE();
     };
 
+    protected:
     /* 0004 */ LoginData m_loginData;
+
+    private:
     /* 0534 */ NETSTATE m_netState;
     /* 0538 */ bool m_suspended;
     /* 0539 */ uint8_t unused_0539[3];
-    /* 053C */ MESSAGE_HANDLER m_handlers [1311];
-    /* 19B8 */ void* m_handlerParams [1311];
+    /* 053C */ MESSAGE_HANDLER m_handlers [NUM_MSG_TYPES];
+    /* 19B8 */ void* m_handlerParams [NUM_MSG_TYPES];
     /* 2E34 */ NETEVENTQUEUE* m_netEventQueue;
     /* 2E38 */ WowConnection* m_serverConnection;
-    /* 2E3C */ WowConnection* m_redirectConnection;
+    /* 2E3C */ WowConnection* m_newConnection;
     /* 2E40 */ uint32_t m_redirectKey;
     /* 2E44 */ ATOMIC32 m_refCount;
     /* 2E48 */ bool m_deleteMe;
@@ -106,6 +127,7 @@ class NetClient : public WowConnectionResponse {
     /* 2ED0 */ ClntObjMgr* m_objMgr;
     /* 2ED4 */ TSList<NetClient::HELDMESSAGE> m_heldMessages;
 
+    public:
     ~NetClient() override;
     void WCMessageReady(WowConnection* connection, uint32_t timeStamp, CDataStore* msg) override;
     void WCConnected(WowConnection* connection, WowConnection* inbound, uint32_t timeStamp, const NETCONNADDR* addr) override;
@@ -130,13 +152,14 @@ class NetClient : public WowConnectionResponse {
     void EnableEncryption(WowConnection* connection, const uint8_t* seed, uint8_t seedLength);
     void GetNetStats(float& bytesIn, float& bytesOut, uint32_t& latency);
     uint8_t* GetSessionKey();
+    NETSTATE GetNetState() const { return this->m_netState; } // (inferred)
     void HandleAuthChallenge(WowConnection* connection, CDataStore* msg);
     void HandleIdle();
     void HandlePong(WowConnection* connection, CDataStore* msg);
     void HandleRedirectClient(WowConnection* connection, CDataStore* msg);
     void HandleResumeComms(WowConnection* connection, CDataStore* msg);
     void HandleSuspendComms(WowConnection* connection, CDataStore* msg);
-    int32_t ProcessMessage(uint32_t timeReceived, CDataStore* msg, int32_t unused_a4);
+    int32_t ProcessMessage(uint32_t timeReceived, CDataStore* msg, int32_t unused4);
     void Ping();
     void PollEventQueue();
     void Disconnect();
@@ -144,6 +167,7 @@ class NetClient : public WowConnectionResponse {
     void Send(CDataStore* msg);
     void SetMessageHandler(NETMESSAGE msgId, MESSAGE_HANDLER handler, void* param);
     void SetLoginData(LoginData* loginData);
+    void SetObjectManager(ClntObjMgr* mgr) { this->m_objMgr = mgr; } // (inferred)
 };
 
 class CNetClient {

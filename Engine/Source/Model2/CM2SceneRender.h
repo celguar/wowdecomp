@@ -21,6 +21,16 @@ struct CGxBuf;
 
 class CM2SceneRender {
     public:
+    // Fog color selection; separate from the distance/density equations.
+    enum FOG_MODE : uint32_t {
+        FOG_DISABLED = 0,
+        FOG_LIGHTING_COLOR = 1,
+        FOG_BLACK = 2,
+        FOG_WHITE = 3,
+        FOG_GRAY = 4,
+        FOG_UNSET = 0xFFFFFFFF, // Initial value of both mode slots.
+    };
+
     /* 0000 */ C44Matrix m_matrix;
     /* 0040 */ CM2Scene* m_scene;
     /* 0044 */ CM2Cache* m_cache;
@@ -28,8 +38,8 @@ class CM2SceneRender {
     /* 004C */ M2PASS m_pass;
     /* 0050 */ M2Element* m_curElement;
     /* 0054 */ M2Element* m_prevElement;
-    /* 0058 */ int32_t m_curType;
-    /* 005C */ int32_t m_prevType;
+    /* 0058 */ M2_ELEMENT_TYPE m_curType;
+    /* 005C */ M2_ELEMENT_TYPE m_prevType;
     /* 0060 */ CM2Model* m_curModel;
     /* 0064 */ CM2Model* m_prevModel;
     /* 0068 */ CM2Shared* m_curShared;
@@ -38,20 +48,20 @@ class CM2SceneRender {
     /* 0074 */ CM2Lighting* m_prevLighting;
     /* 0078 */ int32_t m_curLocalLighting;
     /* 007C */ int32_t m_prevLocalLighting;
-    /* 0080 */ uint32_t m_curFogMode;
-    /* 0084 */ uint32_t m_prevFogMode;
+    /* 0080 */ FOG_MODE m_curFogMode;
+    /* 0084 */ FOG_MODE m_prevFogMode;
     /* 0088 */ M2Batch* m_curBatch;
     /* 008C */ M2Batch* m_prevBatch;
-    /* 0090 */ M2SkinSection* m_curSkinSection;
+    /* 0090 */ M2SkinSection* m_skinSection;
     /* 0094 */ M2SkinSection* m_prevSkinSection;
     /* 0098 */ M2Material* m_curMaterial;
     /* 009C */ M2Material* m_prevMaterial;
-    /* 00A0 */ CShaderEffect* m_particleEffect;
-    /* 00A4 */ CShaderEffect* m_particleUnlitEffect;
-    /* 00A8 */ CShaderEffect* m_projectedModModEffect;
-    /* 00AC */ CShaderEffect* m_projectedModModUnlitEffect;
-    /* 00B0 */ CShaderEffect* m_projectedModAddEffect;
-    /* 00B4 */ CShaderEffect* m_projectedModAddUnlitEffect;
+    /* 00A0 */ CShaderEffect* m_hParticleEffect;
+    /* 00A4 */ CShaderEffect* m_hParticleUnlitEffect;
+    /* 00A8 */ CShaderEffect* m_hProjOpaqueEffect;
+    /* 00AC */ CShaderEffect* m_hProjOpaqueUnlitEffect;
+    /* 00B0 */ CShaderEffect* m_hProjAddEffect;
+    /* 00B4 */ CShaderEffect* m_hProjAddUnlitEffect;
     /* 00B8 */ M2Material m_defaultMaterial;
 
     static void EndFixed();

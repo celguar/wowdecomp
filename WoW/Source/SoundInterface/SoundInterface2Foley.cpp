@@ -30,11 +30,11 @@ void SI2::Detach(SE2SoundKitObject* object) {
 
 // VERIFY: f4fa7734 manual
 // OFFSET: 0x004CFC10
-int32_t SI2::PlayFoleySound(int32_t materialId, const C3Vector* position, int32_t self) {
+SI2_RESULT SI2::PlayFoleySound(int32_t materialId, const C3Vector* position, int32_t self) {
     MaterialRec* material = g_materialDB.GetRecord(materialId);
 
     if (!material || !material->m_foleySoundID) {
-        return 0;
+        return SI2_OK;
     }
 
     C3Vector soundPosition;
@@ -57,14 +57,14 @@ int32_t SI2::PlayFoleySound(int32_t materialId, const C3Vector* position, int32_
         properties.m_volumeScale = 0.65f;
     }
 
-    properties.m_priority = 110;
+    properties.m_priority = SI2_PRIORITY_OBJECT;
 
     return SI2::PlaySoundKit(material->m_foleySoundID, listenerAtCharacter == 0 ? &soundPosition : nullptr, nullptr, &properties, 0, nullptr, 1, 0);
 }
 
 // VERIFY: 9dd45739 manual
 // OFFSET: 0x004CFE00
-int32_t SI2::IsTooCloseToExistingSoundKit(int32_t soundKitId, const C3Vector* position) {
+BOOL SI2::IsTooCloseToExistingSoundKit(int32_t soundKitId, const C3Vector* position) {
     SEChannelInfo info[512];
     uint32_t hardwareCount;
     uint32_t softwareCount;
@@ -93,27 +93,32 @@ int32_t SI2::IsTooCloseToExistingSoundKit(int32_t soundKitId, const C3Vector* po
 
 // VERIFY: 4d8f58a6 manual
 // OFFSET: 0x004D0020
-int32_t SndInterfacePlayItemSound(ITEMSOUNDTYPE type, CGItem_C* item) {
-    if (item->m_item->m_itemFieldFlags & ITEM_DFLAG_WRAPPED) {
-        if (type == ITEMSOUND_DROP) {
+SI2_RESULT SndInterfacePlayItemSound(ITEMSOUNDTYPE soundType, CGItem_C* itemPtr) {
+    STORM_ASSERT(soundType < NUM_ITEMSOUNDS);
+    STORM_ASSERT(itemPtr);
+
+    if (itemPtr->m_item->m_itemFieldFlags & ITEM_DYNAMIC_FLAGS::ITEM_DFLAG_WRAPPED) {
+        if (soundType == ITEMSOUND_DROP) {
             return SI2::PlaySoundKit("(DONOTRENAME)WrappedItemDrop", nullptr, nullptr, nullptr);
         }
 
         return SI2::PlaySoundKit("(DONOTRENAME)WrappedItemPickup", nullptr, nullptr, nullptr);
     }
 
-    const ItemGroupSoundsRec* sounds = item->m_groupSounds;
+    const ItemGroupSoundsRec* sounds = itemPtr->GetItemGroupSounds();
 
     if (sounds) {
-        return SI2::PlaySoundKit(sounds->m_sound[type], nullptr, nullptr, nullptr, 0, nullptr, 1, 0);
+        return SI2::PlaySoundKit(sounds->m_sound[soundType], nullptr, nullptr, nullptr, 0, nullptr, 1, 0);
     }
 
-    return 0;
+    return SI2_OK;
 }
 
 // VERIFY: fc148494 manual
 // OFFSET: 0x004D0090
-void SI2::PlayItemSound(ITEMSOUNDTYPE type, int32_t displayId) {
+void SI2::PlayItemSound(ITEMSOUNDTYPE soundType, int32_t displayId) {
+    STORM_ASSERT(soundType < NUM_ITEMSOUNDS);
+
     ItemDisplayInfoRec display;
 
     if (!g_itemDisplayInfoDB.GetRecord(displayId, &display)) {
@@ -123,7 +128,7 @@ void SI2::PlayItemSound(ITEMSOUNDTYPE type, int32_t displayId) {
     ItemGroupSoundsRec* sounds = g_itemGroupSoundsDB.GetRecord(display.m_groupSoundIndex);
 
     if (sounds) {
-        SI2::PlaySoundKit(sounds->m_sound[type], nullptr, nullptr, nullptr, 0, nullptr, 1, 0);
+        SI2::PlaySoundKit(sounds->m_sound[soundType], nullptr, nullptr, nullptr, 0, nullptr, 1, 0);
     }
 }
 
@@ -139,7 +144,7 @@ void SI2::UpdateTaxiSounds(float elapsed) {
 
     CGUnit_C* player = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPE_PLAYER, __FILE__, __LINE__));
 
-    if (!player || !(player->m_unit->m_unitFieldFlags & 0x100000)) {
+    if (!player || !(player->m_unit->m_unitFieldFlags & UNIT_FLAGS::UNIT_FLAG_ON_TAXI)) {
         return;
     }
 
@@ -160,7 +165,7 @@ void SI2::UpdateTaxiSounds(float elapsed) {
         }
 
         uint32_t roll = CRandom::dice_(static_cast<uint32_t>(static_cast<int64_t>(range * 100.0f)), g_rndSeed);
-        s_taxiFidgetDelay = static_cast<float>(roll) * 0.0099999998f + delayMin;
+        s_taxiFidgetDelay = static_cast<float>(roll) * 0.01f + delayMin;
     }
 
     if (!SI2::IsPlaying(&s_taxiSound)) {

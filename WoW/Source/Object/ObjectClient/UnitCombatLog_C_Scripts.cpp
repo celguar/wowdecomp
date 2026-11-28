@@ -59,7 +59,7 @@ static int32_t Script_CombatLog_Object_IsA(lua_State* L) {
     uint32_t flags = static_cast<uint32_t>(lua_tonumber(L, 1));
     flags &= static_cast<uint32_t>(lua_tonumber(L, 2));
 
-    if ((flags & 0xFFFF0000) || ((flags & 0xF) && (flags & 0xF0) && (flags & 0x300) && (flags & 0xFC00))) {
+    if ((flags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_SPECIAL_MASK) || ((flags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_AFFILIATION_MASK) && (flags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_REACTION_MASK) && (flags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_CONTROL_MASK) && (flags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_TYPE_MASK))) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -83,7 +83,7 @@ static int32_t Script_CombatLogAddFilter(lua_State* L) {
         case LUA_TNUMBER:
             sourceFlags = static_cast<uint32_t>(static_cast<int64_t>(lua_tonumber(L, 2)));
 
-            if (!(sourceFlags & 0xFFFF0000) && (!(sourceFlags & 0xF) || !(sourceFlags & 0xF0) || !(sourceFlags & 0x300) || !(sourceFlags & 0xFC00))) {
+            if (!(sourceFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_SPECIAL_MASK) && (!(sourceFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_AFFILIATION_MASK) || !(sourceFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_REACTION_MASK) || !(sourceFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_CONTROL_MASK) || !(sourceFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_TYPE_MASK))) {
                 luaL_error(L, "CombatLogAddFilter(): incomplete filter for srcMask");
                 return 0;
             }
@@ -103,7 +103,7 @@ static int32_t Script_CombatLogAddFilter(lua_State* L) {
         case LUA_TNUMBER:
             destFlags = static_cast<uint32_t>(static_cast<int64_t>(lua_tonumber(L, 3)));
 
-            if (!(destFlags & 0xFFFF0000) && (!(destFlags & 0xF) || !(destFlags & 0xF0) || !(destFlags & 0x300) || !(destFlags & 0xFC00))) {
+            if (!(destFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_SPECIAL_MASK) && (!(destFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_AFFILIATION_MASK) || !(destFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_REACTION_MASK) || !(destFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_CONTROL_MASK) || !(destFlags & COMBATLOG_OBJECT::COMBATLOG_OBJECT_TYPE_MASK))) {
                 luaL_error(L, "CombatLogAddFilter(): incomplete filter for dstMask");
                 return 0;
             }
@@ -129,7 +129,7 @@ static int32_t Script_CombatLogAddFilter(lua_State* L) {
             break;
     }
 
-    CombatLogFilter* filter = s_filters.NewNode(2, 0, 0);
+    CombatLogFilter* filter = s_filters.NewNode(TSLIST_LINK_BEFORE, 0, 0);
     filter->SetFilterData(events, sourceGuid, sourceFlags, destGuid, destFlags, spellId, spellName);
     return 0;
 }
@@ -170,7 +170,7 @@ static int32_t Script_CombatLogSetCurrentEntry(lua_State* L) {
     int32_t all = StringToBOOL(L, 2, 0);
 
     if (index <= 0) {
-        CombatLogEntry* entry = s_pendingEntries ? s_entries.Prev(s_pendingEntries) : s_entries.Tail();
+        CombatLogEntry* entry = s_pendingCombatLogEntry ? s_entries.Prev(s_pendingCombatLogEntry) : s_entries.Tail();
 
         for (; entry; entry = s_entries.Prev(entry)) {
             if ((all || entry->MatchesFilter()) && index++ == 0) {
@@ -179,7 +179,7 @@ static int32_t Script_CombatLogSetCurrentEntry(lua_State* L) {
             }
         }
     } else {
-        for (CombatLogEntry* entry = s_entries.Head(); entry && entry != s_pendingEntries; entry = s_entries.Next(entry)) {
+        for (CombatLogEntry* entry = s_entries.Head(); entry && entry != s_pendingCombatLogEntry; entry = s_entries.Next(entry)) {
             if ((all || entry->MatchesFilter()) && --index == 0) {
                 s_currentEntry = entry;
                 break;
@@ -231,7 +231,7 @@ static int32_t Script_CombatLogAdvanceEntry(lua_State* L) {
                 entry = entry->m_link.Prev();
             }
         } else if (entry) {
-            while (entry != s_pendingEntries) {
+            while (entry != s_pendingCombatLogEntry) {
                 if ((ignoreFilter || entry->MatchesFilter()) && !count--) {
                     result = entry;
                     break;

@@ -13,10 +13,10 @@ BspQuery_SegmentLink::BspQuery_SegmentLink(SMOPoly* faces, C3Vector* vertexList,
     this->m_indices = indices;
     this->m_ray.origin = C3Vector(0.0f, 0.0f, 0.0f);
     this->m_ray.dir = C3Vector(0.0f, 0.0f, 0.0f);
-    this->m_seg.b = C3Vector(0.0f, 0.0f, 0.0f);
-    this->m_seg.t = C3Vector(0.0f, 0.0f, 0.0f);
-    this->m_ray.origin = seg.b;
-    this->m_ray.dir = C3Vector(seg.t.x - seg.b.x, seg.t.y - seg.b.y, seg.t.z - seg.b.z);
+    this->m_seg.start = C3Vector(0.0f, 0.0f, 0.0f);
+    this->m_seg.end = C3Vector(0.0f, 0.0f, 0.0f);
+    this->m_ray.origin = seg.start;
+    this->m_ray.dir = C3Vector(seg.end.x - seg.start.x, seg.end.y - seg.start.y, seg.end.z - seg.start.z);
     this->m_seg = seg;
 
     float length = std::sqrt(this->m_ray.dir.z * this->m_ray.dir.z + this->m_ray.dir.y * this->m_ray.dir.y + this->m_ray.dir.x * this->m_ray.dir.x);
@@ -28,7 +28,7 @@ BspQuery_SegmentLink::BspQuery_SegmentLink(SMOPoly* faces, C3Vector* vertexList,
     this->m_groundMaxT = groundMaxT;
     this->m_interiorFace = -1;
     this->m_groundFace = -1;
-    this->m_faceIgnoreFlags = 0x82;
+    this->m_faceIgnoreFlags = SMOPoly::F_NOCAMCOLLIDE | SMOPoly::F_COLLIDE_HIT;
     this->m_interiorT = interiorMaxT * length;
     this->m_groundT = length * groundMaxT;
 }
@@ -41,20 +41,20 @@ void BspQuery_SegmentLink::operator()(uint16_t face) {
         return;
     }
 
-    if (BspQuery::testFaceSub >= 0x2000) {
+    if (BspQuery::testFaceSub >= BspQuery::MAX_FACES) {
         return;
     }
 
     BspQuery::testFaces[BspQuery::testFaceSub++] = face;
-    this->m_faces[face].m_flags |= 0x80;
+    this->m_faces[face].m_flags |= SMOPoly::F_COLLIDE_HIT;
 
     float t = 0.0f;
 
-    if (!NTempest::Intersect(this->m_ray, this->m_vertexList, &this->m_indices[3 * face], &t, nullptr, 0.0020000001f)) {
+    if (!NTempest::Intersect(this->m_ray, this->m_vertexList, &this->m_indices[3 * face], &t, nullptr, 0.002f)) {
         return;
     }
 
-    if (flags & 0x20) {
+    if (flags & SMOPoly::F_RENDER) {
         if (t < 0.0f) {
             return;
         }
@@ -68,12 +68,12 @@ void BspQuery_SegmentLink::operator()(uint16_t face) {
             this->m_groundFace = face;
             this->m_groundT = t;
         }
-    } else if (flags & 0x8) {
+    } else if (flags & SMOPoly::F_COLLISION) {
         if (t >= 0.0f && t <= this->m_interiorT) {
             this->m_interiorFace = face;
             this->m_interiorT = t;
         }
-    } else if (flags & 0x4) {
+    } else if (flags & SMOPoly::F_DETAIL) {
         if (t >= 0.0f && t <= this->m_groundT) {
             this->m_groundFace = face;
             this->m_groundT = t;
@@ -131,36 +131,36 @@ bool BspQuery_SegmentLink::GetFaceIndicesUsingCache(const CAaBsp& aaBsp, const C
         return false;
     }
 
-    float maxX = this->m_seg.t.x;
-    float maxY = this->m_seg.t.y;
-    float minX = this->m_seg.b.x;
-    float maxZ = this->m_seg.t.z;
+    float maxX = this->m_seg.end.x;
+    float maxY = this->m_seg.end.y;
+    float minX = this->m_seg.start.x;
+    float maxZ = this->m_seg.end.z;
 
     if (minX > maxX) {
-        minX = this->m_seg.t.x;
-        maxX = this->m_seg.b.x;
+        minX = this->m_seg.end.x;
+        maxX = this->m_seg.start.x;
     }
 
-    float minY = this->m_seg.b.y;
+    float minY = this->m_seg.start.y;
 
     if (minY > maxY) {
-        minY = this->m_seg.t.y;
-        maxY = this->m_seg.b.y;
+        minY = this->m_seg.end.y;
+        maxY = this->m_seg.start.y;
     }
 
-    float minZ = this->m_seg.b.z;
+    float minZ = this->m_seg.start.z;
 
     if (minZ > maxZ) {
-        minZ = this->m_seg.t.z;
-        maxZ = this->m_seg.b.z;
+        minZ = this->m_seg.end.z;
+        maxZ = this->m_seg.start.z;
     }
 
-    minX -= 0.0099999998f;
-    maxX += 0.0099999998f;
-    minY -= 0.0099999998f;
-    maxY += 0.0099999998f;
-    minZ -= 0.0099999998f;
-    maxZ += 0.0099999998f;
+    minX -= 0.01f;
+    maxX += 0.01f;
+    minY -= 0.01f;
+    maxY += 0.01f;
+    minZ -= 0.01f;
+    maxZ += 0.01f;
 
     uint8_t outcodes[450];
 
@@ -203,12 +203,12 @@ bool BspQuery_SegmentLink::GetFaceIndicesUsingCache(const CAaBsp& aaBsp, const C
             continue;
         }
 
-        if (BspQuery::testFaceSub >= 0x2000) {
+        if (BspQuery::testFaceSub >= BspQuery::MAX_FACES) {
             continue;
         }
 
         BspQuery::testFaces[BspQuery::testFaceSub++] = face;
-        this->m_faces[face].m_flags |= 0x80;
+        this->m_faces[face].m_flags |= SMOPoly::F_COLLIDE_HIT;
 
         const uint16_t* verts = &digest->m_faceVertexIndices[3 * i];
 
@@ -218,11 +218,11 @@ bool BspQuery_SegmentLink::GetFaceIndicesUsingCache(const CAaBsp& aaBsp, const C
 
         float t = 0.0f;
 
-        if (!NTempest::Intersect(this->m_ray, digest->m_vertices, verts, &t, nullptr, 0.0020000001f)) {
+        if (!NTempest::Intersect(this->m_ray, digest->m_vertices, verts, &t, nullptr, 0.002f)) {
             continue;
         }
 
-        if (flags & 0x20) {
+        if (flags & SMOPoly::F_RENDER) {
             if (t < 0.0f) {
                 continue;
             }
@@ -236,12 +236,12 @@ bool BspQuery_SegmentLink::GetFaceIndicesUsingCache(const CAaBsp& aaBsp, const C
                 this->m_groundT = t;
                 this->m_groundFace = face;
             }
-        } else if (flags & 0x8) {
+        } else if (flags & SMOPoly::F_COLLISION) {
             if (t >= 0.0f && t <= this->m_interiorT) {
                 this->m_interiorT = t;
                 this->m_interiorFace = face;
             }
-        } else if (flags & 0x4) {
+        } else if (flags & SMOPoly::F_DETAIL) {
             if (t >= 0.0f && t <= this->m_groundT) {
                 this->m_groundT = t;
                 this->m_groundFace = face;

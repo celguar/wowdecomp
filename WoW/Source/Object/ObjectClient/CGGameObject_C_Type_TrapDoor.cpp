@@ -11,15 +11,9 @@
 // VERIFY: 6e6904ff manual
 // OFFSET: 0x0070D980
 void CGGameObject_C_Type_TrapDoor::PostInitWithStats() {
-    this->CreateWorldObj();
+    this->CGGameObject_C_Type_TransportBase::PostInitWithStats();
 
-    if (!this->m_worldObject) {
-        return;
-    }
-
-    MovementAddTransport(this->m_owner);
-
-    if (!this->m_worldObject) {
+    if (!this->m_objectId) {
         return;
     }
 
@@ -28,25 +22,25 @@ void CGGameObject_C_Type_TrapDoor::PostInitWithStats() {
     matrix.d0 = this->m_position.x;
     matrix.d1 = this->m_position.y;
     matrix.d2 = this->m_position.z;
-    World::ObjectSetSequenceFinishedCallback(this->m_worldObject, &CGGameObject_C_Type_WorldObj::SequenceFinishedHandler, 0, 0);
-    World::ObjectUpdate(this->m_worldObject, this->m_owner->GetMatrix());
+    World::ObjectSetSequenceFinishedCallback(this->m_objectId, &CGGameObject_C_Type_WorldObj::SequenceFinishedHandler, 0, 0);
+    World::ObjectUpdate(this->m_objectId, this->m_owner->GetMatrix());
 
-    if (this->m_owner->m_gameObject->m_state != 1) {
-        this->UpdateState(1, 0);
+    if (this->m_owner->m_gameObject->m_state != GAMEOBJECT_DISPLAY_STATE_CLOSED) {
+        this->UpdateState(GAMEOBJECT_DISPLAY_STATE_CLOSED, GAMEOBJECT_DISPLAY_STATE_OPEN);
     }
 }
 
 // VERIFY: 58fe01f9 auto
 // OFFSET: 0x00710460
 void CGGameObject_C_Type_TrapDoor::UpdateState(int32_t oldState, int32_t newState) {
-    if (!this->m_worldObject) {
+    if (!this->m_objectId) {
         return;
     }
 
     if (newState) {
-        World::ObjectSetSequence(this->m_worldObject, 146, 0, 0);
+        World::ObjectSetSequence(this->m_objectId, ANIM_GAMEOBJ_CLOSE, 0, 0);
         this->m_owner->m_hasWorldBounds = 1;
-        World::ObjectEnableCollision(this->m_worldObject, 1);
+        World::ObjectEnableCollision(this->m_objectId, 1);
         return;
     }
 
@@ -68,9 +62,9 @@ void CGGameObject_C_Type_TrapDoor::UpdateState(int32_t oldState, int32_t newStat
         }
     }
 
-    World::ObjectSetSequence(this->m_worldObject, 148, 0, 0);
+    World::ObjectSetSequence(this->m_objectId, ANIM_GAMEOBJ_OPEN, 0, 0);
     this->m_owner->m_hasWorldBounds = 0;
-    World::ObjectEnableCollision(this->m_worldObject, 0);
+    World::ObjectEnableCollision(this->m_objectId, 0);
 }
 
 // VERIFY: 84b1b349 auto
@@ -81,30 +75,26 @@ CGGameObject_C_Type_TrapDoor::CGGameObject_C_Type_TrapDoor(CGGameObject_C* owner
 // VERIFY: 7c534dd2 auto
 // OFFSET: 0x0070B580
 void CGGameObject_C_Type_TrapDoor::PostReenable() {
-    this->CreateWorldObj();
+    this->CGGameObject_C_Type_TransportBase::PostReenable();
 
-    if (this->m_worldObject) {
-        MovementAddTransport(this->m_owner);
-    }
-
-    if (this->m_worldObject) {
-        World::ObjectSetSequenceFinishedCallback(this->m_worldObject, &CGGameObject_C_Type_WorldObj::SequenceFinishedHandler, 0, 0);
+    if (this->m_objectId) {
+        World::ObjectSetSequenceFinishedCallback(this->m_objectId, &CGGameObject_C_Type_WorldObj::SequenceFinishedHandler, 0, 0);
     }
 }
 
 // VERIFY: 70c8e6d1 auto
 // OFFSET: 0x007137B0
 void CGGameObject_C_Type_TrapDoor::UpdateMovement(uint32_t time, uint32_t elapsed) {
-    if (!this->m_worldObject) {
+    if (!this->m_objectId) {
         return;
     }
 
-    if (!this->m_worldObjectReady && World::ObjectIsLoaded(this->m_worldObject)) {
+    if (!this->m_worldObjectReady && World::ObjectIsLoaded(this->m_objectId)) {
         this->m_worldObjectReady = 1;
         int32_t moved;
         this->MovePassengers(&moved);
         return;
     }
 
-    World::ObjectUpdate(this->m_worldObject, this->m_owner->GetMatrix());
+    World::ObjectUpdate(this->m_objectId, this->m_owner->GetMatrix());
 }

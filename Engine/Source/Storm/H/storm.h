@@ -14,8 +14,17 @@
 
 #define STORM_ERROR_SUCCESS 0
 #define STORM_ERROR_FILE_NOT_FOUND 2
+#define STORM_ERROR_ACCESS_DENIED 5
+#define STORM_ERROR_INVALID_HANDLE 6
 #define STORM_ERROR_NOT_ENOUGH_MEMORY 8
+#define STORM_ERROR_HANDLE_EOF 38
 #define STORM_ERROR_INVALID_PARAMETER 87
+#define STORM_ERROR_DRIVE_LOCKED 108
+#define STORM_ERROR_OPEN_FAILED 110
+#define STORM_ERROR_NEGATIVE_SEEK 131
+#define STORM_ERROR_BAD_PATHNAME 161
+#define STORM_ERROR_FILE_INVALID 1006
+#define STORM_ERROR_NOT_AUTHENTICATED 1244
 #define STORM_ERROR_ASSERTION 0x85100000
 #define STORM_ERROR_BAD_ARGUMENT 0x85100065
 #define STORM_ERROR_NOT_ARCHIVE 0x8510006C
@@ -143,6 +152,21 @@ void SErrDisplayAppFatal(const char* format, ...);
 void SErrDisplayAppFatalCustom(uint32_t errorcode, const char* format, ...);
 void SErrDisplayAppFatalCustomV(uint32_t errorcode, const char* format, va_list args);
 int32_t STORMAPI SErrDisplayError(uint32_t errorcode, const char* filename, int32_t linenumber, const char* description, int32_t recoverable, uint32_t exitcode, uint32_t unknown);
+// Debug assertions. The 3.3.5.12213 Mac build keeps them; the 3.3.5a Windows release compiles them out, so they
+// are only built with WOWDECOMP_ASSERTIONS. A failed STORM_ASSERT is fatal (recoverable 0); a failed
+// STORM_ASSERT_RECOVERABLE lets the caller continue (recoverable 1). Macro names inferred.
+#ifndef ARRSIZE
+#define ARRSIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+
+#if defined(WOWDECOMP_ASSERTIONS)
+#define STORM_ASSERT(x) ((x) ? (void)0 : (void)SErrDisplayError(STORM_ERROR_ASSERTION, __FILE__, __LINE__, #x, 0, 1, 0x11111111))
+#define STORM_ASSERT_RECOVERABLE(x) ((x) ? (void)0 : (void)SErrDisplayError(STORM_ERROR_ASSERTION, __FILE__, __LINE__, #x, 1, 1, 0x11111111))
+#else
+#define STORM_ASSERT(x) ((void)0)
+#define STORM_ASSERT_RECOVERABLE(x) ((void)0)
+#endif
+
 int32_t SErrDisplayErrorFmt(uint32_t errorcode, const char* filename, int32_t linenumber, int32_t recoverable, uint32_t exitcode, const char* format, ...);
 int32_t STORMAPI SErrGetErrorStr(uint32_t errorcode, char* buffer, uint32_t bufferchars);
 uint32_t STORMAPI SErrGetLastError();

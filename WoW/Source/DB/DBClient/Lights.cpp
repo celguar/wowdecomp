@@ -1,4 +1,5 @@
 #include <cstdint>
+#include "Engine/Source/Tempest/Color.h"
 #include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/Tempest/CMath.h"
 #include "WoW/Source/DB/DBClient/DBClient.h"
@@ -49,7 +50,7 @@ static CImVector InterpolateIntBand(const LightIntBandRec& rec, int32_t time) {
     CImVector color;
 
     if (!rec.m_num) {
-        *reinterpret_cast<uint32_t*>(&color) = 0xFF000000;
+        *reinterpret_cast<uint32_t*>(&color) = COLOR_BLACK_ARGB;
         return color;
     }
 
@@ -76,8 +77,8 @@ static void TransformMapCoord(LightRec* rec, bool transform) {
         rec->m_gameCoords[0] *= 1.0f / 36.0f;
         rec->m_gameCoords[1] *= 1.0f / 36.0f;
         rec->m_gameCoords[2] *= 1.0f / 36.0f;
-        rec->m_gameFalloffStart *= 1.0f / 36.0f;
-        rec->m_gameFalloffEnd *= 1.0f / 36.0f;
+        rec->m_gameFalloff.m_l *= 1.0f / 36.0f;
+        rec->m_gameFalloff.m_h *= 1.0f / 36.0f;
 
         float offsetX = 0.0f;
         float offsetY = 0.0f;
@@ -98,8 +99,8 @@ static void TransformMapCoord(LightRec* rec, bool transform) {
 // VERIFY: c7d146ee auto
 // OFFSET: 0x007EB010
 static void TransformLights(bool transform) {
-    for (int32_t i = 0; i < g_lightDB.m_numRecords; i++) {
-        LightRec* rec = i >= 0 && i < g_lightDB.m_numRecords ? &g_lightDB.m_records[i] : nullptr;
+    for (int32_t i = 0; i < g_lightDB.GetNumRecords(); i++) {
+        LightRec* rec = i >= 0 && i < g_lightDB.GetNumRecords() ? &g_lightDB.m_records[i] : nullptr;
         TransformMapCoord(rec, transform);
     }
 }

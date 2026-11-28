@@ -1,7 +1,9 @@
 #include "PetitionVendor.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "WoW/Source/Ui/GameUI.h"
 #include "WoW/Source/Ui/Types.h"
+#include "WoW/Source/Object/CGPetition.h"
 #include <cstring>
 #include "Engine/Source/Storm/H/storm.h"
 #include "WoW/Source/DB/DBClient/DBCacheInstances.h"
@@ -36,19 +38,19 @@ GuildPetitionInfo CGPetitionVendorInfo::m_petitionItems[10];
 uint32_t CGPetitionVendorInfo::m_arenaTeamSize;
 
 // STATIC: 0x00ACF7D8
-uint32_t CGPetitionVendorInfo::m_arenaBackgroundColor = 0xFFFFFFFF;
+uint32_t CGPetitionVendorInfo::m_arenaBackgroundColor = COLOR_WHITE_ARGB;
 
 // STATIC: 0x00ACF7DC
 uint32_t CGPetitionVendorInfo::m_arenaEmblemStyle = 0xFFFFFFFF;
 
 // STATIC: 0x00ACF7E0
-uint32_t CGPetitionVendorInfo::m_arenaEmblemColor = 0xFFFFFFFF;
+uint32_t CGPetitionVendorInfo::m_arenaEmblemColor = COLOR_WHITE_ARGB;
 
 // STATIC: 0x00ACF7E4
 uint32_t CGPetitionVendorInfo::m_arenaBorderStyle = 0xFFFFFFFF;
 
 // STATIC: 0x00ACF7E8
-uint32_t CGPetitionVendorInfo::m_arenaBorderColor = 0xFFFFFFFF;
+uint32_t CGPetitionVendorInfo::m_arenaBorderColor = COLOR_WHITE_ARGB;
 
 
 // VERIFY: 645b030e manual
@@ -66,7 +68,7 @@ int32_t CGPetitionVendorInfo::ClickPetitionButton(WOWGUID item, WOWGUID containe
 
     CGItem_C* object = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(item, TYPE_ITEM, __FILE__, __LINE__));
 
-    if (!object || !(object->GetItemStaticFlags(0) & ITEM_FLAG_PETITION)) {
+    if (!object || !object->IsPetition()) {
         return 0;
     }
 
@@ -116,12 +118,12 @@ void CGPetitionVendorInfo::BuyPetition(uint32_t index, const char* name) {
         return;
     }
 
-    if (!CGPetitionVendorInfo::m_petitionItems[index].m_charterType && player->m_player->m_playerGuildid) {
+    if (CGPetitionVendorInfo::m_petitionItems[index].m_charterType == CGPetition::STATIC_TYPE_GUILD && player->m_player->m_playerGuildid) {
         CGGameUI::DisplayError(ERR_ALREADY_IN_GUILD);
         return;
     }
 
-    if (CGPetitionVendorInfo::m_petitionItems[index].m_charterType == 1) {
+    if (CGPetitionVendorInfo::m_petitionItems[index].m_charterType == CGPetition::STATIC_TYPE_ARENA) {
         for (uint32_t i = 0; i < 3; i++) {
             ArenaTeam* team = CGArenaTeamInfo::GetArenaTeam(i);
 
@@ -139,7 +141,7 @@ void CGPetitionVendorInfo::BuyPetition(uint32_t index, const char* name) {
         }
     }
 
-    if (CGPetitionVendorInfo::m_petitionItems[index].m_charterType == 1) {
+    if (CGPetitionVendorInfo::m_petitionItems[index].m_charterType == CGPetition::STATIC_TYPE_ARENA) {
         int32_t level = player->m_unit->m_unitFieldLevel;
 
         if (level != 60 && level != 70 && level != 80) {

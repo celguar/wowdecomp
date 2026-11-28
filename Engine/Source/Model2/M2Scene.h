@@ -7,6 +7,7 @@
 #include "Engine/Source/Model2/Types.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
+#include "Engine/Source/Tempest/CRange.h"
 #include "Engine/Source/Storm/H/stpl.h"
 
 class C3Vector;
@@ -22,14 +23,20 @@ class CShaderEffect;
 class M2HitRec {
     public:
     /* 0000 */ CM2Model* m_model;
-    /* 0004 */ float m_tNear;
-    /* 0008 */ float m_tFar;
+    /* 0004 */ CRange m_interval; // Near/far distances along the query ray, clamped to its length.
     /* 000C */ uint32_t m_priority;
 };
 
 class M2Element {
     public:
-    /* 0000 */ int32_t m_type;
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        DEPTH_ONLY = 0x1, // Depth-sorted copy of a transparent batch drawn with color writes off.
+        LIQUID_CLIP = 0x2, // Transparent batch above and below liquid; clipped by the liquid plane.
+        OPTIMIZED = 0x4, // Uses the model's own optimized vertex and index buffers.
+    };
+
+    /* 0000 */ M2_ELEMENT_TYPE m_type;
     /* 0004 */ CM2Model* m_model;
     /* 0008 */ uint32_t m_flags;
     /* 000C */ float m_alpha;
@@ -37,7 +44,7 @@ class M2Element {
     /* 0014 */ float m_depth;
     union {
         /* 0018 */ int32_t m_index;
-        /* 0018 */ CParticleEmitter2* m_emitter;
+        /* 0018 */ CParticleEmitter2* emitter;
     };
     /* 001C */ uint32_t m_count;
     /* 0020 */ uint32_t m_doodadKey;
@@ -53,6 +60,14 @@ class M2Element {
 
 class CM2Scene {
     public:
+    // Local world-animation,hit-test and callback scopes;M2Element flags are separate.
+    enum SCENE_FLAGS : uint32_t {
+        NONE = 0,
+        WORLD_ANIMATION_ACTIVE = 1,
+        HIT_TEST_ACTIVE = 2,
+        PROCESSING_CALLBACKS = 4,
+    };
+
     /* 0000 */ int32_t m_refCount;
     /* 0004 */ CM2Cache* m_cache;
     /* 0008 */ CM2Model* m_modelList;
@@ -75,7 +90,7 @@ class CM2Scene {
     /* 0108 */ void* m_projectTextureParam;
     /* 010C */ int32_t (*m_projectPositionCallback)(const C3Vector&, float&, void*);
     /* 0110 */ void* m_projectPositionParam;
-    /* 0114 */ CM2Model* m_hitTestList;
+    /* 0114 */ CM2Model* m_hitList;
     /* 0118 */ M2HitRec* m_hitRecs;
     /* 011C */ uint32_t* m_hitOrder;
     /* 0120 */ uint32_t m_hitCapacity;
@@ -96,7 +111,7 @@ class CM2Scene {
     static int32_t SortHitNear(uint32_t a, uint32_t b, const void* param);
     static int32_t SortOpaque(uint32_t a, uint32_t b, const void* param);
     static int32_t SortOpaqueGeoBatches(M2Element* a, M2Element* b);
-    static int32_t SortOpaqueParticles(M2Element* a, M2Element* b);
+    static int32_t SortOpaqueParticles(M2Element* A, M2Element* B);
     static int32_t SortOpaqueRibbons(M2Element* a, M2Element* b);
     static int32_t SortTransparent(uint32_t a, uint32_t b, const void* param);
 
@@ -105,6 +120,15 @@ class CM2Scene {
     M2Element* AddParticleElement(CParticleEmitter2* emitter, CM2Model* model, float depth, float alpha, int32_t split, uint32_t& index, uint32_t& additiveCount);
     void AdvanceTime(uint32_t delta);
     void AllocateSpaceForHitList();
+
+    // INLINED
+    int32_t IsHitTesting() const {
+        return (this->m_flags & HIT_TEST_ACTIVE) != 0;
+    }
+    // INLINED (12213 name).
+    int32_t AllowDirectionalLights() const {
+        return !(this->m_flags & WORLD_ANIMATION_ACTIVE);
+    }
     int32_t Animate(const C3Vector& cameraPos);
     void BeginHitTest();
     int32_t ComputeRayDirAndLen(const C3Vector& start, const C3Vector& end, float t, float* length, C3Vector* dir);

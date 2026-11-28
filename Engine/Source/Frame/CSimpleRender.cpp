@@ -103,7 +103,7 @@ static int32_t s_fontStringCount;
 
 // VERIFY: 0e98fd61 auto
 // OFFSET: 0x004826D0
-static int32_t IsRectOffscreen(const CRect& rect) {
+static BOOL IsRectOffscreen(const CRect& rect) {
     return rect.maxY < 0.0f || rect.minY > 1.0f || rect.maxX < 0.0f || rect.minX > 1.0f;
 }
 
@@ -217,6 +217,12 @@ static char* LanguageRule1(const char* text) {
     *dest = 0;
     SUniConvertUTF16to8(s_languageBuffer, sizeof(s_languageBuffer), s_languageWideBuffer, STORM_MAX_STR, nullptr, nullptr);
 
+#if defined(WOWDECOMP_ASSERTIONS)
+    if (text && SStrLen(text) >= sizeof(s_languageBuffer)) {
+        STORM_ASSERT(0);
+    }
+#endif
+
     return s_languageBuffer;
 }
 
@@ -315,6 +321,12 @@ static char* LanguageRule2(const char* text) {
     *dest = 0;
     SUniConvertUTF16to8(s_languageBuffer, sizeof(s_languageBuffer), s_languageWideBuffer, STORM_MAX_STR, nullptr, nullptr);
 
+#if defined(WOWDECOMP_ASSERTIONS)
+    if (text && SStrLen(text) >= sizeof(s_languageBuffer)) {
+        STORM_ASSERT(0);
+    }
+#endif
+
     return s_languageBuffer;
 }
 
@@ -378,6 +390,12 @@ static char* LanguageRule3(const char* text) {
     }
 
     *dest = 0;
+
+#if defined(WOWDECOMP_ASSERTIONS)
+    if (text && SStrLen(text) >= sizeof(s_languageBuffer)) {
+        STORM_ASSERT(0);
+    }
+#endif
 
     return s_languageBuffer;
 }
@@ -468,6 +486,12 @@ static char* LanguageRule4(const char* text) {
     }
 
     *dest = 0;
+
+#if defined(WOWDECOMP_ASSERTIONS)
+    if (text && SStrLen(text) >= sizeof(s_languageBuffer)) {
+        STORM_ASSERT(0);
+    }
+#endif
 
     return s_languageBuffer;
 }
@@ -597,7 +621,7 @@ void CSimpleRender::Destroy() {
 
 // VERIFY: d4f7147d manual
 // OFFSET: 0x00482F00
-int32_t CSimpleRender::CalcBatchCounts(CRenderBatch* batch, uint32_t* vertCounts, uint32_t* idxCounts) {
+int32_t CSimpleRender::CalcBatchCounts(CRenderBatch* batch, uint32_t* batchVertices, uint32_t* batchIndices) {
     CGxTex* textureID = reinterpret_cast<CGxTex*>(-1);
     int32_t alphaMode = GxBlends_Last;
     CGxShader* shader = nullptr;
@@ -606,30 +630,34 @@ int32_t CSimpleRender::CalcBatchCounts(CRenderBatch* batch, uint32_t* vertCounts
     uint32_t idxTotal = 0;
 
     for (uint32_t i = 0; i < batch->m_texturelist.Count(); i++) {
-        CSimpleBatchedMesh* mesh = &batch->m_texturelist[i];
-        int32_t changed = 0;
+        CSimpleBatchedMesh* entry = &batch->m_texturelist[i];
+        STORM_ASSERT(entry->m_positionCount > 0);
+        STORM_ASSERT(entry->m_indexCount > 0);
+        STORM_ASSERT(entry->m_texSort);
 
-        if (mesh->m_textureID != textureID) {
-            textureID = mesh->m_textureID;
+        BOOL changed = 0;
+
+        if (entry->m_texSort != textureID) {
+            textureID = entry->m_texSort;
             changed = 1;
         }
 
-        int32_t meshAlphaMode = (mesh->m_color && mesh->m_alphaMode < GxBlend_Alpha) ? GxBlend_Alpha : mesh->m_alphaMode;
+        int32_t meshAlphaMode = (entry->m_color && entry->m_alphaMode < GxBlend_Alpha) ? GxBlend_Alpha : entry->m_alphaMode;
 
         if (meshAlphaMode != alphaMode) {
             alphaMode = meshAlphaMode;
             changed = 1;
         }
 
-        if (mesh->m_shader != shader) {
-            shader = mesh->m_shader;
+        if (entry->m_shader != shader) {
+            shader = entry->m_shader;
             changed = 1;
         }
 
-        if (!CSimpleRender::s_mergeEnable || changed || idxTotal + mesh->m_idxCount >= 0x20000 || vertTotal + mesh->m_posCount >= 0x10000) {
+        if (!CSimpleRender::s_mergeEnable || changed || idxTotal + entry->m_indexCount >= 0x20000 || vertTotal + entry->m_positionCount >= 0x10000) {
             if (batchIndex > -1) {
-                vertCounts[batchIndex] = vertTotal;
-                idxCounts[batchIndex] = idxTotal;
+                batchVertices[batchIndex] = vertTotal;
+                batchIndices[batchIndex] = idxTotal;
             }
 
             batchIndex++;
@@ -637,13 +665,13 @@ int32_t CSimpleRender::CalcBatchCounts(CRenderBatch* batch, uint32_t* vertCounts
             idxTotal = 0;
         }
 
-        vertTotal += mesh->m_posCount;
-        idxTotal += mesh->m_idxCount;
+        vertTotal += entry->m_positionCount;
+        idxTotal += entry->m_indexCount;
     }
 
     if (idxTotal) {
-        vertCounts[batchIndex] = vertTotal;
-        idxCounts[batchIndex] = idxTotal;
+        batchVertices[batchIndex] = vertTotal;
+        batchIndices[batchIndex] = idxTotal;
         batchIndex++;
     }
 
@@ -677,83 +705,91 @@ void CSimpleRender::DrawBatch(CRenderBatch* batch) {
         GxRsSet(GxRs_DepthTest, 0);
         GxRsSet(GxRs_DepthWrite, 0);
 
-        uint32_t* vertCounts = static_cast<uint32_t*>(alloca(sizeof(uint32_t) * meshCount));
-        uint32_t* idxCounts = static_cast<uint32_t*>(alloca(sizeof(uint32_t) * meshCount));
-        CSimpleRender::CalcBatchCounts(batch, vertCounts, idxCounts);
+        uint32_t* batchVertices = static_cast<uint32_t*>(alloca(sizeof(uint32_t) * meshCount));
+        uint32_t* batchIndices = static_cast<uint32_t*>(alloca(sizeof(uint32_t) * meshCount));
+        CSimpleRender::CalcBatchCounts(batch, batchVertices, batchIndices);
 
         CGxBuf* vertexBuf = nullptr;
         CGxBuf* indexBuf = nullptr;
         CGxVertexPCT* vertices = nullptr;
         uint16_t* indices = nullptr;
-        uint32_t vertTotal = 0;
-        int32_t idxTotal = 0;
-        int32_t batchIndex = -1;
+        uint32_t nBufVertices = 0;
+        int32_t nBufIndices = 0;
+        int32_t currentBatchIndex = -1;
 
         for (uint32_t i = 0; i < meshCount; i++) {
-            CSimpleBatchedMesh* mesh = &batch->m_texturelist[i];
-            int32_t changed = 0;
+            CSimpleBatchedMesh* entry = &batch->m_texturelist[i];
+            STORM_ASSERT(entry->m_indices);
 
-            if (mesh->m_textureID != textureID) {
-                textureID = mesh->m_textureID;
+            BOOL changed = 0;
+
+            if (entry->m_texSort != textureID) {
+                textureID = entry->m_texSort;
                 changed = 1;
             }
 
-            int32_t meshAlphaMode = (mesh->m_color && mesh->m_alphaMode < GxBlend_Alpha) ? GxBlend_Alpha : mesh->m_alphaMode;
+            int32_t meshAlphaMode = (entry->m_color && entry->m_alphaMode < GxBlend_Alpha) ? GxBlend_Alpha : entry->m_alphaMode;
 
             if (meshAlphaMode != alphaMode) {
                 alphaMode = meshAlphaMode;
                 changed = 1;
             }
 
-            if (mesh->m_shader != shader) {
-                shader = mesh->m_shader;
+            if (entry->m_shader != shader) {
+                shader = entry->m_shader;
                 changed = 1;
             }
 
-            bool newBatch = !CSimpleRender::s_mergeEnable || changed || idxTotal + mesh->m_idxCount >= 0x20000 || vertTotal + mesh->m_posCount >= 0x10000;
+            bool newBatch = !CSimpleRender::s_mergeEnable || changed || nBufIndices + entry->m_indexCount >= 0x20000 || nBufVertices + entry->m_positionCount >= 0x10000;
 
             if (newBatch) {
-                if (idxTotal > 0) {
+                if (nBufIndices > 0) {
                     GxBufUnlock(vertexBuf, 0);
                     GxBufUnlock(indexBuf, 0);
                     GxPrimVertexPtr(vertexBuf, GxVBF_PCT);
                     g_theGxDevicePtr->PrimIndexPtr(indexBuf);
 
+                    STORM_ASSERT(batchIndices[currentBatchIndex] == nBufIndices);
+                    STORM_ASSERT(batchVertices[currentBatchIndex] == nBufVertices);
+
                     CGxBatch gxBatch;
                     gxBatch.m_primType = GxPrim_Triangles;
                     gxBatch.m_start = 0;
-                    gxBatch.m_count = idxCounts[batchIndex];
+                    gxBatch.m_count = batchIndices[currentBatchIndex];
                     gxBatch.m_minIndex = 0;
-                    gxBatch.m_maxIndex = vertCounts[batchIndex] - 1;
+                    gxBatch.m_maxIndex = batchVertices[currentBatchIndex] - 1;
                     GxDraw(&gxBatch, 1);
                 }
 
-                batchIndex++;
-                idxTotal = 0;
-                vertTotal = 0;
+                currentBatchIndex++;
+                nBufIndices = 0;
+                nBufVertices = 0;
 
-                GxRsSet(GxRs_Texture0, TextureGetGxTex(mesh->m_texture, 1, nullptr));
+                GxRsSet(GxRs_Texture0, TextureGetGxTex(entry->m_texture, 1, nullptr));
                 GxRsSet(GxRs_BlendingMode, alphaMode);
                 GxUpdateAlphaRef(GxRs_AlphaRef);
                 GxRsSet(GxRs_PixelShader, shader);
             }
 
             if (newBatch || !vertices) {
-                vertexBuf = GxBufStream(GxPoolTarget_Vertex, sizeof(CGxVertexPCT), vertCounts[batchIndex]);
-                indexBuf = GxBufStream(GxPoolTarget_Index, sizeof(uint16_t), idxCounts[batchIndex]);
+                STORM_ASSERT(batchVertices[currentBatchIndex] < 65536);
+                STORM_ASSERT(batchIndices[currentBatchIndex] < 131072);
+
+                vertexBuf = GxBufStream(GxPoolTarget_Vertex, sizeof(CGxVertexPCT), batchVertices[currentBatchIndex]);
+                indexBuf = GxBufStream(GxPoolTarget_Index, sizeof(uint16_t), batchIndices[currentBatchIndex]);
                 vertices = reinterpret_cast<CGxVertexPCT*>(GxBufLock(vertexBuf));
                 indices = reinterpret_cast<uint16_t*>(GxBufLock(indexBuf));
             }
 
-            if (!mesh->m_indices) {
+            if (!entry->m_indices) {
                 continue;
             }
 
-            for (uint32_t v = 0; v < mesh->m_posCount; v++) {
-                vertices->p = mesh->m_position[v];
+            for (uint32_t v = 0; v < entry->m_positionCount; v++) {
+                vertices->p = entry->m_position[v];
 
-                if (mesh->m_color) {
-                    CImVector color = mesh->m_color[(v * mesh->m_colorCount) >> 2];
+                if (entry->m_color) {
+                    CImVector color = entry->m_color[(v * entry->m_colorCount) >> 2];
                     GxFormatColor(color);
                     vertices->c = color;
                 } else {
@@ -765,37 +801,40 @@ void CSimpleRender::DrawBatch(CRenderBatch* batch) {
                     vertices->c = white;
                 }
 
-                if (mesh->m_onAtlas) {
-                    vertices->tc.x = mesh->m_atlasScale * mesh->m_texCoord[v].x + mesh->m_atlasOffset.x;
-                    vertices->tc.y = mesh->m_atlasScale * mesh->m_texCoord[v].y + mesh->m_atlasOffset.y;
+                if (entry->m_onAtlas) {
+                    vertices->tc.x = entry->m_atlasScale * entry->m_texCoord[v].x + entry->m_atlasOffset.x;
+                    vertices->tc.y = entry->m_atlasScale * entry->m_texCoord[v].y + entry->m_atlasOffset.y;
                 } else {
-                    vertices->tc = mesh->m_texCoord[v];
+                    vertices->tc = entry->m_texCoord[v];
                 }
 
                 vertices++;
             }
 
-            for (uint32_t j = 0; j < mesh->m_idxCount; j++) {
-                *indices = vertTotal + mesh->m_indices[j];
+            for (uint32_t j = 0; j < entry->m_indexCount; j++) {
+                *indices = nBufVertices + entry->m_indices[j];
                 indices++;
             }
 
-            vertTotal += mesh->m_posCount;
-            idxTotal += mesh->m_idxCount;
+            nBufVertices += entry->m_positionCount;
+            nBufIndices += entry->m_indexCount;
         }
 
-        if (idxTotal > 0) {
-            GxBufUnlock(vertexBuf, sizeof(CGxVertexPCT) * vertTotal);
-            GxBufUnlock(indexBuf, sizeof(uint16_t) * idxTotal);
+        if (nBufIndices > 0) {
+            GxBufUnlock(vertexBuf, sizeof(CGxVertexPCT) * nBufVertices);
+            GxBufUnlock(indexBuf, sizeof(uint16_t) * nBufIndices);
             GxPrimVertexPtr(vertexBuf, GxVBF_PCT);
             g_theGxDevicePtr->PrimIndexPtr(indexBuf);
+
+            STORM_ASSERT(batchIndices[currentBatchIndex] == nBufIndices);
+            STORM_ASSERT(batchVertices[currentBatchIndex] == nBufVertices);
 
             CGxBatch gxBatch;
             gxBatch.m_primType = GxPrim_Triangles;
             gxBatch.m_start = 0;
-            gxBatch.m_count = idxCounts[batchIndex];
+            gxBatch.m_count = batchIndices[currentBatchIndex];
             gxBatch.m_minIndex = 0;
-            gxBatch.m_maxIndex = vertCounts[batchIndex] - 1;
+            gxBatch.m_maxIndex = batchVertices[currentBatchIndex] - 1;
             GxDraw(&gxBatch, 1);
         }
 
@@ -814,8 +853,8 @@ void CSimpleRender::DrawBatch(CRenderBatch* batch) {
 // VERIFY: e5b220d7 auto
 // OFFSET: 0x00482200
 void CSimpleFontString::RemoveShadow() {
-    if (this->m_styleFlags & 0x100) {
-        this->m_styleFlags &= ~0x100u;
+    if (this->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_SHADOW) {
+        this->m_styleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_SHADOW;
 
         if (this->m_string) {
             TextBlockRemoveShadow(this->m_string);
@@ -828,7 +867,7 @@ void CSimpleFontString::RemoveShadow() {
 float CSimpleFontString::GetFontHeight(bool recalculate) {
     float fontHeight = this->m_fontHeight;
 
-    if (recalculate && this->m_fontHandle && (this->m_styleFlags & 0x200)) {
+    if (recalculate && this->m_fontHandle && (this->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_FIXED_SIZE)) {
         float ndcHeight = GxuFontGetOneToOneHeight(TextBlockGetFontPtr(this->m_fontHandle)) / this->m_layoutScale;
         NDCToDDC(0.0f, ndcHeight, nullptr, &fontHeight);
     }
@@ -860,15 +899,15 @@ const char* CSimpleFontString::GetDisplayText(float width, float height) {
         return text;
     }
 
-    if (!(this->m_maxLines & 0xFFFFFF) && height <= 0.0f) {
+    if (!(this->m_maxLines & MAX_LINES_MASK) && height <= 0.0f) {
         return text;
     }
 
     float fontHeight = this->GetFontHeight(true);
     float lineHeight = (CSimpleTop::RoundToPixelHeight(this->m_spacing) + fontHeight) * this->m_layoutScale;
 
-    if (this->m_maxLines & 0xFFFFFF) {
-        height = lineHeight * (this->m_maxLines & 0xFFFFFF);
+    if (this->m_maxLines & MAX_LINES_MASK) {
+        height = lineHeight * (this->m_maxLines & MAX_LINES_MASK);
     } else if (lineHeight >= height) {
         height = lineHeight;
     }
@@ -934,15 +973,15 @@ bool CSimpleFontString::SetLayoutScale(float scale, bool force) {
             this->m_fontHandle = font;
 
             if (font) {
-                this->m_textWidth = 0.0f;
-                this->m_textHeight = 0.0f;
+                this->m_cachedWidth = 0.0f;
+                this->m_cachedHeight = 0.0f;
 
                 if (this->m_string) {
                     HandleClose(reinterpret_cast<HOBJECT>(this->m_string));
                     this->m_string = nullptr;
                 }
 
-                this->m_layoutFlags &= ~0x100u;
+                this->m_layoutFlags &= ~CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID;
                 this->Resize(0);
             }
         }
@@ -1039,8 +1078,8 @@ void CSimpleFontString::operator delete(void* ptr) {
 // OFFSET: 0x00485240
 CSimpleFontString::CSimpleFontString(CSimpleFrame* frame, uint32_t drawLayer, bool show) : CSimpleRegion(frame, drawLayer, show) {
     this->m_spacing = 0.0f;
-    this->m_textWidth = 0.0f;
-    this->m_textHeight = 0.0f;
+    this->m_cachedWidth = 0.0f;
+    this->m_cachedHeight = 0.0f;
     this->m_fontHandle = nullptr;
     this->m_textMaxSize = 0;
     this->m_textCurSize = 0;
@@ -1048,9 +1087,9 @@ CSimpleFontString::CSimpleFontString(CSimpleFrame* frame, uint32_t drawLayer, bo
     this->m_string = nullptr;
     this->m_shadowColor.a = 0xFF;
     this->m_alphaGradientStart = -1;
-    this->m_styleFlags = 0x212;
-    this->m_settableStyleFlags = 0x2107F;
-    this->m_maxLines = (this->m_maxLines & 0xFE000000) | 0x1000000;
+    this->m_styleFlags = TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_DEFAULT_STYLE;
+    this->m_settableStyleFlags = TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_DEFAULT_SETTABLE_STYLE;
+    this->m_maxLines = (this->m_maxLines & ~(MAX_LINES_MASK | MAX_LINES_LOAD_XML_FONT)) | MAX_LINES_LOAD_XML_FONT;
     s_fontStringCount++;
 }
 
@@ -1080,6 +1119,8 @@ void CSimpleFontString::SetTextLength(uint32_t length) {
         char* text = static_cast<char*>(SMemAlloc(length + 1, __FILE__, __LINE__, 0));
         *text = 0;
 
+        STORM_ASSERT(!m_text || !*m_text);
+
         if (this->m_text) {
             SMemFree(this->m_text, __FILE__, __LINE__, 0);
         }
@@ -1104,16 +1145,16 @@ bool CSimpleFontString::SetAlphaGradient(int32_t start, int32_t length) {
 // OFFSET: 0x00482320
 void CSimpleFontString::SetWidth(float width) {
     this->CLayoutFrame::SetWidth(width);
-    this->m_textWidth = 0.0f;
-    this->m_textHeight = 0.0f;
+    this->m_cachedWidth = 0.0f;
+    this->m_cachedHeight = 0.0f;
 }
 
 // VERIFY: 0b7750c4 auto
 // OFFSET: 0x00482350
 void CSimpleFontString::SetHeight(float height) {
     this->CLayoutFrame::SetHeight(height);
-    this->m_textWidth = 0.0f;
-    this->m_textHeight = 0.0f;
+    this->m_cachedWidth = 0.0f;
+    this->m_cachedHeight = 0.0f;
 }
 
 // VERIFY: fd665b85 auto
@@ -1179,8 +1220,8 @@ uint32_t CSimpleFontString::GetNumCharsWithinWidthFromEnd(const char* text, uint
 // VERIFY: 5d78882a auto
 // OFFSET: 0x004826B0
 void CSimpleFontString::OnScreenSizeChanged() {
-    this->m_textWidth = 0.0f;
-    this->m_textHeight = 0.0f;
+    this->m_cachedWidth = 0.0f;
+    this->m_cachedHeight = 0.0f;
     this->Resize(0);
 }
 
@@ -1197,15 +1238,15 @@ void CSimpleFontString::AddAnimTranslation(const C2Vector& translation) {
 // VERIFY: ebf55995 auto
 // OFFSET: 0x00482E10
 void CSimpleFontString::ClearString() {
-    this->m_textWidth = 0.0f;
-    this->m_textHeight = 0.0f;
+    this->m_cachedWidth = 0.0f;
+    this->m_cachedHeight = 0.0f;
 
     if (this->m_string) {
         HandleClose(reinterpret_cast<HOBJECT>(this->m_string));
         this->m_string = nullptr;
     }
 
-    this->m_layoutFlags &= ~0x100u;
+    this->m_layoutFlags &= ~CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID;
     this->Resize(0);
 }
 
@@ -1216,9 +1257,9 @@ void CSimpleFontString::PostLoadXML(XMLNode* node, CStatus* status) {
         return;
     }
 
-    if (this->m_styleFlags & 0x1) {
+    if (this->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_LEFT) {
         this->SetPoint(FRAMEPOINT_LEFT, this->m_parent, FRAMEPOINT_LEFT, 0.0f, 0.0f, 1);
-    } else if (this->m_styleFlags & 0x4) {
+    } else if (this->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_RIGHT) {
         this->SetPoint(FRAMEPOINT_RIGHT, this->m_parent, FRAMEPOINT_RIGHT, 0.0f, 0.0f, 1);
     } else {
         this->SetPoint(FRAMEPOINT_CENTER, this->m_parent, FRAMEPOINT_CENTER, 0.0f, 0.0f, 1);
@@ -1269,9 +1310,11 @@ int32_t CSimpleFontString::SetFont(const char* fontName, float fontHeight, uint3
 // VERIFY: 3d8d8078 auto
 // OFFSET: 0x00483890
 void CSimpleFontString::SetTextHeight(float height) {
+    STORM_ASSERT(height > 0);
+
     if (fabsf(height - this->m_fontHeight) >= 0.00000023841858f) {
         this->m_fontHeight = height;
-        this->m_styleFlags &= ~0x200u;
+        this->m_styleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_FIXED_SIZE;
         this->ClearString();
     }
 }
@@ -1344,11 +1387,11 @@ void CSimpleFontString::SetJustificationOffset(float x, float y) {
 // VERIFY: 273d1f7a manual
 // OFFSET: 0x00483CD0
 void CSimpleFontString::AddShadow(const CImVector& color, const C2Vector& offset) {
-    if ((this->m_styleFlags & 0x100) && *reinterpret_cast<const uint32_t*>(&color) == *reinterpret_cast<uint32_t*>(&this->m_shadowColor) && this->m_shadowOffset.x == offset.x && this->m_shadowOffset.y == offset.y) {
+    if ((this->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_SHADOW) && *reinterpret_cast<const uint32_t*>(&color) == *reinterpret_cast<uint32_t*>(&this->m_shadowColor) && this->m_shadowOffset.x == offset.x && this->m_shadowOffset.y == offset.y) {
         return;
     }
 
-    this->m_styleFlags |= 0x100;
+    this->m_styleFlags |= TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_SHADOW;
     this->m_shadowColor = color;
     this->m_shadowOffset = offset;
 
@@ -1384,15 +1427,15 @@ void CSimpleFontString::SetShadowOffset(const C2Vector& offset) {
 // VERIFY: 230de876 auto
 // OFFSET: 0x00483E80
 float CSimpleFontString::GetStringWidth() {
-    if (this->m_textWidth == 0.0f && this->m_fontHandle) {
+    if (this->m_cachedWidth == 0.0f && this->m_fontHandle) {
         const char* text = this->GetDisplayText(this->CLayoutFrame::GetWidth() * this->m_layoutScale, this->CLayoutFrame::GetHeight() * this->m_layoutScale);
 
         if (text && *text) {
-            TextBlockGetTextExtent(this->m_fontHandle, text, SStrLen(text), this->GetFontHeight(true) * this->m_layoutScale, &this->m_textWidth, this->m_shadowOffset.x * this->m_layoutScale, this->m_layoutScale, 0.0f, this->m_styleFlags);
+            TextBlockGetTextExtent(this->m_fontHandle, text, SStrLen(text), this->GetFontHeight(true) * this->m_layoutScale, &this->m_cachedWidth, this->m_shadowOffset.x * this->m_layoutScale, this->m_layoutScale, 0.0f, this->m_styleFlags);
         }
     }
 
-    return this->m_textWidth / this->m_layoutScale;
+    return this->m_cachedWidth / this->m_layoutScale;
 }
 
 // VERIFY: 9a3e23aa auto
@@ -1410,18 +1453,18 @@ float CSimpleFontString::GetWidth() {
 // VERIFY: 5c920bfb auto
 // OFFSET: 0x00483FA0
 float CSimpleFontString::GetStringHeight() {
-    if (this->m_textHeight == 0.0f && this->m_fontHandle) {
+    if (this->m_cachedHeight == 0.0f && this->m_fontHandle) {
         const char* text = this->GetDisplayText(this->CLayoutFrame::GetWidth() * this->m_layoutScale, this->CLayoutFrame::GetHeight() * this->m_layoutScale);
 
         if (text && *text) {
             C2Vector shadowOffset;
             shadowOffset.x = this->m_shadowOffset.x * this->m_layoutScale;
             shadowOffset.y = this->m_layoutScale * this->m_shadowOffset.y;
-            this->m_textHeight = TextBlockGetWrappedTextHeight(this->m_fontHandle, text, this->GetFontHeight(true) * this->m_layoutScale, this->GetWidth() * this->m_layoutScale, shadowOffset, this->m_layoutScale, this->m_spacing * this->m_layoutScale, this->m_styleFlags);
+            this->m_cachedHeight = TextBlockGetWrappedTextHeight(this->m_fontHandle, text, this->GetFontHeight(true) * this->m_layoutScale, this->GetWidth() * this->m_layoutScale, shadowOffset, this->m_layoutScale, this->m_spacing * this->m_layoutScale, this->m_styleFlags);
         }
     }
 
-    return this->m_textHeight / this->m_layoutScale;
+    return this->m_cachedHeight / this->m_layoutScale;
 }
 
 // VERIFY: 34e78a2e auto
@@ -1466,11 +1509,7 @@ void CSimpleFontString::PreOnAnimUpdate() {
     }
 
     if (this->m_animAlpha) {
-        uint8_t alpha = this->m_animSavedAlpha;
-        CImVector color;
-        this->GetVertexColor(color);
-        color.a = alpha;
-        this->SetVertexColor(color);
+        this->SetVertexAlpha(this->m_animSavedAlpha);
     }
 }
 
@@ -1518,7 +1557,7 @@ void CSimpleFontString::OnColorChanged(bool changed) {
 
         TextBlockUpdateColor(this->m_string, color);
 
-        if (this->m_styleFlags & 0x100) {
+        if (this->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_SHADOW) {
             CImVector shadowColor = this->m_shadowColor;
             C2Vector shadowOffset;
             shadowOffset.x = this->m_shadowOffset.x * this->m_layoutScale;
@@ -1546,7 +1585,7 @@ void CSimpleFontString::OnColorChanged(bool changed) {
 // VERIFY: 1148256f manual
 // OFFSET: 0x00486B20
 void CSimpleFontString::UpdateString() {
-    if (!(this->m_layoutFlags & 0x100)) {
+    if (!(this->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_RECT_VALID)) {
         return;
     }
 
@@ -1568,14 +1607,14 @@ void CSimpleFontString::UpdateString() {
         position.z = this->m_layoutDepth;
 
         float width = this->CLayoutFrame::GetWidth();
-        width = width != 0.0f ? width * this->m_layoutScale : this->m_textWidth;
+        width = width != 0.0f ? width * this->m_layoutScale : this->m_cachedWidth;
 
         if (fnotequalz(width, this->m_rect.maxX - this->m_rect.minX, 0.00001f)) {
             width = this->m_rect.maxX - this->m_rect.minX;
         }
 
         float height = this->CLayoutFrame::GetHeight();
-        height = height != 0.0f ? height * this->m_layoutScale : this->m_textHeight;
+        height = height != 0.0f ? height * this->m_layoutScale : this->m_cachedHeight;
 
         if (fnotequalz(height, this->m_rect.maxY - this->m_rect.minY, 0.00001f)) {
             height = this->m_rect.maxY - this->m_rect.minY;
@@ -1590,7 +1629,7 @@ void CSimpleFontString::UpdateString() {
         color.r = 0xFF;
         color.a = 0xFF;
 
-        if (!(styleFlags & 0x400)) {
+        if (!(styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_UNIFORM_COLOR)) {
             bool hasColorCode = false;
 
             for (int32_t i = 0; text[i]; i++) {
@@ -1605,7 +1644,7 @@ void CSimpleFontString::UpdateString() {
             }
 
             if (!hasColorCode) {
-                styleFlags |= 0x400;
+                styleFlags |= TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_UNIFORM_COLOR;
             }
         }
 
@@ -1615,7 +1654,9 @@ void CSimpleFontString::UpdateString() {
 
         this->m_string = TextBlockCreate(this->m_fontHandle, text, color, position, this->GetFontHeight(true) * this->m_layoutScale, width, height, styleFlags, 0.0f, this->m_spacing * this->m_layoutScale, this->m_layoutScale);
 
-        if (this->m_styleFlags & 0x100) {
+        STORM_ASSERT(m_string);
+
+        if (this->m_styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_SHADOW) {
             CImVector shadowColor = this->m_shadowColor;
             uint8_t alpha = this->m_parent->GetEffectiveAlpha();
             C2Vector shadowOffset;
@@ -1700,7 +1741,7 @@ void CSimpleFontString::SetSpacing(float spacing) {
 
     if (fabsf(spacing - this->m_spacing) >= 0.00000023841858f) {
         this->m_spacing = spacing;
-        this->m_textHeight = 0.0f;
+        this->m_cachedHeight = 0.0f;
 
         if (this->m_string) {
             this->UpdateString();
@@ -1723,8 +1764,8 @@ void CSimpleFontString::SetShadowColor(const CImVector& color) {
 // VERIFY: 283d01b1 auto
 // OFFSET: 0x00487190
 void CSimpleFontString::SetJustifyH(uint8_t justify) {
-    this->m_settableStyleFlags &= ~0x7u;
-    uint32_t styleFlags = (this->m_styleFlags & ~0x7u) | (justify & 0x7);
+    this->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK;
+    uint32_t styleFlags = (this->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK) | (justify & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK);
 
     if (styleFlags != this->m_styleFlags) {
         this->m_styleFlags = styleFlags;
@@ -1738,8 +1779,8 @@ void CSimpleFontString::SetJustifyH(uint8_t justify) {
 // VERIFY: d976f70d auto
 // OFFSET: 0x004871D0
 void CSimpleFontString::SetJustifyV(uint8_t justify) {
-    this->m_settableStyleFlags &= ~0x38u;
-    uint32_t styleFlags = (this->m_styleFlags & ~0x38u) | (justify & 0x38);
+    this->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_V_MASK;
+    uint32_t styleFlags = (this->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_V_MASK) | (justify & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_V_MASK);
 
     if (styleFlags != this->m_styleFlags) {
         this->m_styleFlags = styleFlags;
@@ -1753,8 +1794,8 @@ void CSimpleFontString::SetJustifyV(uint8_t justify) {
 // VERIFY: e9a340b1 auto
 // OFFSET: 0x00487210
 void CSimpleFontString::SetNonWordWrap(int32_t noWrap) {
-    this->m_settableStyleFlags &= ~0x40u;
-    uint32_t styleFlags = noWrap ? this->m_styleFlags | 0x40 : this->m_styleFlags & ~0x40u;
+    this->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NO_WORD_WRAP;
+    uint32_t styleFlags = noWrap ? this->m_styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NO_WORD_WRAP : this->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NO_WORD_WRAP;
 
     if (styleFlags != this->m_styleFlags) {
         this->m_styleFlags = styleFlags;
@@ -1768,8 +1809,8 @@ void CSimpleFontString::SetNonWordWrap(int32_t noWrap) {
 // VERIFY: eb8e3134 auto
 // OFFSET: 0x00487250
 void CSimpleFontString::SetNonSpaceWrap(int32_t wrap) {
-    this->m_settableStyleFlags &= ~0x1000u;
-    uint32_t styleFlags = wrap ? this->m_styleFlags | 0x1000 : this->m_styleFlags & ~0x1000u;
+    this->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NON_SPACE_WRAP;
+    uint32_t styleFlags = wrap ? this->m_styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NON_SPACE_WRAP : this->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NON_SPACE_WRAP;
 
     if (styleFlags != this->m_styleFlags) {
         this->m_styleFlags = styleFlags;
@@ -1783,8 +1824,8 @@ void CSimpleFontString::SetNonSpaceWrap(int32_t wrap) {
 // VERIFY: 8f4f99c8 auto
 // OFFSET: 0x004872A0
 void CSimpleFontString::SetIndented(int32_t indented) {
-    this->m_settableStyleFlags &= ~0x20000u;
-    uint32_t styleFlags = indented ? this->m_styleFlags | 0x20000 : this->m_styleFlags & ~0x20000u;
+    this->m_settableStyleFlags &= ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_INDENTED;
+    uint32_t styleFlags = indented ? this->m_styleFlags | TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_INDENTED : this->m_styleFlags & ~TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_INDENTED;
 
     if (styleFlags != this->m_styleFlags) {
         this->m_styleFlags = styleFlags;
@@ -1804,7 +1845,7 @@ void CSimpleFontString::LoadXML(XMLNode* node, CStatus* status) {
         CSimpleFont* font = CSimpleFont::GetFont(inherits, 0);
 
         if (font) {
-            if (this->m_maxLines & 0x1000000) {
+            if (this->m_maxLines & MAX_LINES_LOAD_XML_FONT) {
                 this->SetFontObject(font);
             }
         } else {
@@ -1870,10 +1911,10 @@ void CSimpleFontString::LoadXML(XMLNode* node, CStatus* status) {
     const char* maxLines = node->GetAttributeByName("maxLines");
 
     if (maxLines && *maxLines) {
-        this->m_maxLines = (this->m_maxLines & ~0xFFFFFFu) | (SStrToUnsigned(maxLines) & 0xFFFFFF);
+        this->m_maxLines = (this->m_maxLines & ~MAX_LINES_MASK) | (SStrToUnsigned(maxLines) & MAX_LINES_MASK);
     }
 
-    if (!(this->m_maxLines & 0x1000000)) {
+    if (!(this->m_maxLines & MAX_LINES_LOAD_XML_FONT)) {
         return;
     }
 
@@ -1902,20 +1943,20 @@ void CSimpleFontString::LoadXML(XMLNode* node, CStatus* status) {
 
             if (outline && *outline) {
                 if (!SStrCmpI(outline, "NORMAL", STORM_MAX_STR)) {
-                    fontFlags = 1;
+                    fontFlags = TEXTBLOCK_FONT_OUTLINE;
                 } else if (!SStrCmpI(outline, "THICK", STORM_MAX_STR)) {
-                    fontFlags = 5;
+                    fontFlags = TEXTBLOCK_FONT_OUTLINE | TEXTBLOCK_FONT_THICKOUTLINE;
                 }
             }
 
             const char* monochrome = node->GetAttributeByName("monochrome");
 
             if (monochrome && *monochrome && StringToBOOL(monochrome)) {
-                fontFlags |= 2;
+                fontFlags |= TEXTBLOCK_FONT_MONOCHROME;
             }
 
             if (this->SetFont(fontName, fontHeight, fontFlags, false)) {
-                this->m_fontableFlags &= ~0x1u;
+                this->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_FONT_UPDATE;
             } else {
                 status->Add(STATUS_WARNING, "FontString %s: Unable to load font file %s", this->GetDisplayName(), fontName);
             }
@@ -1927,7 +1968,7 @@ void CSimpleFontString::LoadXML(XMLNode* node, CStatus* status) {
     if (spacing && *spacing) {
         float value = SStrToFloat(spacing);
         this->SetSpacing(NDCToDDCWidth(value / (CoordinateGetAspectCompensation() * 1024.0f)));
-        this->m_fontableFlags &= ~0x10u;
+        this->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_SPACING_UPDATE;
     }
 
     uint32_t justify;
@@ -1935,14 +1976,14 @@ void CSimpleFontString::LoadXML(XMLNode* node, CStatus* status) {
 
     if (justifyV && *justifyV && StringToJustify(justifyV, justify)) {
         this->SetJustifyV(justify);
-        this->m_fontableFlags &= ~0x2u;
+        this->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_STYLE_UPDATE;
     }
 
     const char* justifyH = node->GetAttributeByName("justifyH");
 
     if (justifyH && *justifyH && StringToJustify(justifyH, justify)) {
         this->SetJustifyH(justify);
-        this->m_fontableFlags &= ~0x2u;
+        this->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_STYLE_UPDATE;
     }
 
     const char* indented = node->GetAttributeByName("indented");
@@ -1970,7 +2011,7 @@ void CSimpleFontString::LoadXML(XMLNode* node, CStatus* status) {
             CImVector color;
             LoadXML_Color(child, color, status);
             this->SetVertexColor(color);
-            this->m_fontableFlags &= ~0x4u;
+            this->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_COLOR_UPDATE;
         } else if (!SStrCmpI(child->m_name.m_str, "Shadow", STORM_MAX_STR)) {
             float offsetX = 0.001f;
             float offsetY = -0.001f;
@@ -1993,7 +2034,7 @@ void CSimpleFontString::LoadXML(XMLNode* node, CStatus* status) {
             offset.x = offsetX;
             offset.y = offsetY;
             this->AddShadow(color, offset);
-            this->m_fontableFlags &= ~0x8u;
+            this->m_fontableFlags &= ~FONT_ATTRIBUTE_UPDATE_FLAGS::FLAG_SHADOW_UPDATE;
         }
     }
 }
@@ -2170,7 +2211,7 @@ float CSimpleTexture::GetHeight() {
 
 // VERIFY: d5f393df auto
 // OFFSET: 0x004818D0
-int32_t CSimpleTexture::IsObjectLoaded() {
+BOOL CSimpleTexture::IsObjectLoaded() {
     if (this->m_texture && !TextureIsLoaded(this->m_texture)) {
         return 0;
     }
@@ -2242,7 +2283,7 @@ void CSimpleTexture::PostLoadXML(XMLNode* node, CStatus* status) {
     }
 
     for (uint32_t i = 0; i < FRAMEPOINT_NUMPOINTS; i++) {
-        if (this->m_framePoints[i] && !(this->m_framePoints[i]->m_flags & 0x8)) {
+        if (this->m_framePoints[i] && !(this->m_framePoints[i]->GetFlags() & CFramePoint::POINT_FLAGS::FLAG_UNUSED)) {
             return;
         }
     }
@@ -2333,8 +2374,8 @@ void CSimpleTexture::OnFrameSizeChanged(const CRect& rect) {
         this->SetPosition(this->m_rect, this->m_positions);
     }
 
-    if ((this->m_textureFlags & 0x4) || (this->m_textureFlags & 0x8)) {
-        this->m_textureFlags |= 0x2;
+    if ((this->m_textureFlags & TEXTURE_FLAGS::FLAG_HORIZ_TILE) || (this->m_textureFlags & TEXTURE_FLAGS::FLAG_VERT_TILE)) {
+        this->m_textureFlags |= TEXTURE_FLAGS::FLAG_TEXCOORDS_DIRTY;
         this->OnRegionChanged();
     }
 
@@ -2350,22 +2391,18 @@ void CSimpleTexture::PreOnAnimUpdate() {
         memcpy(this->m_positions, this->m_storedPositions, sizeof(this->m_positions));
 
         if (this->m_animAlpha) {
-            uint8_t alpha = this->m_animSavedAlpha;
-            CImVector color;
-            this->GetVertexColor(color);
-            color.a = alpha;
-            this->SetVertexColor(color);
+            this->SetVertexAlpha(this->m_animSavedAlpha);
         }
     }
 }
 
 // VERIFY: e87a4320 manual
 // OFFSET: 0x00484470
-CSimpleTexture::CSimpleTexture(CSimpleFrame* frame, uint32_t drawLayer, int32_t show) : CSimpleRegion(frame, drawLayer, show) {
+CSimpleTexture::CSimpleTexture(CSimpleFrame* frame, uint32_t drawLayer, BOOL show) : CSimpleRegion(frame, drawLayer, show) {
     this->m_texture = nullptr;
     this->m_alphaMode = GxBlend_Alpha;
     this->m_shader = CSimpleTexture::s_imageModePixelShaders[ImageMode_Normal];
-    this->m_textureFlags &= ~0xFu;
+    this->m_textureFlags &= ~TEXTURE_FLAGS::FLAG_INITIALIZATION_MASK;
     this->m_shader = CSimpleTexture::GetImageModePixelShader(ImageMode_Normal);
     CSimpleTexture::s_count++;
     this->m_texCoords[0].x = 0.0f;
@@ -2439,33 +2476,33 @@ void CSimpleEmbeddedTexture::InitEmbeddedTexture(CSimpleFontString* string, cons
             float y = 0.0f;
             uint32_t point = FRAMEPOINT_TOPLEFT;
 
-            switch (styleFlags & 0x7) {
-                case 0x1:
+            switch (styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_H_MASK) {
+                case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_LEFT:
                     x = left + offsetX;
                     break;
 
-                case 0x2:
+                case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_CENTER:
                     point = FRAMEPOINT_TOP;
                     x = (right + left) * 0.5f + offsetX;
                     break;
 
-                case 0x4:
+                case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_RIGHT:
                     point = FRAMEPOINT_TOPRIGHT;
                     x = right + offsetX;
                     break;
             }
 
-            switch (styleFlags & 0x38) {
-                case 0x8:
+            switch (styleFlags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_V_MASK) {
+                case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_TOP:
                     y = top + offsetY;
                     break;
 
-                case 0x10:
+                case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_MIDDLE:
                     point += 3;
                     y = (string->GetStringHeight() * string->m_layoutScale + height) * 0.5f + baseLine + offsetY;
                     break;
 
-                case 0x20:
+                case TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_BOTTOM:
                     point += 6;
                     y = string->GetStringHeight() + baseLine + offsetY;
                     break;
@@ -2537,14 +2574,14 @@ void CSimpleTexture::LoadXML(XMLNode* node, CStatus* status) {
     const char* horizTile = node->GetAttributeByName("horizTile");
 
     if (horizTile && *horizTile) {
-        this->m_textureFlags ^= (((StringToBOOL(horizTile) != 0) << 2) ^ this->m_textureFlags) & 0x4;
+        this->m_textureFlags ^= (((StringToBOOL(horizTile) != 0) << CSimpleTexture::FLAG_HORIZ_TILE_BIT_INDEX) ^ this->m_textureFlags) & TEXTURE_FLAGS::FLAG_HORIZ_TILE;
         wrapU = 1;
     }
 
     const char* vertTile = node->GetAttributeByName("vertTile");
 
     if (vertTile && *vertTile) {
-        this->m_textureFlags ^= (((StringToBOOL(vertTile) != 0) << 3) ^ this->m_textureFlags) & 0x8;
+        this->m_textureFlags ^= (((StringToBOOL(vertTile) != 0) << CSimpleTexture::FLAG_VERT_TILE_BIT_INDEX) ^ this->m_textureFlags) & TEXTURE_FLAGS::FLAG_VERT_TILE;
         wrapV = 1;
     }
 
@@ -2558,7 +2595,7 @@ void CSimpleTexture::LoadXML(XMLNode* node, CStatus* status) {
             float ury = 0.0f;
             float lrx = 1.0f;
             float lry = 1.0f;
-            int32_t valid = 1;
+            BOOL valid = 1;
 
             XMLNode* rectNode = child->GetChildByName("Rect");
 
@@ -2663,7 +2700,7 @@ void CSimpleTexture::LoadXML(XMLNode* node, CStatus* status) {
             const char* left = child->GetAttributeByName("left");
 
             if (left && *left) {
-                if (this->m_textureFlags & 0x4) {
+                if (this->m_textureFlags & TEXTURE_FLAGS::FLAG_HORIZ_TILE) {
                     const char* name = this->GetName();
                     status->Add(STATUS_ERROR, "Texture %s: Invalid TexCoords value (horizTile is on)", name ? name : "<unnamed>");
                 } else {
@@ -2681,7 +2718,7 @@ void CSimpleTexture::LoadXML(XMLNode* node, CStatus* status) {
             const char* right = child->GetAttributeByName("right");
 
             if (right && *right) {
-                if (this->m_textureFlags & 0x4) {
+                if (this->m_textureFlags & TEXTURE_FLAGS::FLAG_HORIZ_TILE) {
                     const char* name = this->GetName();
                     status->Add(STATUS_ERROR, "Texture %s: Invalid TexCoords value (horizTile is on)", name ? name : "<unnamed>");
                 } else {
@@ -2699,7 +2736,7 @@ void CSimpleTexture::LoadXML(XMLNode* node, CStatus* status) {
             const char* top = child->GetAttributeByName("top");
 
             if (top && *top) {
-                if (this->m_textureFlags & 0x8) {
+                if (this->m_textureFlags & TEXTURE_FLAGS::FLAG_VERT_TILE) {
                     const char* name = this->GetName();
                     status->Add(STATUS_ERROR, "Texture %s: Invalid TexCoords value (vertTile is on)", name ? name : "<unnamed>");
                 } else {
@@ -2717,7 +2754,7 @@ void CSimpleTexture::LoadXML(XMLNode* node, CStatus* status) {
             const char* bottom = child->GetAttributeByName("bottom");
 
             if (bottom && *bottom) {
-                if (this->m_textureFlags & 0x8) {
+                if (this->m_textureFlags & TEXTURE_FLAGS::FLAG_VERT_TILE) {
                     const char* name = this->GetName();
                     status->Add(STATUS_ERROR, "Texture %s: Invalid TexCoords value (vertTile is on)", name ? name : "<unnamed>");
                 } else {
@@ -2804,6 +2841,6 @@ void CSimpleTexture::LoadXML(XMLNode* node, CStatus* status) {
     const char* nonBlocking = node->GetAttributeByName("nonBlocking");
 
     if (nonBlocking && *nonBlocking) {
-        this->m_textureFlags ^= ((StringToBOOL(nonBlocking) != 0) ^ this->m_textureFlags) & 0x1;
+        this->m_textureFlags ^= ((StringToBOOL(nonBlocking) != 0) ^ this->m_textureFlags) & TEXTURE_FLAGS::FLAG_NONBLOCKING;
     }
 }

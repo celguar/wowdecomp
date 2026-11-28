@@ -12,6 +12,7 @@
 #include "Engine/Source/Tempest/CRect.h"
 #include "Engine/Source/lua-5.1/src/lauxlib.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
+#include "Engine/Source/Tempest/CMath.h"
 
 // STATIC: 0x00AC1110
 int32_t CSimpleTexture::s_metatable = LUA_NOREF;
@@ -190,10 +191,7 @@ static int32_t Script_SetAlpha(lua_State* L) {
     float alpha = lua_tonumber(L, 2);
     alpha = alpha < 0.0f ? 0.0f : (alpha >= 1.0f ? 1.0f : alpha);
 
-    CImVector color;
-    texture->GetVertexColor(color);
-    color.a = static_cast<uint8_t>(alpha * 255.0f);
-    texture->SetVertexColor(color);
+    texture->SetVertexAlpha(static_cast<uint8_t>(alpha * 255.0f));
 
     return 0;
 }
@@ -205,7 +203,7 @@ static int32_t Script_GetAlpha(lua_State* L) {
     CImVector color;
 
     texture->GetVertexColor(color);
-    lua_pushnumber(L, color.a * 0.0039215689f);
+    lua_pushnumber(L, color.a * ONE_OVER_255);
 
     return 1;
 }
@@ -388,7 +386,7 @@ static int32_t Script_SetNonBlocking(lua_State* L) {
     CSimpleTexture* texture = static_cast<CSimpleTexture*>(FrameScript_GetObjectThis(L, CSimpleTexture::GetObjectType()));
     uint32_t nonBlocking = StringToBOOL(L, 2, 1) != 0;
 
-    texture->m_textureFlags ^= (texture->m_textureFlags ^ nonBlocking) & 0x1;
+    texture->m_textureFlags ^= (texture->m_textureFlags ^ nonBlocking) & CSimpleTexture::TEXTURE_FLAGS::FLAG_NONBLOCKING;
     return 0;
 }
 
@@ -397,7 +395,7 @@ static int32_t Script_SetNonBlocking(lua_State* L) {
 static int32_t Script_GetNonBlocking(lua_State* L) {
     CSimpleTexture* texture = static_cast<CSimpleTexture*>(FrameScript_GetObjectThis(L, CSimpleTexture::GetObjectType()));
 
-    if (texture->m_textureFlags & 0x1) {
+    if (texture->m_textureFlags & CSimpleTexture::TEXTURE_FLAGS::FLAG_NONBLOCKING) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -411,7 +409,7 @@ static int32_t Script_GetNonBlocking(lua_State* L) {
 static int32_t Script_SetHorizTile(lua_State* L) {
     CSimpleTexture* texture = static_cast<CSimpleTexture*>(FrameScript_GetObjectThis(L, CSimpleTexture::GetObjectType()));
 
-    texture->m_textureFlags ^= (texture->m_textureFlags ^ ((StringToBOOL(L, 2, 1) != 0) << 2)) & 0x4;
+    texture->m_textureFlags ^= (texture->m_textureFlags ^ ((StringToBOOL(L, 2, 1) != 0) << CSimpleTexture::FLAG_HORIZ_TILE_BIT_INDEX)) & CSimpleTexture::TEXTURE_FLAGS::FLAG_HORIZ_TILE;
     return 0;
 }
 
@@ -420,7 +418,7 @@ static int32_t Script_SetHorizTile(lua_State* L) {
 static int32_t Script_GetHorizTile(lua_State* L) {
     CSimpleTexture* texture = static_cast<CSimpleTexture*>(FrameScript_GetObjectThis(L, CSimpleTexture::GetObjectType()));
 
-    if (texture->m_textureFlags & 0x4) {
+    if (texture->m_textureFlags & CSimpleTexture::TEXTURE_FLAGS::FLAG_HORIZ_TILE) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -434,7 +432,7 @@ static int32_t Script_GetHorizTile(lua_State* L) {
 static int32_t Script_SetVertTile(lua_State* L) {
     CSimpleTexture* texture = static_cast<CSimpleTexture*>(FrameScript_GetObjectThis(L, CSimpleTexture::GetObjectType()));
 
-    texture->m_textureFlags ^= (texture->m_textureFlags ^ ((StringToBOOL(L, 2, 1) != 0) << 3)) & 0x8;
+    texture->m_textureFlags ^= (texture->m_textureFlags ^ ((StringToBOOL(L, 2, 1) != 0) << CSimpleTexture::FLAG_VERT_TILE_BIT_INDEX)) & CSimpleTexture::TEXTURE_FLAGS::FLAG_VERT_TILE;
     return 0;
 }
 
@@ -443,7 +441,7 @@ static int32_t Script_SetVertTile(lua_State* L) {
 static int32_t Script_GetVertTile(lua_State* L) {
     CSimpleTexture* texture = static_cast<CSimpleTexture*>(FrameScript_GetObjectThis(L, CSimpleTexture::GetObjectType()));
 
-    if (texture->m_textureFlags & 0x8) {
+    if (texture->m_textureFlags & CSimpleTexture::TEXTURE_FLAGS::FLAG_VERT_TILE) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);

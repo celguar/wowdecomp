@@ -107,11 +107,12 @@ ParticleSystemManager* ParticleSystemManager::GetInstance() {
 
     CRndSeed seed((rand() << 16) | static_cast<uint16_t>(rand()));
 
-    for (uint32_t i = 0; i < 128; i++) {
+    for (uint32_t i = 0; i < CParticleEmitter2::RND_TABLE_SIZE; i++) {
         CParticleEmitter2::s_rndTable[i] = CRandom::ufloat_(seed);
     }
 
     CParticleEmitter2::Init();
+    STORM_ASSERT(ParticleSystemManager::s_instance); // 12213: "manager"
 
     return ParticleSystemManager::s_instance;
 }

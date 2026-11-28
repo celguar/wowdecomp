@@ -94,7 +94,7 @@ bool CSimpleCheckbox::IsA(const char* typeName) {
 
 // VERIFY: 0e5dc769 manual
 // OFFSET: 0x00962340
-void CSimpleCheckbox::SetChecked(int32_t checked, int32_t force) {
+void CSimpleCheckbox::SetChecked(int32_t checked, BOOL force) {
     if (!force && checked == this->m_checked) {
         return;
     }
@@ -178,7 +178,7 @@ void CSimpleCheckbox::SetDisabledCheckedTexture(CSimpleTexture* texture) {
 
 // VERIFY: 1affe968 auto
 // OFFSET: 0x00962490
-void CSimpleCheckbox::Enable(int32_t enabled) {
+void CSimpleCheckbox::Enable(BOOL enabled) {
     CSimpleButton::Enable(enabled);
     this->SetChecked(this->m_checked, 1);
 }
@@ -211,7 +211,7 @@ int32_t CSimpleCheckbox::SetCheckedTexture(const char* fileName) {
         return 1;
     }
 
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     CSimpleTexture* texture = data ? new (data) CSimpleTexture(nullptr, 2, 1) : nullptr;
 
     if (!texture->SetTexture(fileName, 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal)) {
@@ -236,7 +236,7 @@ int32_t CSimpleCheckbox::SetDisabledCheckedTexture(const char* fileName) {
         return 1;
     }
 
-    void* data = CSimpleTexture::s_allocator.GetData(0, typeid(CSimpleTexture).raw_name(), SLOG_OBJECT);
+    void* data = CSimpleTexture::Allocate(sizeof(CSimpleTexture));
     CSimpleTexture* texture = data ? new (data) CSimpleTexture(nullptr, 2, 1) : nullptr;
 
     if (!texture->SetTexture(fileName, 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal)) {

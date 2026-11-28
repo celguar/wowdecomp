@@ -270,7 +270,7 @@ void CSimpleScrollFrame::RenderScrollChild(void* param) {
     CSimpleScrollFrame* scrollFrame = static_cast<CSimpleScrollFrame*>(param);
     CRect rect = { 0.0f, 0.0f, 0.0f, 0.0f };
 
-    if (!scrollFrame->GetHitRect(rect) || !scrollFrame->m_scrollChild || !scrollFrame->m_scrollChild->m_isVisible) {
+    if (!scrollFrame->GetHitRect(rect) || !scrollFrame->m_scrollChild || !scrollFrame->m_scrollChild->IsVisible()) {
         return;
     }
 
@@ -381,7 +381,7 @@ void CSimpleScrollFrame::LoadXML(XMLNode* node, CStatus* status) {
 void CSimpleScrollFrame::OnFrameRender(CRenderBatch* batch, uint32_t layer) {
     CSimpleFrame::OnFrameRender(batch, layer);
 
-    if (layer == 4) {
+    if (layer == DRAWLAYER_HIGHLIGHT) {
         batch->QueueCallback(&CSimpleScrollFrame::RenderScrollChild, this);
     }
 }

@@ -9,6 +9,7 @@
 #include <vector>
 #include <windows.h>
 #include "Engine/Source/BlizzardCore/Include/Blizzard/Util/MD5.h"
+#include "Engine/Source/BlizzardCore/SFile2-Core.h"
 #include "Engine/Source/BlizzardCore/Source/Packages/Streaming/Manifests.h"
 #include "Engine/Source/BlizzardCore/Source/Packages/Streaming/Storage.h"
 #include "Engine/Source/BlizzardCore/Source/Packages/Streaming/Streaming.h"
@@ -213,7 +214,7 @@ void Blizzard::Streaming::WaitForLoads() {
         bool busy = false;
 
         for (int32_t i = 0; i < 2; i++) {
-            if (s_currentCommands[i] && s_currentCommands[i]->m_type == 1) {
+            if (s_currentCommands[i] && s_currentCommands[i]->m_type == FILE_THREAD_CMD_LOAD) {
                 busy = true;
                 break;
             }
@@ -237,19 +238,19 @@ bool Blizzard::Streaming::CancelQueue(int32_t priority) {
     std::deque<FILE_THREAD_CMD>& queue = *s_queues[priority];
 
     for (std::deque<FILE_THREAD_CMD>::iterator it = queue.begin(); it != queue.end(); ++it) {
-        if (it->m_completion && it->m_type == 2) {
+        if (it->m_completion && it->m_type == FILE_THREAD_CMD_COMPLETION) {
             it->m_completion->m_result = static_cast<int32_t>(s_queues[priority]->size());
             it->m_completion->m_done = true;
             SetEvent(*it->m_completion->m_event);
             it->m_completion = nullptr;
         }
 
-        it->m_type = 0;
+        it->m_type = FILE_THREAD_CMD_NONE;
     }
 
     for (DigestStateMap::iterator it = s_digestStates->begin(); it != s_digestStates->end(); ++it) {
         if (it->second.m_state && it->second.m_priority == priority) {
-            it->second.m_state = 0;
+            it->second.m_state = SFILE_LOCAL_NO;
         }
     }
 
@@ -383,7 +384,7 @@ bool Blizzard::Streaming::QueueLoad(Blizzard::File::StreamRecord* file, int32_t 
 
     FILE_THREAD_CMD command;
     command.m_fs = fs;
-    command.m_type = 1;
+    command.m_type = FILE_THREAD_CMD_LOAD;
     command.m_file = file;
     command.m_range = static_cast<LoadRange*>(Blizzard::Memory::Allocate(sizeof(LoadRange)));
 
@@ -531,7 +532,7 @@ bool Blizzard::Streaming::QueueCompletion(Completion* completion, int32_t priori
 
     FILE_THREAD_CMD command;
     command.m_fs = nullptr;
-    command.m_type = 2;
+    command.m_type = FILE_THREAD_CMD_COMPLETION;
     command.m_file = nullptr;
     command.m_range = nullptr;
     command.m_completion = completion;
@@ -557,11 +558,11 @@ bool Blizzard::Streaming::MakeLocalAsync(Blizzard::File::StreamRecord* file, int
     DigestStateMap::iterator it = s_digestStates->find(digest);
 
     if (it != s_digestStates->end()) {
-        if (it->second.m_state == 1) {
+        if (it->second.m_state == SFILE_LOCAL_YES) {
             return true;
         }
 
-        if (it->second.m_state == 2 && it->second.m_priority <= priority) {
+        if (it->second.m_state == SFILE_LOCAL_PARTIAL && it->second.m_priority <= priority) {
             return true;
         }
     }
@@ -589,14 +590,14 @@ bool Blizzard::Streaming::MakeLocalAsync(Blizzard::File::StreamRecord* file, int
     }
 
     if (queued) {
-        (*s_digestStates)[digest].m_state = 2;
+        (*s_digestStates)[digest].m_state = SFILE_LOCAL_PARTIAL;
         (*s_digestStates)[digest].m_priority = priority;
 
         if (s_useBackgroundQueues) {
             SetEvent(s_queueEvent);
         }
     } else {
-        (*s_digestStates)[digest].m_state = 1;
+        (*s_digestStates)[digest].m_state = SFILE_LOCAL_YES;
         AddDownloaded(size);
     }
 
@@ -611,54 +612,54 @@ int32_t Blizzard::Streaming::CheckFileRange(const char* path, int64_t offset, in
     HashFileName(&digest, name);
 
     DigestStateMap::iterator it = s_digestStates->find(digest);
-    int32_t previous = 0;
+    int32_t previous = SFILE_LOCAL_NO;
 
     if (it != s_digestStates->end()) {
         previous = it->second.m_state;
 
-        if (previous == 1) {
-            return 1;
+        if (previous == SFILE_LOCAL_YES) {
+            return SFILE_LOCAL_YES;
         }
     }
 
     if (!path) {
-        return -1;
+        return SFILE_LOCAL_UNKNOWN;
     }
 
     std::string key = ResolveFilePath(std::string(path));
 
     if (!Blizzard::Storage::s_storage) {
-        return -1;
+        return SFILE_LOCAL_UNKNOWN;
     }
 
     std::map<std::string, StorageEntry>::iterator entry = Blizzard::Storage::s_storage->find(key);
 
     if (entry == Blizzard::Storage::s_storage->end()) {
-        return -1;
+        return SFILE_LOCAL_UNKNOWN;
     }
 
     int32_t count;
     LoadRange* ranges = Blizzard::Storage::GetRange(&entry->second, offset, size, &count, false);
 
     if (!ranges || !count) {
-        return -1;
+        return SFILE_LOCAL_UNKNOWN;
     }
 
-    int32_t result = 1;
+    int32_t result = SFILE_LOCAL_YES;
 
     for (LoadRange* range = ranges; count > 0 && result; range++, count--) {
         switch (range->m_state) {
             case 1:
             case 3:
-                if (result == 1) {
-                    result = 2;
+                if (result == SFILE_LOCAL_YES) {
+                    result = SFILE_LOCAL_PARTIAL;
                 }
 
                 break;
 
             case 2:
             case 4:
-                result = 0;
+                result = SFILE_LOCAL_NO;
                 break;
         }
     }
@@ -680,7 +681,7 @@ int32_t Blizzard::Streaming::GetIsLocalAmount(const char* path, int64_t offset, 
 
     DigestStateMap::iterator it = s_digestStates->find(digest);
 
-    if (it != s_digestStates->end() && it->second.m_state == 1) {
+    if (it != s_digestStates->end() && it->second.m_state == SFILE_LOCAL_YES) {
         return size;
     }
 
@@ -723,7 +724,7 @@ bool Blizzard::Streaming::MakeLocalBlocking(Blizzard::File::StreamRecord* file, 
 
     DigestStateMap::iterator it = s_digestStates->find(digest);
 
-    if (it != s_digestStates->end() && it->second.m_state == 1) {
+    if (it != s_digestStates->end() && it->second.m_state == SFILE_LOCAL_YES) {
         return true;
     }
 
@@ -821,16 +822,16 @@ bool System_File::Stacked::stream_flush(Blizzard::File::Filesystem* fs, FileParm
 
             if (queue->size()) {
                 for (std::deque<Blizzard::Streaming::FILE_THREAD_CMD>::iterator it = queue->begin(); it != queue->end(); ++it) {
-                    if (file == it->m_file && it->m_type == 1) {
-                        it->m_type = 0;
+                    if (file == it->m_file && it->m_type == Blizzard::Streaming::FILE_THREAD_CMD_LOAD) {
+                        it->m_type = Blizzard::Streaming::FILE_THREAD_CMD_NONE;
                     }
                 }
             }
         }
 
         for (int32_t i = 0; i < 2; i++) {
-            if (s_currentCommands[i] && file == s_currentCommands[i]->m_file && s_currentCommands[i]->m_type == 1) {
-                s_currentCommands[i]->m_type = 0;
+            if (s_currentCommands[i] && file == s_currentCommands[i]->m_file && s_currentCommands[i]->m_type == Blizzard::Streaming::FILE_THREAD_CMD_LOAD) {
+                s_currentCommands[i]->m_type = Blizzard::Streaming::FILE_THREAD_CMD_NONE;
             }
         }
 
@@ -993,17 +994,17 @@ uint32_t Blizzard::Streaming::DownloadThread(void* param) {
                     bool success = true;
                     bool requeue = false;
 
-                    if (!command->m_type) {
+                    if (command->m_type == FILE_THREAD_CMD_NONE) {
                         success = false;
-                    } else if (command->m_type == 1) {
+                    } else if (command->m_type == FILE_THREAD_CMD_LOAD) {
                         if (LoadFile(command->m_fs, command->m_file, command->m_range)) {
-                            command->m_type = 0;
+                            command->m_type = FILE_THREAD_CMD_NONE;
                         } else if (command->m_type && !command->m_completion) {
                             requeue = true;
                             success = false;
                         }
-                    } else if (command->m_type == 2) {
-                        command->m_type = 0;
+                    } else if (command->m_type == FILE_THREAD_CMD_COMPLETION) {
+                        command->m_type = FILE_THREAD_CMD_NONE;
 
                         if (!pending) {
                             WaitForLoads();

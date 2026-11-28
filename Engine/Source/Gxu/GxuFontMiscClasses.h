@@ -5,6 +5,7 @@
 #include <cstdint>
 #include "Engine/Source/Gx/Types.h"
 #include "Engine/Source/Gxu/GxuFontString.h"
+#include "Engine/Source/Services/Texture.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C3Vector.h"
@@ -40,13 +41,18 @@ struct CHARCODEDESC : public TSHashObject<CHARCODEDESC, HASHKEY_NONE> {
     /* 0020 */ TSLink<CHARCODEDESC> m_fontGlyphLink;
     /* 0028 */ uint32_t m_textureNumber;
     /* 002C */ uint32_t m_rowNumber;
-    /* 0030 */ uint32_t m_glyphStartPixel;
+    /* 0030 */ uint32_t glyphStartPixel;
     /* 0034 */ uint32_t m_glyphEndPixel;
-    /* 0038 */ GLYPHBITMAPDATA m_bitmapData;
+    /* 0038 */ GLYPHBITMAPDATA bitmapData;
 
     CHARCODEDESC();
-    void GenerateTextureCoords(uint32_t rowNumber, uint32_t cellHeight);
+    void GenerateTextureCoords(uint32_t rowNumber, uint32_t glyphSide);
+    bool ValidBlockEndPoints() const {
+        return this->glyphStartPixel <= this->m_glyphEndPixel;
+    }
+
     uint32_t GapToPrevious();
+    inline uint32_t GapToNext(); // (inferred)
 };
 
 struct TEXTLINETEXTURE : public TSLinkedNode<TEXTLINETEXTURE> {
@@ -73,9 +79,9 @@ struct BATCHEDRENDERFONTDESC : public TSHashObject<BATCHEDRENDERFONTDESC, HASHKE
     static void Initialize();
     static void InitializeIndexBuff();
     static void Shutdown();
-    static CGxVertexPCT* UnlockVertexPtrAndRender(CGxBuf*& buf, int32_t count);
+    static CGxVertexPCT* UnlockVertexPtrAndRender(CGxBuf*& buf, int32_t numVerts);
 
-    /* 0018 */ CGxFont* m_face;
+    /* 0018 */ CGxFont* face;
     /* 001C */ TSExplicitList<CGxString, offsetof(CGxString, m_batchedStringLink)> m_strings;
 
     ~BATCHEDRENDERFONTDESC();
@@ -83,6 +89,13 @@ struct BATCHEDRENDERFONTDESC : public TSHashObject<BATCHEDRENDERFONTDESC, HASHKE
 };
 
 struct CGxStringBatch : public TSLinkedNode<CGxStringBatch> {
+    // Rendering and link-retention behavior; raw factory API remains unchanged.
+    enum STRING_BATCH_FLAGS : int32_t {
+        BATCH_NONE = 0,
+        BATCH_BILLBOARDED = 1,
+        BATCH_CLEAR_STRINGS_AFTER_RENDER = 2,
+    };
+
     /* 0008 */ uint32_t m_flags;
     /* 000C */ TSHashTable<BATCHEDRENDERFONTDESC, HASHKEY_PTR> m_fontBatch;
 
@@ -96,28 +109,38 @@ struct TEXTURECACHEROW {
     /* 0004 */ TSExplicitList<CHARCODEDESC, offsetof(CHARCODEDESC, m_textureRowLink)> m_glyphlist;
 
     TEXTURECACHEROW();
-    CHARCODEDESC* CreateNewDesc(GLYPHBITMAPDATA* data, uint32_t rowNumber, uint32_t cellHeight);
+    CHARCODEDESC* CreateNewDesc(GLYPHBITMAPDATA* data, uint32_t rowNumber, uint32_t glyphSide);
     void EvictGlyph(CHARCODEDESC* desc);
 };
 
 struct TEXTURECACHE {
-    static void TextureCallback(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
+    private:
+    friend struct CGxFont;
+
+    static void TextureCallback(EGxTexCommand command, uint32_t w, uint32_t h, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
 
     /* 0000 */ CTexture* m_texture;
     /* 0004 */ CGxFont* m_theFace;
     /* 0008 */ uint8_t m_anyDirtyGlyphs;
     /* 000C */ TSFixedArray<TEXTURECACHEROW> m_textureRows;
 
+    void PasteGlyphNonOutlinedAA(const GLYPHBITMAPDATA& data, uint16_t* dest);
+    void PasteGlyphNonOutlinedMonochrome(const GLYPHBITMAPDATA& data, uint16_t* dest);
+    void PasteGlyphOutlinedAA(const GLYPHBITMAPDATA& data, uint16_t* dest);
+    void PasteGlyphOutlinedMonochrome(const GLYPHBITMAPDATA& data, uint16_t* dest);
+    void PasteGlyph(const GLYPHBITMAPDATA& bitmapData, uint16_t* dest);
+    void WriteGlyphToTexture(CHARCODEDESC* glyph);
+
+    public:
     TEXTURECACHE();
     ~TEXTURECACHE();
     CHARCODEDESC* AllocateNewGlyph(GLYPHBITMAPDATA* data);
     void CreateTexture(int32_t filter);
     void Destroy();
-    void Initialize(CGxFont* face, uint32_t cellHeight);
-    void PasteGlyphNonOutlinedAA(const GLYPHBITMAPDATA& data, uint16_t* dest);
-    void PasteGlyphNonOutlinedMonochrome(const GLYPHBITMAPDATA& data, uint16_t* dest);
-    void PasteGlyphOutlinedAA(const GLYPHBITMAPDATA& data, uint16_t* dest);
-    void PasteGlyphOutlinedMonochrome(const GLYPHBITMAPDATA& data, uint16_t* dest);
+    void Initialize(CGxFont* face, uint32_t pixelSize);
+    CGxTex* GetTexturePtr() const {
+        return this->m_texture ? TextureGetGxTex(this->m_texture, 1, nullptr) : nullptr;
+    }
     void UpdateDirty();
 };
 

@@ -34,9 +34,7 @@ class WowConnection {
         SENDNODE(const WowConnection::SENDNODE& source, uint8_t* buffer);
     };
 
-    struct IDBITS {
-        /* 0000 */ uint32_t m_count;
-        /* 0004 */ TSFixedArray<uint32_t> m_bits;
+    struct IDBITS : public TSBitField<TSFixedArray<uint32_t>> {
 
         void Or(const WowConnection::IDBITS& source);
         void SetCount(uint32_t count);
@@ -49,6 +47,9 @@ class WowConnection {
     static int32_t s_lagTestDelayMin;
     static int32_t s_lagTestDelayMax;
     static bool (*s_verifyAddr)(const NETADDR* addr);
+
+    private:
+    friend class WowConnectionNet;
 
     /* 0000 */ ATOMIC32 m_refCount;
     /* 0004 */ int32_t m_sock;
@@ -85,12 +86,16 @@ class WowConnection {
     /* 00D8 */ TSLink<WowConnection> m_netLink;
     /* 00E0 */ TSList<WowConnection::SENDNODE> m_sendList;
     /* 00EC */ int32_t m_sendDepth;
-    /* 00F0 */ int32_t m_sendBytes;
+    /* 00F0 */ int32_t m_sendDepthBytes;
     /* 00F4 */ int32_t m_maxSendDepth;
     /* 00F8 */ int32_t m_serviceFlags;
     /* 00FC */ TSList<WowConnection::SENDNODE> m_lagTestRecvList;
     /* 0108 */ SCritSect m_lock;
+    private:
+    friend class WowConnectionNet; // (inferred)
     /* 0130 */ int32_t m_serviceCount;
+
+    public:
     /* 0134 */ int32_t unused_0134;
     /* 0138 */ void* m_event;
     /* 013C */ WOWC_TYPE m_type;
@@ -102,10 +107,11 @@ class WowConnection {
     /* 034C */ uint8_t m_sendKeyInit [20];
     /* 0360 */ uint8_t m_receiveKeyInit [20];
     /* 0374 */ bool m_encrypt;
-    /* 0375 */ uint8_t m_uint375;
-    /* 0376 */ uint8_t m_uint376;
+    /* 0375 */ uint8_t m_sendEncryptedOpcodeSize; // (inferred)
+    /* 0376 */ uint8_t m_receiveEncryptedOpcodeSize; // (inferred)
     /* 0377 */ uint8_t unused_0377[1];
 
+    public:
     static void DestroyOsNet();
     static int32_t InitOsNet(bool (*netAddrFilter)(const NETADDR* addr), void (*threadInit)(), int32_t numThreads, bool useEngine);
     static void MarkSocketId(int32_t sock);
@@ -131,7 +137,9 @@ class WowConnection {
     void Encrypt(uint8_t* data, uint32_t length);
     void FreeSendList();
     void FreeSendNode(WowConnection::SENDNODE* node);
+    uint32_t GetConnectAddress() const { return this->m_connectAddress; } // (inferred)
     void Init(WowConnectionResponse* response, void (*threadInit)());
+    bool IsEncrypted() const { return this->m_encrypt; } // (inferred)
     WowConnection::SENDNODE* NewSendNodeCopy(const WowConnection::SENDNODE* source, int32_t size);
     WowConnection::SENDNODE* NewSendNodePacket(const void* data, int32_t size, bool raw);
     char* PeerAddrToStr(char* buffer, uint32_t size);
@@ -140,9 +148,14 @@ class WowConnection {
     WC_SEND_RESULT Send(uint8_t* data, int32_t size, bool raw);
     WC_SEND_RESULT SendPacket(CDataStore* msg, int32_t headroom);
     void SetEncryption(bool enabled);
+    void SetEncryptedOpcodeSizes(uint8_t sendSize, uint8_t receiveSize) { // (inferred)
+        this->m_sendEncryptedOpcodeSize = sendSize;
+        this->m_receiveEncryptedOpcodeSize = receiveSize;
+    }
     void SetEncryptionKey(const uint8_t* key, uint8_t keyLength, uint8_t direction, const uint8_t* seed, uint8_t seedLength);
     void SetResponse(WowConnectionResponse* response, bool deferred);
     void SetSendTime(WowConnection::SENDNODE* node);
+    WOW_CONN_STATE GetState() const { return this->m_connState; }
     void SetState(WOW_CONN_STATE state);
     void SetType(WOWC_TYPE type);
     void StartConnect();

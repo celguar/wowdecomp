@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
@@ -26,11 +27,21 @@ class CVehicleHeap {
 
 class CVehicle_C {
     public:
+    // Bone animation listener slots (inferred name).
+    static const uint32_t MAX_BONE_ANIM_LISTENERS = 16;
+
     static void EnterWorld();
     struct BoneAnimListener {
         /* 0000 */ WOWGUID m_guid;
         /* 0008 */ uint32_t m_boneId;
-        /* 000C */ void (*m_callback)(CGUnit_C* unit, int32_t& a2, TSGrowableArray<CVehiclePassenger_C*>& passengers);
+        /* 000C */ void (*m_callback)(CGUnit_C* unit, BOOL& keepListening, TSGrowableArray<CVehiclePassenger_C*>& passengers);
+    };
+
+    // Runtime vehicle state; reconstructed names.
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // PlayBoneAnim started at least one bone animation (m_playingBoneAnims).
+        BONE_ANIMS_PLAYING = 0x1,
     };
 
     static CVehicleHeap* s_vehiclePool;
@@ -42,37 +53,56 @@ class CVehicle_C {
 
     /* 0000 */ uint32_t m_memHandle;
     /* 0004 */ CGUnit_C* m_unit;
-    /* 0008 */ uint32_t m_flags;
+    /* 0008 */ uint32_t m_flags; // FLAGS
     /* 000C */ VehicleRec* m_vehicleRec;
     /* 0010 */ C44Matrix m_worldMatrix;
     /* 0050 */ float m_rawFacing;
     /* 0054 */ float m_largestPassengerBoundsRadius;
     /* 0058 */ uint32_t m_playingBoneAnims [2];
-    /* 0060 */ BoneAnimListener m_boneAnimListeners [16];
+    /* 0060 */ BoneAnimListener m_boneAnimListeners [MAX_BONE_ANIM_LISTENERS];
     /* 0160 */ WOWGUID m_forceFacingGuid;
     /* 0168 */ uint32_t m_forceFacingBone;
     /* 016C */ uint8_t m_mirroringAnimsMask;
     /* 016D */ uint8_t m_freeSeatMask;
     /* 0170 */ TSExplicitList<CPassenger, offsetof(CPassenger, m_link)> m_passengers;
-    /* 017C */ uint32_t unused_017C;
+
+    // INLINED
+    TSExplicitList<CPassenger, offsetof(CPassenger, m_link)>& GetPassengerList() {
+        return this->m_passengers;
+    }
+    /* 017C */ uint32_t unknown_017C;
 
     CVehicle_C();
     VehicleSeatRec* GetVehicleSeatRec(uint8_t seat) const;
-    uint32_t IsSpecialBoneAnimPlaying() const;
-    int32_t InstallBoneAnimListener(WOWGUID guid, uint32_t boneId, void (*callback)(CGUnit_C* unit, int32_t& a2, TSGrowableArray<CVehiclePassenger_C*>& passengers));
+    uint32_t IsRootBoneAnimPlaying() const;
+    int32_t InstallBoneAnimListener(WOWGUID guid, uint32_t boneId, void (*callback)(CGUnit_C* unit, BOOL& keepListening, TSGrowableArray<CVehiclePassenger_C*>& passengers));
     void UninstallBoneAnimListener(WOWGUID guid);
     void RemoveBoneAnimListener(uint32_t boneId, WOWGUID guid);
-    int32_t CanPlayBoneAnim(uint32_t animId) const;
+    BOOL CanPlayBoneAnim(uint32_t animId) const;
     void SetBoneAnimForceFacing(WOWGUID guid, uint32_t boneId);
     bool IsMirroringAnimsToPassengers() const;
     void OnPassengerStartMirroringAnims(uint8_t seat);
     void OnPassengerStopMirroringAnims(uint8_t seat);
-    int32_t IsSuppressingCameraPitchWhileMouseAiming() const;
-    int32_t HasHighPriorityCastingAnim() const;
+    BOOL IsSuppressingCameraPitchWhileMouseAiming() const;
+    BOOL HasHighPriorityCastingAnim() const;
     uint32_t IsBoneAnimPlaying(uint32_t bone) const;
+    // INLINED: m_playingBoneAnims holds one bit per key bone.
+    uint32_t TestBoneAnimBit(uint32_t bone) const {
+        return this->m_playingBoneAnims[bone >> 5] & (1 << (bone & 0x1F));
+    }
+    void SetBoneAnimBit(uint32_t bone) {
+        this->m_playingBoneAnims[bone >> 5] |= 1 << (bone & 0x1F);
+    }
+    void ClearBoneAnimBit(uint32_t bone) {
+        this->m_playingBoneAnims[bone >> 5] &= ~(1 << (bone & 0x1F));
+    }
+    void ClearBoneAnimBits() {
+        this->m_playingBoneAnims[0] = 0;
+        this->m_playingBoneAnims[1] = 0;
+    }
     void BoneAnimEndHandler(CM2Model* model, uint32_t boneId, uint32_t sequenceId, int32_t interrupted, uint32_t time);
     void PlayBoneAnimOrFallback(CM2Model* model, uint32_t boneId);
-    int32_t HasHighPriorityAnim() const;
+    BOOL HasHighPriorityAnim() const;
     int32_t GetVirtualSeatCount() const;
     int32_t GetVehicleAndSeatFromVirtualSeatsRemaining(int32_t& remaining, const CVehicle_C*& vehicle, uint8_t& seat) const;
     CGUnit_C* FindPassengerUnit(uint8_t seat);

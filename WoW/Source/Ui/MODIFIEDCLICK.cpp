@@ -7,7 +7,7 @@
 
 // VERIFY: dfca5dad manual
 // OFFSET: 0x0055D6B0
-int32_t MODIFIEDCLICK::IsActive(BINDING_SET set) {
+BOOL MODIFIEDCLICK::IsActive(BINDING_SET set) {
     const char* button = this->m_data[set].m_button;
     uint32_t modifiers = this->m_data[set].m_modifiers;
 
@@ -52,10 +52,10 @@ int32_t MODIFIEDCLICK::SetBinding(BINDING_SET set, const char* binding) {
         }
     }
 
-    if (set) {
-        this->m_data[set].m_flags &= ~1u;
+    if (set != BINDING_SET_DEFAULT) {
+        this->m_data[set].m_flags &= ~MODIFIEDCLICK_DATA::FLAGS::DEFAULT;
     } else {
-        this->m_data[set].m_flags |= 1u;
+        this->m_data[set].m_flags |= MODIFIEDCLICK_DATA::FLAGS::DEFAULT;
     }
 
     this->m_data[set].m_button = button;

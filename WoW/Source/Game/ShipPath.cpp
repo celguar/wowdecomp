@@ -1,4 +1,5 @@
 #include "ShipPath.h"
+#include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Tempest/CMath.h"
 #include <malloc.h>
 #include <new>
@@ -14,7 +15,7 @@
 ShipPath::ShipPath() {
     this->m_physics = nullptr;
     this->m_taxiPathId = 0xFFFFFFFF;
-    this->m_moveSpeed = 0.0f;
+    this->m_shipSpeed = 0.0f;
     this->m_totalPathTime = 0;
     this->m_accelRate = 0.0f;
     this->m_waitTime = 0;
@@ -27,7 +28,7 @@ ShipPath::ShipPath() {
 // VERIFY: 09b64bdb auto
 // OFFSET: 0x007F92F0
 void ShipPath::Init(uint32_t taxiPathId, float moveSpeed, float accelRate, const TransportPhysicsRec* physics) {
-    this->m_moveSpeed = moveSpeed;
+    this->m_shipSpeed = moveSpeed;
     this->m_taxiPathId = taxiPathId;
     this->m_totalPathTime = 0;
     this->m_accelRate = accelRate;
@@ -40,15 +41,15 @@ void ShipPath::Init(uint32_t taxiPathId, float moveSpeed, float accelRate, const
 void ShipPath::SetTotalPathTime(uint32_t time) {
     this->m_totalPathTime = time;
 
-    if (this->m_legs.Count() > 0) {
-        this->m_legs.Top()->m_endTime = time;
+    if (this->m_leg.Count() > 0) {
+        this->m_leg.Top()->m_endTime = time;
     }
 }
 
 // VERIFY: b2be9152 auto
 // OFFSET: 0x007F7AD0
 static int32_t FindFirstPathNode(uint32_t pathId) {
-    int32_t high = g_taxiPathNodeDB.m_numRecords;
+    int32_t high = g_taxiPathNodeDB.GetNumRecords();
     int32_t low = 0;
 
     if (high <= 0) {
@@ -57,7 +58,7 @@ static int32_t FindFirstPathNode(uint32_t pathId) {
 
     do {
         int32_t mid = (high + low) / 2;
-        TaxiPathNodeRec* records = g_taxiPathNodeDB.m_numRecords <= 0 ? nullptr : g_taxiPathNodeDB.m_records;
+        TaxiPathNodeRec* records = g_taxiPathNodeDB.GetNumRecords() <= 0 ? nullptr : g_taxiPathNodeDB.m_records;
 
         if (records[mid].m_pathID >= static_cast<int32_t>(pathId)) {
             high = mid;
@@ -66,8 +67,8 @@ static int32_t FindFirstPathNode(uint32_t pathId) {
         }
     } while (low < high);
 
-    if (low < g_taxiPathNodeDB.m_numRecords) {
-        TaxiPathNodeRec* records = g_taxiPathNodeDB.m_numRecords <= 0 ? nullptr : g_taxiPathNodeDB.m_records;
+    if (low < g_taxiPathNodeDB.GetNumRecords()) {
+        TaxiPathNodeRec* records = g_taxiPathNodeDB.GetNumRecords() <= 0 ? nullptr : g_taxiPathNodeDB.m_records;
 
         if (records[low].m_pathID == static_cast<int32_t>(pathId)) {
             return low;
@@ -115,21 +116,21 @@ void ShipPath::BuildLegs() {
 
     TaxiPathNodeRec* node = nullptr;
 
-    if (index >= 0 && index < g_taxiPathNodeDB.m_numRecords) {
+    if (index >= 0 && index < g_taxiPathNodeDB.GetNumRecords()) {
         node = &g_taxiPathNodeDB.m_records[index];
     }
 
     int32_t teleport = 0;
 
     while (true) {
-        if (leg < 0 || node->m_continentID != this->m_legs.m_data[leg].m_mapId || teleport) {
+        if (leg < 0 || node->m_continentID != this->m_leg.m_data[leg].m_mapId || teleport) {
             if (leg >= 0) {
-                this->BuildLeg(&points, &pauses, &events, leg);
+                this->AddLeg(points, pauses, events, leg);
             }
 
             leg++;
-            this->m_legs.SetCount(leg + 1);
-            this->m_legs.m_data[leg].m_mapId = node->m_continentID;
+            this->m_leg.SetCount(leg + 1);
+            this->m_leg.m_data[leg].m_mapId = node->m_continentID;
             points.SetCount(0);
 
             if (pauses.m_count) {
@@ -141,7 +142,7 @@ void ShipPath::BuildLegs() {
             }
         }
 
-        if ((node->m_flags & 0x2) && points.m_count) {
+        if ((node->m_flags & TAXI_PATH_NODE_FLAG_STOP) && points.m_count) {
             ShipPathPause* pause = &pauses.m_data[pauses.m_count++];
 
             if (pause) {
@@ -168,10 +169,10 @@ void ShipPath::BuildLegs() {
             point->z = node->m_loc[2];
         }
 
-        teleport = node->m_flags & 0x1;
+        teleport = node->m_flags & TAXI_PATH_NODE_FLAG_TELEPORT;
         index++;
 
-        if (index < 0 || index >= g_taxiPathNodeDB.m_numRecords) {
+        if (index < 0 || index >= g_taxiPathNodeDB.GetNumRecords()) {
             break;
         }
 
@@ -183,23 +184,29 @@ void ShipPath::BuildLegs() {
     }
 
     if (points.m_count) {
-        this->BuildLeg(&points, &pauses, &events, leg);
+        this->AddLeg(points, pauses, events, leg);
     }
+
+#if defined(WOWDECOMP_ASSERTIONS)
+    if (this->m_leg.Count()) {
+        STORM_ASSERT(m_shipSpeed);
+    }
+#endif
 }
 
 // VERIFY: b35e3ee1 manual
 // OFFSET: 0x007F7A60
 uint32_t ShipPath::LegTimeAccel(float distance) {
     float invAccel = 1.0f / this->m_accelRate;
-    float accelTime = invAccel * this->m_moveSpeed;
-    float accelDistance = this->m_moveSpeed * 0.5f * accelTime;
+    float accelTime = invAccel * this->m_shipSpeed;
+    float accelDistance = this->m_shipSpeed * 0.5f * accelTime;
     float time;
 
     if (0.5f * distance <= accelDistance) {
         float root = sqrtf(invAccel * distance);
         time = root + root;
     } else {
-        time = 2.0f * accelTime + (distance - accelDistance * 2.0f) / this->m_moveSpeed;
+        time = 2.0f * accelTime + (distance - accelDistance * 2.0f) / this->m_shipSpeed;
     }
 
     return static_cast<uint32_t>(time * 1000.0f);
@@ -207,58 +214,60 @@ uint32_t ShipPath::LegTimeAccel(float distance) {
 
 // VERIFY: db975c72 manual
 // OFFSET: 0x007F8660
-void ShipPath::BuildLeg(ShipPathArray<C3Vector>* points, ShipPathArray<ShipPathPause>* pauses, ShipPathArray<ShipPathEvent>* events, int32_t legIndex) {
-    ShipPathLeg* leg = &this->m_legs.m_data[legIndex];
-    leg->m_spline.SetPoints(points->m_data, points->m_count);
-    leg = &this->m_legs.m_data[legIndex];
-    leg->m_segments.SetCount(pauses->m_count + 1);
+void ShipPath::AddLeg(ShipPathArray<C3Vector>& pathPoints, const ShipPathArray<ShipPathPause>& pauses, const ShipPathArray<ShipPathEvent>& events, int32_t leg) {
+    STORM_ASSERT(pathPoints.Count() > 0);
+
+    ShipPathLeg* pathLeg = &this->m_leg.m_data[leg];
+    pathLeg->m_spline.SetPoints(pathPoints.m_data, pathPoints.m_count);
+    pathLeg = &this->m_leg.m_data[leg];
+    pathLeg->m_segments.SetCount(pauses.m_count + 1);
     float prevDistance = 0.0f;
-    this->m_legs.m_data[legIndex].m_duration = 0;
+    this->m_leg.m_data[leg].m_splineTime = 0;
     uint32_t eventCount = this->m_events.m_count;
     uint32_t accumDelay = 0;
     uint32_t eventIndex = 0;
-    this->m_events.SetCount(eventCount + 2 * events->m_count);
+    this->m_events.SetCount(eventCount + 2 * events.m_count);
     uint32_t i;
 
-    for (i = 0; i < pauses->m_count; i++) {
-        if (pauses->m_data[i].m_point >= points->m_count - 1) {
+    for (i = 0; i < pauses.m_count; i++) {
+        if (pauses.m_data[i].m_point >= pathPoints.m_count - 1) {
             break;
         }
 
-        for (; eventIndex < events->m_count; eventIndex++) {
-            ShipPathEvent* event = &events->m_data[eventIndex];
+        for (; eventIndex < events.m_count; eventIndex++) {
+            const ShipPathEvent* event = &events.m_data[eventIndex];
 
-            if (event->m_point > pauses->m_data[i].m_point) {
+            if (event->m_point > pauses.m_data[i].m_point) {
                 break;
             }
 
-            float distance = this->m_legs.m_data[legIndex].m_spline.LengthBeforePoint(event->m_point) - prevDistance;
+            float distance = this->m_leg.m_data[leg].m_spline.LengthBeforePoint(event->m_point) - prevDistance;
             float invAccel = 1.0f / this->m_accelRate;
-            float accelTime = this->m_moveSpeed * invAccel;
+            float accelTime = this->m_shipSpeed * invAccel;
             float time;
 
             if (i) {
-                float accelDistance = this->m_moveSpeed * 0.5f * accelTime;
+                float accelDistance = this->m_shipSpeed * 0.5f * accelTime;
 
                 if (accelDistance >= 0.5f * distance) {
                     float root = sqrtf(distance * invAccel);
                     time = root + root;
                 } else {
-                    time = 2.0f * accelTime + (distance - accelDistance * 2.0f) / this->m_moveSpeed;
+                    time = 2.0f * accelTime + (distance - accelDistance * 2.0f) / this->m_shipSpeed;
                 }
             } else {
-                float accelDistance = this->m_moveSpeed * 0.5f * accelTime;
+                float accelDistance = this->m_shipSpeed * 0.5f * accelTime;
 
                 if (accelDistance >= distance) {
                     time = sqrtf(distance * invAccel + distance * invAccel);
                 } else {
-                    time = accelTime + (distance - accelDistance) / this->m_moveSpeed;
+                    time = accelTime + (distance - accelDistance) / this->m_shipSpeed;
                 }
             }
 
             uint32_t eventTime = static_cast<uint32_t>(time * 1000.0f);
-            uint32_t delay = event->m_point == pauses->m_data[i].m_point ? pauses->m_data[i].m_delay : 0;
-            uint32_t base = accumDelay + eventTime + this->m_legs.m_data[legIndex].m_duration;
+            uint32_t delay = event->m_point == pauses.m_data[i].m_point ? pauses.m_data[i].m_delay : 0;
+            uint32_t base = accumDelay + eventTime + this->m_leg.m_data[leg].m_splineTime;
 
             if (event->m_arrivalEvent) {
                 this->m_events.m_data[eventCount].m_time = base + this->m_totalPathTime;
@@ -273,7 +282,7 @@ void ShipPath::BuildLeg(ShipPathArray<C3Vector>* points, ShipPathArray<ShipPathP
             }
         }
 
-        float pauseDistance = this->m_legs.m_data[legIndex].m_spline.LengthBeforePoint(pauses->m_data[i].m_point);
+        float pauseDistance = this->m_leg.m_data[leg].m_spline.LengthBeforePoint(pauses.m_data[i].m_point);
         float distance = pauseDistance - prevDistance;
         uint32_t segmentTime;
 
@@ -281,37 +290,37 @@ void ShipPath::BuildLeg(ShipPathArray<C3Vector>* points, ShipPathArray<ShipPathP
             segmentTime = this->LegTimeAccel(distance);
         } else {
             float invAccel = 1.0f / this->m_accelRate;
-            float accelTime = this->m_moveSpeed * invAccel;
-            float accelDistance = this->m_moveSpeed * 0.5f * accelTime;
-            float time = accelDistance >= distance ? sqrtf(distance * invAccel + distance * invAccel) : accelTime + (distance - accelDistance) / this->m_moveSpeed;
+            float accelTime = this->m_shipSpeed * invAccel;
+            float accelDistance = this->m_shipSpeed * 0.5f * accelTime;
+            float time = accelDistance >= distance ? sqrtf(distance * invAccel + distance * invAccel) : accelTime + (distance - accelDistance) / this->m_shipSpeed;
             segmentTime = static_cast<uint32_t>(time * 1000.0f);
         }
 
-        this->m_legs.m_data[legIndex].m_duration += segmentTime;
+        this->m_leg.m_data[leg].m_splineTime += segmentTime;
         prevDistance = pauseDistance;
-        ShipPathSegment* segment = &this->m_legs.m_data[legIndex].m_segments.m_data[i];
-        segment->m_time = accumDelay + this->m_legs.m_data[legIndex].m_duration;
+        ShipPathSegment* segment = &this->m_leg.m_data[leg].m_segments.m_data[i];
+        segment->m_time = accumDelay + this->m_leg.m_data[leg].m_splineTime;
         segment->m_distance = pauseDistance;
-        segment->m_delay = pauses->m_data[i].m_delay;
-        accumDelay += pauses->m_data[i].m_delay;
+        segment->m_delay = pauses.m_data[i].m_delay;
+        accumDelay += pauses.m_data[i].m_delay;
     }
 
-    for (; eventIndex < events->m_count; eventIndex++) {
-        ShipPathEvent* event = &events->m_data[eventIndex];
-        float distance = this->m_legs.m_data[legIndex].m_spline.LengthBeforePoint(event->m_point) - prevDistance;
+    for (; eventIndex < events.m_count; eventIndex++) {
+        const ShipPathEvent* event = &events.m_data[eventIndex];
+        float distance = this->m_leg.m_data[leg].m_spline.LengthBeforePoint(event->m_point) - prevDistance;
         uint32_t eventTime;
 
         if (i) {
             float invAccel = 1.0f / this->m_accelRate;
-            float accelTime = this->m_moveSpeed * invAccel;
-            float accelDistance = this->m_moveSpeed * 0.5f * accelTime;
-            float time = accelDistance >= distance ? sqrtf(distance * invAccel + distance * invAccel) : accelTime + (distance - accelDistance) / this->m_moveSpeed;
+            float accelTime = this->m_shipSpeed * invAccel;
+            float accelDistance = this->m_shipSpeed * 0.5f * accelTime;
+            float time = accelDistance >= distance ? sqrtf(distance * invAccel + distance * invAccel) : accelTime + (distance - accelDistance) / this->m_shipSpeed;
             eventTime = static_cast<uint32_t>(time * 1000.0f);
         } else {
-            eventTime = static_cast<uint32_t>(distance / this->m_moveSpeed * 1000.0f);
+            eventTime = static_cast<uint32_t>(distance / this->m_shipSpeed * 1000.0f);
         }
 
-        uint32_t base = accumDelay + eventTime + this->m_legs.m_data[legIndex].m_duration;
+        uint32_t base = accumDelay + eventTime + this->m_leg.m_data[leg].m_splineTime;
 
         if (event->m_arrivalEvent) {
             this->m_events.m_data[eventCount].m_time = base + this->m_totalPathTime;
@@ -327,34 +336,35 @@ void ShipPath::BuildLeg(ShipPathArray<C3Vector>* points, ShipPathArray<ShipPathP
     }
 
     this->m_events.SetCount(eventCount);
-    float length = this->m_legs.m_data[legIndex].m_spline.cachedLength;
+    float length = this->m_leg.m_data[leg].m_spline.cachedLength;
     float distance = length - prevDistance;
     uint32_t lastTime;
 
     if (i) {
         float invAccel = 1.0f / this->m_accelRate;
-        float accelTime = this->m_moveSpeed * invAccel;
-        float accelDistance = this->m_moveSpeed * 0.5f * accelTime;
-        float time = accelDistance >= distance ? sqrtf(distance * invAccel + distance * invAccel) : accelTime + (distance - accelDistance) / this->m_moveSpeed;
+        float accelTime = this->m_shipSpeed * invAccel;
+        float accelDistance = this->m_shipSpeed * 0.5f * accelTime;
+        float time = accelDistance >= distance ? sqrtf(distance * invAccel + distance * invAccel) : accelTime + (distance - accelDistance) / this->m_shipSpeed;
         lastTime = static_cast<uint32_t>(time * 1000.0f);
     } else {
-        lastTime = static_cast<uint32_t>(distance / this->m_moveSpeed * 1000.0f);
+        lastTime = static_cast<uint32_t>(distance / this->m_shipSpeed * 1000.0f);
     }
 
-    leg = &this->m_legs.m_data[legIndex];
-    leg->m_duration += lastTime;
-    ShipPathSegment* last = &leg->m_segments.m_data[i];
-    last->m_time = accumDelay + leg->m_duration;
+    pathLeg = &this->m_leg.m_data[leg];
+    pathLeg->m_splineTime += lastTime;
+    ShipPathSegment* last = &pathLeg->m_segments.m_data[i];
+    last->m_time = accumDelay + pathLeg->m_splineTime;
     last->m_distance = length;
     last->m_delay = 0;
-    leg->m_startTime = this->m_totalPathTime;
-    this->m_totalPathTime += leg->m_segments.m_data[i].m_time;
+    pathLeg->m_startTime = this->m_totalPathTime;
+    STORM_ASSERT(m_leg[leg].m_splineTime);
+    this->m_totalPathTime += pathLeg->m_segments.m_data[i].m_time;
 
-    for (uint32_t j = 0; j < leg->m_segments.m_count; j++) {
-        leg->m_segments.m_data[j].m_time += leg->m_startTime;
+    for (uint32_t j = 0; j < pathLeg->m_segments.m_count; j++) {
+        pathLeg->m_segments.m_data[j].m_time += pathLeg->m_startTime;
     }
 
-    leg->m_endTime = this->m_totalPathTime;
+    pathLeg->m_endTime = this->m_totalPathTime;
 }
 
 // VERIFY: c8996cba manual
@@ -427,27 +437,27 @@ uint32_t ShipPath::UpdatePathTime(uint32_t time, uint32_t elapsed, int32_t absol
 // VERIFY: 316a0013 manual
 // OFFSET: 0x007F7660
 float ShipPath::GetDecelDistance(float t, float segTime, uint32_t* sequence, float* speed) {
-    float accelTime = this->m_moveSpeed / this->m_accelRate;
+    float accelTime = this->m_shipSpeed / this->m_accelRate;
     float decelTime = segTime >= accelTime ? accelTime : segTime;
     float cruiseTime = segTime - decelTime;
 
     if (t <= cruiseTime) {
         *sequence = ANIM_SHIP_MOVING;
-        *speed = this->m_moveSpeed;
-        return t * this->m_moveSpeed;
+        *speed = this->m_shipSpeed;
+        return t * this->m_shipSpeed;
     }
 
     float startSpeed = decelTime * this->m_accelRate;
     float dt = t - cruiseTime;
     *speed = startSpeed - this->m_accelRate * dt;
     *sequence = ANIM_SHIP_STOP;
-    return dt * ((startSpeed + startSpeed - this->m_accelRate * dt) * 0.5f) + cruiseTime * this->m_moveSpeed;
+    return dt * ((startSpeed + startSpeed - this->m_accelRate * dt) * 0.5f) + cruiseTime * this->m_shipSpeed;
 }
 
 // VERIFY: b5ad35a3 manual
 // OFFSET: 0x007F76F0
 float ShipPath::GetAccelDecelDistance(float t, float segTime, uint32_t* sequence, float* speed) {
-    float accelTime = this->m_moveSpeed / this->m_accelRate;
+    float accelTime = this->m_shipSpeed / this->m_accelRate;
     float rampTime = segTime * 0.5f;
 
     if (rampTime >= accelTime) {
@@ -463,20 +473,22 @@ float ShipPath::GetAccelDecelDistance(float t, float segTime, uint32_t* sequence
         }
 
         *sequence = ANIM_SHIP_MOVING;
-        *speed = this->m_moveSpeed;
-        return accelTime * (0.5f * this->m_moveSpeed) + (t - accelTime) * this->m_moveSpeed;
+        *speed = this->m_shipSpeed;
+        return accelTime * (0.5f * this->m_shipSpeed) + (t - accelTime) * this->m_shipSpeed;
     }
 
     float peak = this->m_accelRate * rampTime;
     float dt = t - (segTime - rampTime);
     *speed = peak - this->m_accelRate * dt;
     *sequence = ANIM_SHIP_STOP;
-    return rampTime * (0.5f * peak) + dt * ((peak * 2.0f - this->m_accelRate * dt) * 0.5f) + (segTime - 2.0f * rampTime) * this->m_moveSpeed;
+    return rampTime * (0.5f * peak) + dt * ((peak * 2.0f - this->m_accelRate * dt) * 0.5f) + (segTime - 2.0f * rampTime) * this->m_shipSpeed;
 }
 
 // VERIFY: 5639ad48 manual
 // OFFSET: 0x007F7B30
 void ShipPath::GetRollAndPitch(uint32_t time, float speed, float turn, C3Vector* position, float* roll, float* pitch) {
+    STORM_ASSERT(roll && pitch);
+
     const TransportPhysicsRec* physics = this->m_physics;
     float damp;
 
@@ -521,8 +533,8 @@ void ShipPath::GetRollAndPitch(uint32_t time, float speed, float turn, C3Vector*
 // OFFSET: 0x007F7DD0
 void ShipPath::ComputeRollAndPitch(float speed, float facing, float distance, uint32_t leg, float turn, uint32_t time, C3Vector* position, float* roll, float* pitch) {
     if (speed > 0.0f) {
-        float low = this->m_physics->m_speedDampThresh * 0.15000001f;
-        float high = this->m_physics->m_speedDampThresh * 0.30000001f;
+        float low = this->m_physics->m_speedDampThresh * 0.15f;
+        float high = this->m_physics->m_speedDampThresh * 0.3f;
 
         if (speed < low) {
             speed = 0.0f;
@@ -534,13 +546,13 @@ void ShipPath::ComputeRollAndPitch(float speed, float facing, float distance, ui
         C3Vector vel(0.0f, 0.0f, 0.0f);
 
         for (int32_t i = 1; i < 5; i++) {
-            float ahead = distance - speed * static_cast<float>(i) * 0.44999999f;
+            float ahead = distance - speed * static_cast<float>(i) * 0.45f;
 
             if (ahead < 0.0f) {
                 ahead = 0.0f;
             }
 
-            ShipPathLeg* pathLeg = &this->m_legs.m_data[leg];
+            ShipPathLeg* pathLeg = &this->m_leg.m_data[leg];
             float u = ahead / pathLeg->m_spline.cachedLength;
 
             if (u < 0.0f) {
@@ -590,6 +602,8 @@ void ShipPath::GetPosition(uint32_t time, uint32_t elapsed, int32_t* mapId, uint
     position->z = 0.0f;
     *facing = 0.0f;
 
+    STORM_ASSERT((pitch && roll) || (!pitch && !roll));
+
     if (roll && pitch) {
         *pitch = 0.0f;
         *roll = 0.0f;
@@ -597,18 +611,18 @@ void ShipPath::GetPosition(uint32_t time, uint32_t elapsed, int32_t* mapId, uint
 
     *leg = 0;
 
-    if (!this->m_legs.m_count) {
+    if (!this->m_leg.m_count) {
         return;
     }
 
-    while (pathTime >= this->m_legs.m_data[*leg].m_endTime) {
-        if (++*leg >= this->m_legs.m_count) {
+    while (pathTime >= this->m_leg.m_data[*leg].m_endTime) {
+        if (++*leg >= this->m_leg.m_count) {
             return;
         }
     }
 
     float prevDistance = 0.0f;
-    ShipPathLeg* pathLeg = &this->m_legs.m_data[*leg];
+    ShipPathLeg* pathLeg = &this->m_leg.m_data[*leg];
     uint32_t startTime = pathLeg->m_startTime;
     uint32_t seg = 0;
     float distance;
@@ -626,7 +640,7 @@ void ShipPath::GetPosition(uint32_t time, uint32_t elapsed, int32_t* mapId, uint
             prevDistance = segments[seg].m_distance;
             startTime = segments[seg].m_time + segments[seg].m_delay;
 
-            if (++seg >= this->m_legs.m_data[*leg].m_segments.m_count - 1) {
+            if (++seg >= this->m_leg.m_data[*leg].m_segments.m_count - 1) {
                 break;
             }
         }
@@ -643,13 +657,13 @@ void ShipPath::GetPosition(uint32_t time, uint32_t elapsed, int32_t* mapId, uint
                 moved = this->GetDecelDistance(t, segTime, sequence, &speed);
             } else {
                 *sequence = ANIM_SHIP_MOVING;
-                speed = this->m_moveSpeed;
-                moved = t * this->m_moveSpeed;
+                speed = this->m_shipSpeed;
+                moved = t * this->m_shipSpeed;
             }
         } else if (!last) {
             moved = this->GetAccelDecelDistance(t, segTime, sequence, &speed);
         } else {
-            float accelTime = this->m_moveSpeed / this->m_accelRate;
+            float accelTime = this->m_shipSpeed / this->m_accelRate;
             float rampTime = accelTime <= segTime ? accelTime : segTime;
 
             if (rampTime >= t) {
@@ -658,8 +672,8 @@ void ShipPath::GetPosition(uint32_t time, uint32_t elapsed, int32_t* mapId, uint
                 moved = t * (speed * 0.5f);
             } else {
                 *sequence = ANIM_SHIP_MOVING;
-                moved = accelTime * (this->m_moveSpeed * 0.5f) + (t - accelTime) * this->m_moveSpeed;
-                speed = this->m_moveSpeed;
+                moved = accelTime * (this->m_shipSpeed * 0.5f) + (t - accelTime) * this->m_shipSpeed;
+                speed = this->m_shipSpeed;
             }
         }
 
@@ -667,7 +681,7 @@ void ShipPath::GetPosition(uint32_t time, uint32_t elapsed, int32_t* mapId, uint
     }
 
 frame:
-    pathLeg = &this->m_legs.m_data[*leg];
+    pathLeg = &this->m_leg.m_data[*leg];
     float u = distance / pathLeg->m_spline.cachedLength;
 
     if (u < 0.0f) {
@@ -696,7 +710,7 @@ frame:
         this->ComputeRollAndPitch(speed, *facing, distance, *leg, 0.0f, pathTime, position, roll, pitch);
     }
 
-    *mapId = this->m_legs.m_data[*leg].m_mapId;
+    *mapId = this->m_leg.m_data[*leg].m_mapId;
 }
 
 // VERIFY: 574c5d75 auto
@@ -715,8 +729,8 @@ void ShipPath::SetTimeOffsetToPoint(uint32_t time, uint32_t point) {
 // VERIFY: ef046ea6 manual
 // OFFSET: 0x007F7D30
 void ShipPath::FindLegAndSegment(uint32_t pathTime, uint32_t* leg, uint32_t* segment) {
-    for (uint32_t i = 0; i < this->m_legs.m_count; i++) {
-        ShipPathLeg& current = this->m_legs.m_data[i];
+    for (uint32_t i = 0; i < this->m_leg.m_count; i++) {
+        ShipPathLeg& current = this->m_leg.m_data[i];
 
         if (pathTime >= current.m_endTime) {
             continue;
@@ -751,7 +765,7 @@ void ShipPath::WaitAtNextPausePoint(uint32_t time, bool pause) {
     uint32_t leg;
     uint32_t segment;
     this->FindLegAndSegment(pathTime % total, &leg, &segment);
-    ShipPathSegment& entry = this->m_legs.m_data[leg].m_segments.m_data[segment];
+    ShipPathSegment& entry = this->m_leg.m_data[leg].m_segments.m_data[segment];
 
     if (pause) {
         this->m_waitTime = (entry.m_time + entry.m_delay) % total;
@@ -776,7 +790,7 @@ void ShipPath::WaitAtCurrentLocation(uint32_t time) {
     uint32_t leg;
     uint32_t segment;
     this->FindLegAndSegment((total + this->m_timeOffset + time - 1) % total, &leg, &segment);
-    ShipPathSegment& entry = this->m_legs.m_data[leg].m_segments.m_data[segment];
+    ShipPathSegment& entry = this->m_leg.m_data[leg].m_segments.m_data[segment];
     this->m_waiting = 1;
     this->m_waitReached = 1;
     this->unused_003E = 0;

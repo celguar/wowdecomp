@@ -27,13 +27,13 @@ static int32_t s_menuHotkeysEnabled = 1;
 
 // INLINED
 int32_t COsDialog::OnEvent(int32_t itemId, int32_t notifyCode, int32_t code) {
-    if (this->m_callback) {
+    if (this->m_callbackInfo.function) {
         OsGuiCallbackParams params;
         params.type = itemId;
         params.subType = notifyCode;
         params.code = code;
-        params.user = this->m_callbackParam;
-        this->m_callback(params);
+        params.user = this->m_callbackInfo.userParam;
+        this->m_callbackInfo.function(params);
     }
 
     return 1;
@@ -60,7 +60,7 @@ static int32_t sIsCharacterAllowed(char c, uint32_t filters) {
         return 1;
     }
 
-    if (filters & 0x1) {
+    if (filters & OSGUI_FILTER_LETTERS) {
         if (ch >= 'a' && ch <= 'z') {
             return 1;
         }
@@ -70,27 +70,27 @@ static int32_t sIsCharacterAllowed(char c, uint32_t filters) {
         }
     }
 
-    if ((filters & 0x2) && ch >= '0' && ch <= '9') {
+    if ((filters & OSGUI_FILTER_DIGITS) && ch >= '0' && ch <= '9') {
         return 1;
     }
 
-    if ((filters & 0x4) && (ch == '+' || ch == '-')) {
+    if ((filters & OSGUI_FILTER_SIGN) && (ch == '+' || ch == '-')) {
         return 1;
     }
 
-    if ((filters & 0x8) && ch == '.') {
+    if ((filters & OSGUI_FILTER_DECIMAL_POINT) && ch == '.') {
         return 1;
     }
 
-    if ((filters & 0x10) && ch == ' ') {
+    if ((filters & OSGUI_FILTER_SPACE) && ch == ' ') {
         return 1;
     }
 
-    if ((filters & 0x20) && ch == '_') {
+    if ((filters & OSGUI_FILTER_UNDERSCORE) && ch == '_') {
         return 1;
     }
 
-    return (filters & 0x40) && ch <= 0x7E;
+    return (filters & OSGUI_FILTER_PRINTABLE_ASCII) && ch <= 0x7E;
 }
 
 // INLINED
@@ -99,7 +99,7 @@ OsGuiHandle COsTreeView::GetEditControl() {
 }
 
 // OFFSET: 0x0086C600
-int32_t COsTreeView::IsCharacterAllowed(char c) {
+BOOL COsTreeView::IsCharacterAllowed(char c) {
     if (!this->GetEditControl()) {
         return 1;
     }
@@ -113,9 +113,9 @@ int32_t COsTreeView::IsCharacterAllowed(char c) {
 
 // OFFSET: 0x0086C650
 void OsGuiSetWindowTitle(OsGuiHandle window, const char* title) {
-    uint32_t length = SUniConvertUTF8to16Len(title, 0x7FFFFFFF, nullptr);
+    uint32_t length = SUniConvertUTF8to16Len(title, STORM_MAX_STR, nullptr);
     uint16_t* wideTitle = static_cast<uint16_t*>(_alloca(length * sizeof(uint16_t)));
-    SUniConvertUTF8to16(wideTitle, length, title, 0x7FFFFFFF, nullptr, nullptr);
+    SUniConvertUTF8to16(wideTitle, length, title, STORM_MAX_STR, nullptr, nullptr);
 
     SetWindowTextW(static_cast<HWND>(window), reinterpret_cast<const wchar_t*>(wideTitle));
 }
@@ -144,17 +144,17 @@ void OsGuiSetGxWindow(OsGuiHandle window) {
 
 // OFFSET: 0x0086C6E0
 int32_t OsGuiMessageBox(OsGuiHandle parentWindow, int32_t style, const char* message, const char* title) {
-    uint32_t messageLength = SUniConvertUTF8to16Len(message, 0x7FFFFFFF, nullptr);
+    uint32_t messageLength = SUniConvertUTF8to16Len(message, STORM_MAX_STR, nullptr);
     uint16_t* wideMessage = static_cast<uint16_t*>(_alloca(messageLength * sizeof(uint16_t)));
-    SUniConvertUTF8to16(wideMessage, messageLength, message, 0x7FFFFFFF, nullptr, nullptr);
+    SUniConvertUTF8to16(wideMessage, messageLength, message, STORM_MAX_STR, nullptr, nullptr);
 
     if (!title) {
         title = "";
     }
 
-    uint32_t titleLength = SUniConvertUTF8to16Len(title, 0x7FFFFFFF, nullptr);
+    uint32_t titleLength = SUniConvertUTF8to16Len(title, STORM_MAX_STR, nullptr);
     uint16_t* wideTitle = static_cast<uint16_t*>(_alloca(titleLength * sizeof(uint16_t)));
-    SUniConvertUTF8to16(wideTitle, titleLength, title, 0x7FFFFFFF, nullptr, nullptr);
+    SUniConvertUTF8to16(wideTitle, titleLength, title, STORM_MAX_STR, nullptr, nullptr);
 
     UINT type = MB_OK;
 
@@ -220,7 +220,7 @@ static COsDialog* sGetOsGuiPointer(void* window) {
 }
 
 // INLINED
-int32_t COsEditBox::IsCharacterAllowed(char c) {
+BOOL COsEditBox::IsCharacterAllowed(char c) {
     if (!this->m_filtersEnabled) {
         return 1;
     }
@@ -239,12 +239,12 @@ OsGuiHandle COsDialog::GetParentWindow() {
 }
 
 // INLINED
-int32_t COsDialog::HasFlag(uint32_t flag) {
+BOOL COsDialog::HasFlag(uint32_t flag) {
     return (this->m_flags & flag) != 0;
 }
 
 // INLINED
-int32_t COsDialog::IsInFront() {
+BOOL COsDialog::IsInFront() {
     return this->m_handle == OsGuiGetWindow(OSGUI_WINDOW_TYPE_FRONT);
 }
 
@@ -295,7 +295,7 @@ int32_t COsDialog::OnControlTab() {
     int32_t count = this->m_controls.Count();
 
     for (int32_t i = 0; i < count; i++) {
-        if (this->m_controls[i]->m_type == 15) {
+        if (this->m_controls[i]->m_type == COsControl::TYPE_TAB_CONTROL) {
             COsTabControl* tabControl = static_cast<COsTabControl*>(this->m_controls[i]);
             return tabControl ? tabControl->OnControlTab() : 0;
         }
@@ -310,7 +310,7 @@ int32_t COsDialog::ProcessMessage(void* message) {
 
     if (msg->wParam == VK_ESCAPE && msg->message == WM_KEYDOWN) {
         COsControl* control = this->FindControl(msg->hwnd);
-        if (control && control->m_type == 4 && (GetWindowLongA(static_cast<HWND>(control->m_handle), GWL_STYLE) & ES_MULTILINE)) {
+        if (control && control->m_type == COsControl::TYPE_EDIT_BOX && (GetWindowLongA(static_cast<HWND>(control->m_handle), GWL_STYLE) & ES_MULTILINE)) {
             return this->OnCancel();
         }
     }
@@ -321,9 +321,9 @@ int32_t COsDialog::ProcessMessage(void* message) {
             char c = static_cast<char>(msg->wParam);
             int32_t allowed = 1;
 
-            if (control->m_type == 4) {
+            if (control->m_type == COsControl::TYPE_EDIT_BOX) {
                 allowed = static_cast<COsEditBox*>(control)->IsCharacterAllowed(c);
-            } else if (control->m_type == 10) {
+            } else if (control->m_type == COsControl::TYPE_TREE_VIEW) {
                 allowed = static_cast<COsTreeView*>(control)->IsCharacterAllowed(c);
             }
 
@@ -336,7 +336,7 @@ int32_t COsDialog::ProcessMessage(void* message) {
 
     if (msg->wParam == VK_RETURN && msg->message == WM_KEYDOWN) {
         COsControl* control = this->FindControl(msg->hwnd);
-        if (control && (control->m_type == 6 || control->m_type == 10 || control->m_type == 16) && control->OnReturn()) {
+        if (control && (control->m_type == COsControl::TYPE_LIST_BOX || control->m_type == COsControl::TYPE_TREE_VIEW || control->m_type == COsControl::TYPE_LIST_VIEW) && control->OnReturn()) {
             return 1;
         }
     }
@@ -356,7 +356,7 @@ int32_t OsGuiProcessMessage(void* message) {
         return 0;
     }
 
-    int32_t handled = 0;
+    BOOL handled = 0;
 
     if (s_menuHotkeysEnabled) {
         for (uint32_t i = 0; i < s_menubars.Count(); i++) {
@@ -400,5 +400,10 @@ int32_t OsGuiProcessMessage(void* message) {
 
     return handled;
 }
+
+#ifdef WOWDECOMP_TOOL_FEATURES
+// Tool features: the rest of the 0.5.3 OsGui.cpp, sharing this file's statics.
+#include "Engine/Source/Os/GuiToolkit.inl"
+#endif
 
 #endif

@@ -216,8 +216,8 @@ void ShadowSetLOD(int32_t lod) {
     if (lod == 1) {
         TextureSetUserData(s_shadowAddTexture, ShadowAddCallback, nullptr);
         TextureSetUserData(s_shadowModTexture, ShadowModCallback, nullptr);
-        GxTexUpdate(TextureGetGxTex(s_shadowAddTexture, 1, nullptr), rect, 0);
-        GxTexUpdate(TextureGetGxTex(s_shadowModTexture, 1, nullptr), rect, 0);
+        GxTexUpdate(ProjectTex2dGetAddFadeTex(), rect, 0);
+        GxTexUpdate(ProjectTex2dGetModFadeTex(), rect, 0);
     }
 }
 
@@ -229,8 +229,9 @@ void ShadowInit() {
     s_shadowBlobTexture = TextureCreate("Textures\\ShadowBlob.blp", CGxTexFlags(), &status, 1);
     s_shadowAddTexture = TextureCreate(FADETEX_WIDTH, FADETEX_HEIGHT, GxTex_Argb8888, GxTex_Argb8888, CGxTexFlags(), nullptr, ShadowAddCallback, "ShadowAdd", 0);
     s_shadowModTexture = TextureCreate(FADETEX_WIDTH, FADETEX_HEIGHT, GxTex_Argb8888, GxTex_Argb8888, CGxTexFlags(), nullptr, ShadowModCallback, "ShadowMod", 0);
-    s_cvShadowLOD = CVar::Register("shadowLOD", "Unit shadow LOD", 1, "1", ShadowLODCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvShadowLOD = CVar::Register("shadowLOD", "Unit shadow LOD", CVAR_FLAGS::CVAR_ARCHIVE, "1", ShadowLODCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvExtShadowQuality = CVar::Lookup("extShadowQuality");
+    STORM_ASSERT(s_cvExtShadowQuality); // 12213: "cvar_extShadowQuality"
 }
 
 // VERIFY: d5bef9e8 auto
@@ -242,7 +243,7 @@ CGxTex* ProjectTex2dGetAddFadeTex() {
 // VERIFY: ff93aa7d auto
 // OFFSET: 0x007E49E0
 void CWorldScene::RequestModelStreaming(CM2Model* model, const CAaBox* box) {
-    if (model && model->IsDrawable(0, 0) && !(model->m_fFlags & 0x4000) && !box->IsEmpty() && s_cvExtShadowQuality->m_intValue <= 0 && s_shadowLOD == 1) {
+    if (model && model->IsDrawable(0, 0) && !(model->m_runtimeFlags & M2_FLAGS::M2_UNKNOWN_4000) && !box->IsEmpty() && s_cvExtShadowQuality->m_intValue <= 0 && s_shadowLOD == 1) {
         CWorldScene::RenderStreamingRequestDecal(model, box, 0.4f);
     }
 }
@@ -310,7 +311,7 @@ void CWorldScene::RenderStreamingRequestDecal(CM2Model* model, const CAaBox* box
     C44Matrix projection(boundsScale * transpose * localScale);
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 4);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod);
     GxUpdateAlphaRef(GxRs_AlphaRef);
     GxRsSet(GxRs_Lighting, 0);
     GxRsSet(GxRs_Fog, 0);
@@ -339,7 +340,7 @@ void CWorldScene::RenderStreamingRequestDecal(CM2Model* model, const CAaBox* box
     color.g = 0xFF;
     color.r = 0xFF;
     color.a = static_cast<uint8_t>(static_cast<int32_t>(alpha * 255.0f + 0.5f));
-    ProjectTex::Render2d(bounds, color, &projection, 0.5f, 0x220122, 0, scale);
+    ProjectTex::Render2d(bounds, color, &projection, 0.5f, WORLD_QUERY_RENDER_MASK | WORLD_QUERY_LIQUID, PROJECT_TEX_NONE, scale);
     g_theGxDevicePtr->RsPop();
 }
 
@@ -351,26 +352,26 @@ CGxTex* ProjectTex2dGetModFadeTex() {
 
 // VERIFY: 04f96856 manual
 // OFFSET: 0x007E2FD0
-static void ProjectTexBuildVertexBuffer(World::TriData::Batch* triBatch, CGxBatch* batch, uint32_t flags) {
-    CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, sizeof(CGxVertexPN), triBatch->m_indexCount);
+static void ProjectTexBuildVertexBuffer(const World::TriData::Batch* triBatch, CGxBatch* batch, uint32_t flags) {
+    CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, sizeof(CGxVertexPN), triBatch->indexCount);
     CGxVertexPN* vertex = reinterpret_cast<CGxVertexPN*>(g_theGxDevicePtr->BufLock(buf));
 
-    if (triBatch->m_heightList) {
-        for (uint16_t i = 0; i < triBatch->m_indexCount; i++) {
-            uint16_t index = triBatch->m_indices[i];
-            vertex->m_position = triBatch->m_vertexList[index];
-            vertex->m_position.z = triBatch->m_heightList[index];
+    if (triBatch->heights) {
+        for (uint16_t i = 0; i < triBatch->indexCount; i++) {
+            uint16_t index = triBatch->GetVertexIndex(i);
+            vertex->m_position = triBatch->GetVertex(index);
+            vertex->m_position.z = triBatch->GetHeight(index);
             vertex->m_normal = s_projectNormal;
             vertex++;
         }
     } else {
         batch->m_count = 0;
 
-        if (flags & 0x4) {
-            for (uint32_t i = 0; i < triBatch->m_indexCount; i += 3) {
-                const C3Vector& v0 = triBatch->m_vertexList[triBatch->m_indices[i]];
-                const C3Vector& v1 = triBatch->m_vertexList[triBatch->m_indices[i + 1]];
-                const C3Vector& v2 = triBatch->m_vertexList[triBatch->m_indices[i + 2]];
+        if (flags & PROJECT_TEX_ALL_FACES) {
+            for (uint32_t i = 0; i < triBatch->indexCount; i += 3) {
+                const C3Vector& v0 = triBatch->GetVertex(triBatch->GetVertexIndex(i));
+                const C3Vector& v1 = triBatch->GetVertex(triBatch->GetVertexIndex(i + 1));
+                const C3Vector& v2 = triBatch->GetVertex(triBatch->GetVertexIndex(i + 2));
                 vertex[0].m_position = v0;
                 vertex[0].m_normal = s_projectNormal;
                 vertex[1].m_position = v1;
@@ -381,10 +382,10 @@ static void ProjectTexBuildVertexBuffer(World::TriData::Batch* triBatch, CGxBatc
                 vertex += 3;
             }
         } else {
-            for (uint16_t i = 0; i < triBatch->m_indexCount; i += 3) {
-                const C3Vector& v0 = triBatch->m_vertexList[triBatch->m_indices[i]];
-                const C3Vector& v1 = triBatch->m_vertexList[triBatch->m_indices[i + 1]];
-                const C3Vector& v2 = triBatch->m_vertexList[triBatch->m_indices[i + 2]];
+            for (uint16_t i = 0; i < triBatch->indexCount; i += 3) {
+                const C3Vector& v0 = triBatch->GetVertex(triBatch->GetVertexIndex(i));
+                const C3Vector& v1 = triBatch->GetVertex(triBatch->GetVertexIndex(i + 1));
+                const C3Vector& v2 = triBatch->GetVertex(triBatch->GetVertexIndex(i + 2));
 
                 if ((v2.y - v0.y) * (v1.x - v0.x) - (v1.y - v0.y) * (v2.x - v0.x) >= 0.0f) {
                     vertex[0].m_position = v0;
@@ -407,26 +408,26 @@ static void ProjectTexBuildVertexBuffer(World::TriData::Batch* triBatch, CGxBatc
 
 // VERIFY: 2dba67bb manual
 // OFFSET: 0x007E32F0
-static void ProjectTexBuildVertexBufferVariant(World::TriData::Batch* triBatch, CImVector color, CGxBatch* batch, uint32_t flags) {
-    CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, sizeof(CGxVertexPC), triBatch->m_indexCount);
+static void ProjectTexBuildVertexBufferVariant(const World::TriData::Batch* triBatch, CImVector color, CGxBatch* batch, uint32_t flags) {
+    CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Vertex, sizeof(CGxVertexPC), triBatch->indexCount);
     CGxVertexPC* vertex = reinterpret_cast<CGxVertexPC*>(g_theGxDevicePtr->BufLock(buf));
 
-    if (triBatch->m_heightList) {
-        for (uint32_t i = 0; i < triBatch->m_indexCount; i++) {
-            uint16_t index = triBatch->m_indices[i];
-            vertex->p = triBatch->m_vertexList[index];
-            vertex->p.z = triBatch->m_heightList[index];
+    if (triBatch->heights) {
+        for (uint32_t i = 0; i < triBatch->indexCount; i++) {
+            uint16_t index = triBatch->GetVertexIndex(i);
+            vertex->p = triBatch->GetVertex(index);
+            vertex->p.z = triBatch->GetHeight(index);
             vertex->c = color;
             vertex++;
         }
     } else {
         batch->m_count = 0;
 
-        if (flags & 0x4) {
-            for (uint32_t i = 0; i < triBatch->m_indexCount; i += 3) {
-                const C3Vector& v0 = triBatch->m_vertexList[triBatch->m_indices[i]];
-                const C3Vector& v1 = triBatch->m_vertexList[triBatch->m_indices[i + 1]];
-                const C3Vector& v2 = triBatch->m_vertexList[triBatch->m_indices[i + 2]];
+        if (flags & PROJECT_TEX_ALL_FACES) {
+            for (uint32_t i = 0; i < triBatch->indexCount; i += 3) {
+                const C3Vector& v0 = triBatch->GetVertex(triBatch->GetVertexIndex(i));
+                const C3Vector& v1 = triBatch->GetVertex(triBatch->GetVertexIndex(i + 1));
+                const C3Vector& v2 = triBatch->GetVertex(triBatch->GetVertexIndex(i + 2));
                 vertex[0].p = v0;
                 vertex[0].c = color;
                 vertex[1].p = v1;
@@ -437,10 +438,10 @@ static void ProjectTexBuildVertexBufferVariant(World::TriData::Batch* triBatch, 
                 vertex += 3;
             }
         } else {
-            for (uint16_t i = 0; i < triBatch->m_indexCount; i += 3) {
-                const C3Vector& v0 = triBatch->m_vertexList[triBatch->m_indices[i]];
-                const C3Vector& v1 = triBatch->m_vertexList[triBatch->m_indices[i + 1]];
-                const C3Vector& v2 = triBatch->m_vertexList[triBatch->m_indices[i + 2]];
+            for (uint16_t i = 0; i < triBatch->indexCount; i += 3) {
+                const C3Vector& v0 = triBatch->GetVertex(triBatch->GetVertexIndex(i));
+                const C3Vector& v1 = triBatch->GetVertex(triBatch->GetVertexIndex(i + 1));
+                const C3Vector& v2 = triBatch->GetVertex(triBatch->GetVertexIndex(i + 2));
 
                 if ((v2.y - v0.y) * (v1.x - v0.x) - (v1.y - v0.y) * (v2.x - v0.x) >= 0.0f) {
                     vertex[0].p = v0;
@@ -463,11 +464,11 @@ static void ProjectTexBuildVertexBufferVariant(World::TriData::Batch* triBatch, 
 
 // VERIFY: 2df38cbe auto
 // OFFSET: 0x007E3580
-static void ProjectTexRenderIndices(World::TriData::Batch* triBatch) {
-    CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, sizeof(uint16_t), triBatch->m_indexCount);
+static void ProjectTexRenderIndices(const World::TriData::Batch* triBatch) {
+    CGxBuf* buf = g_theGxDevicePtr->BufStream(GxPoolTarget_Index, sizeof(uint16_t), triBatch->indexCount);
     uint16_t* indices = reinterpret_cast<uint16_t*>(g_theGxDevicePtr->BufLock(buf));
 
-    for (uint32_t i = 0; i < triBatch->m_indexCount; i++) {
+    for (uint32_t i = 0; i < triBatch->indexCount; i++) {
         indices[i] = static_cast<uint16_t>(i);
     }
 
@@ -479,7 +480,7 @@ static void ProjectTexRenderIndices(World::TriData::Batch* triBatch) {
 // VERIFY: 3c679037 auto
 // OFFSET: 0x007E35F0
 static int32_t ProjectTexRenderGetQuery2d(const CAaBox& box, uint32_t flags, uint32_t triFlags, int32_t* doodads, int32_t* tris) {
-    *doodads = flags & 0x1;
+    *doodads = flags & PROJECT_TEX_DOODADS;
     s_doodadModelCount = 0;
     s_queryTriFlags = 0;
     s_queryDoodads = 0;
@@ -489,16 +490,12 @@ static int32_t ProjectTexRenderGetQuery2d(const CAaBox& box, uint32_t flags, uin
 
     if (*doodads) {
         s_queryDoodads = 1;
-        s_doodadModelCount = World::GetIntersectingDoodadModels(s_doodadModelBuffer, 10, box, 0x2000000);
+        s_doodadModelCount = World::GetIntersectingDoodadModels(s_doodadModelBuffer, 10, box, WORLD_QUERY_PROJ_TEX_DOODADS);
     }
 
     if (*tris) {
         s_queryTriFlags = triFlags;
-        World::TriData::statusFlags = 0;
-        World::TriData::nBatches = 0;
-        World::TriData::faceIndexCursor = 0;
-        World::TriData::indexCursor = 0;
-        World::TriData::matrixPoolCount = 0;
+        World::TriData::ResetPools();
         World::GetTris(box, &s_queryTriData, triFlags);
     }
 
@@ -518,9 +515,9 @@ void ProjectTex2dDrawShaderEffect(const CAaBox& box, const CImVector& color, uin
     CGxAppRenderState* states = g_theGxDevicePtr->m_appRenderStates.m_data;
 
     if (states[GxRs_BlendingMode].m_value.m_data.i[0] == GxBlend_Mod) {
-        g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(s_shadowModTexture, 1, nullptr));
+        g_theGxDevicePtr->RsSet(GxRs_Texture1, ProjectTex2dGetModFadeTex());
     } else if (!states[GxRs_Texture1].m_value.m_data.i[0]) {
-        g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(s_shadowAddTexture, 1, nullptr));
+        g_theGxDevicePtr->RsSet(GxRs_Texture1, ProjectTex2dGetAddFadeTex());
     }
 
     float savedOffset = 0.0f;
@@ -532,14 +529,18 @@ void ProjectTex2dDrawShaderEffect(const CAaBox& box, const CImVector& color, uin
 
     CImVector packed = color;
 
-    if (flags & 0x2) {
+    if (flags & PROJECT_TEX_MATERIAL_COLOR) {
         CShaderEffect::SetDiffuse(C4Vector(color));
     } else {
         GxFormatColor(packed);
     }
 
     C3Vector cameraPos(0.0f, 0.0f, 0.0f);
+#ifdef WOWDECOMP_TOOL_FEATURES
+    World::GetViewCameraPosition(&cameraPos);
+#else
     CGWorldFrame::GetCameraPosition(&cameraPos);
+#endif
     C44Matrix view;
     view.a0 = 1.0f;
     view.a1 = 0.0f;
@@ -561,9 +562,9 @@ void ProjectTex2dDrawShaderEffect(const CAaBox& box, const CImVector& color, uin
 
     if (tris) {
         for (uint32_t i = 0; i < World::TriData::nBatches; i++) {
-            World::TriData::Batch* triBatch = &World::TriData::batches[i];
+            const World::TriData::Batch* triBatch = &World::TriData::GetBatch(i);
 
-            if (3 * triBatch->m_indexCount > 0x10000 || !triBatch->m_matrix || !triBatch->m_vertexList || !triBatch->m_indices) {
+            if (3 * triBatch->indexCount > 0x10000 || !triBatch->m_matrix || !triBatch->vertices || !triBatch->vertexIndices) {
                 continue;
             }
 
@@ -571,11 +572,11 @@ void ProjectTex2dDrawShaderEffect(const CAaBox& box, const CImVector& color, uin
             CGxBatch batch;
             batch.m_primType = GxPrim_Triangles;
             batch.m_start = 0;
-            batch.m_count = triBatch->m_indexCount;
+            batch.m_count = triBatch->indexCount;
             batch.m_minIndex = 0;
-            batch.m_maxIndex = triBatch->m_indexCount - 1;
+            batch.m_maxIndex = triBatch->indexCount - 1;
 
-            if (flags & 0x2) {
+            if (flags & PROJECT_TEX_MATERIAL_COLOR) {
                 ProjectTexBuildVertexBuffer(triBatch, &batch, flags);
             } else {
                 ProjectTexBuildVertexBufferVariant(triBatch, packed, &batch, flags);
@@ -623,11 +624,11 @@ static void ProjectTexRender2d(const CAaBox& box, const CImVector& color, uint32
     CGxAppRenderState* states = g_theGxDevicePtr->m_appRenderStates.m_data;
 
     if (states[GxRs_BlendingMode].m_value.m_data.i[0] == GxBlend_Mod) {
-        g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(s_shadowModTexture, 1, nullptr));
+        g_theGxDevicePtr->RsSet(GxRs_Texture1, ProjectTex2dGetModFadeTex());
         GxRsSet(GxRs_ColorOp1, GxTexOp_Add);
         GxRsSet(GxRs_AlphaOp1, GxTexOp_Add);
     } else if (!states[GxRs_Texture1].m_value.m_data.i[0]) {
-        g_theGxDevicePtr->RsSet(GxRs_Texture1, TextureGetGxTex(s_shadowAddTexture, 1, nullptr));
+        g_theGxDevicePtr->RsSet(GxRs_Texture1, ProjectTex2dGetAddFadeTex());
         GxRsSet(GxRs_ColorOp1, GxTexOp_Mod);
         GxRsSet(GxRs_AlphaOp1, GxTexOp_Mod);
     }
@@ -636,21 +637,25 @@ static void ProjectTexRender2d(const CAaBox& box, const CImVector& color, uint32
         GxRsSet(GxRs_PolygonOffset, (polygonOffset + polygonOffset) * 3.0518044e-05f);
     }
 
-    GxRsSet(GxRs_TexGen0, 2);
-    GxRsSet(GxRs_TexGen1, 2);
+    GxRsSet(GxRs_TexGen0, GxTexGen_World);
+    GxRsSet(GxRs_TexGen1, GxTexGen_World);
     GxRsSet(GxRs_TextureShader0, 1);
     GxRsSet(GxRs_TextureShader1, 1);
 
     CImVector packed = color;
 
-    if (flags & 0x2) {
+    if (flags & PROJECT_TEX_MATERIAL_COLOR) {
         GxRsSet(GxRs_MatDiffuse, *reinterpret_cast<const int32_t*>(&color));
     } else {
         GxFormatColor(packed);
     }
 
     C3Vector cameraPos(0.0f, 0.0f, 0.0f);
+#ifdef WOWDECOMP_TOOL_FEATURES
+    World::GetViewCameraPosition(&cameraPos);
+#else
     CGWorldFrame::GetCameraPosition(&cameraPos);
+#endif
     C44Matrix view;
     view.a0 = 1.0f;
     view.a1 = 0.0f;
@@ -672,9 +677,9 @@ static void ProjectTexRender2d(const CAaBox& box, const CImVector& color, uint32
 
     if (tris) {
         for (uint32_t i = 0; i < World::TriData::nBatches; i++) {
-            World::TriData::Batch* triBatch = &World::TriData::batches[i];
+            const World::TriData::Batch* triBatch = &World::TriData::GetBatch(i);
 
-            if (3 * triBatch->m_indexCount > 0x10000 || !triBatch->m_matrix || !triBatch->m_vertexList || !triBatch->m_indices) {
+            if (3 * triBatch->indexCount > 0x10000 || !triBatch->m_matrix || !triBatch->vertices || !triBatch->vertexIndices) {
                 continue;
             }
 
@@ -682,11 +687,11 @@ static void ProjectTexRender2d(const CAaBox& box, const CImVector& color, uint32
             CGxBatch batch;
             batch.m_primType = GxPrim_Triangles;
             batch.m_start = 0;
-            batch.m_count = triBatch->m_indexCount;
+            batch.m_count = triBatch->indexCount;
             batch.m_minIndex = 0;
-            batch.m_maxIndex = triBatch->m_indexCount - 1;
+            batch.m_maxIndex = triBatch->indexCount - 1;
 
-            if (flags & 0x2) {
+            if (flags & PROJECT_TEX_MATERIAL_COLOR) {
                 ProjectTexBuildVertexBuffer(triBatch, &batch, flags);
             } else {
                 ProjectTexBuildVertexBufferVariant(triBatch, packed, &batch, flags);
@@ -716,13 +721,13 @@ static void ProjectTexRender2d(const CAaBox& box, const CImVector& color, uint32
 
 // VERIFY: 5f932eb3 manual
 // OFFSET: 0x007E4370
-void ProjectTex::Render2d(const CAaBox& box, const CImVector& color, const C44Matrix* matrix, float fade, uint32_t a5, uint32_t a6, float polygonOffset) {
+void ProjectTex::Render2d(const CAaBox& box, const CImVector& color, const C44Matrix* matrix, float fade, uint32_t queryFlags, uint32_t renderFlags, float polygonOffset) {
     C44Matrix texMatrix;
     C44Matrix fadeMatrix;
     ProjectTex2dMakeMatrices(texMatrix, fadeMatrix, box, matrix, fade, 0);
     g_theGxDevicePtr->XformPushAndSet(GxXform_Tex0, texMatrix);
     g_theGxDevicePtr->XformPushAndSet(GxXform_Tex1, fadeMatrix);
-    ProjectTexRender2d(box, color, a5, a6, polygonOffset);
+    ProjectTexRender2d(box, color, queryFlags, renderFlags, polygonOffset);
     GxXformPop(GxXform_Tex0);
     GxXformPop(GxXform_Tex1);
 }

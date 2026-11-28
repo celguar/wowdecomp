@@ -31,7 +31,7 @@ int32_t CGGuildInfo::m_numEventLogEntries;
 // STATIC: 0x00C22AB8
 uint32_t CGGuildInfo::m_numRanks;
 // STATIC: 0x00C21E60
-GuildRankInfo CGGuildInfo::m_rankInfo[10];
+GuildRankInfo CGGuildInfo::m_rankInfo[MAX_GUILD_RANKS];
 
 // STATIC: 0x00C22090
 char CGGuildInfo::m_infoText[2004];
@@ -40,7 +40,7 @@ char CGGuildInfo::m_infoText[2004];
 char CGGuildInfo::m_motd[516];
 
 // STATIC: 0x00C22A70
-GuildRosterSortCriteria CGGuildInfo::m_sortCriteria[8];
+GuildRosterSortCriteria CGGuildInfo::m_sortCriteria[NUM_GUILD_ROSTER_SORT_COLUMNS];
 
 // STATIC: 0x00C22AB0
 uint32_t CGGuildInfo::m_numMembers;
@@ -105,7 +105,7 @@ void CGGuildInfo::InitializeGame() {
     CGGuildInfo::m_infoText[0] = '\0';
     CGGuildInfo::m_motd[0] = '\0';
 
-    for (int32_t i = 0; i < 8; i++) {
+    for (int32_t i = 0; i < NUM_GUILD_ROSTER_SORT_COLUMNS; i++) {
         CGGuildInfo::m_sortCriteria[i].m_column = i;
         CGGuildInfo::m_sortCriteria[i].m_descending = 0;
     }
@@ -152,7 +152,7 @@ int32_t Packet_MSG_GUILD_EVENT_LOG_QUERY(void* param, NETMESSAGE msgId, uint32_t
             CGGuildInfo::m_pendingEventLogNames++;
         }
 
-        if (entry.m_type == 2 || entry.m_type == 6) {
+        if (entry.m_type == GuildEventLogEntry::EVENT_JOIN || entry.m_type == GuildEventLogEntry::EVENT_QUIT) {
             entry.m_player2 = WOWGUID();
         } else {
             msg->Get(entry.m_player2.m_guid);
@@ -166,7 +166,7 @@ int32_t Packet_MSG_GUILD_EVENT_LOG_QUERY(void* param, NETMESSAGE msgId, uint32_t
             }
         }
 
-        if (entry.m_type == 3 || entry.m_type == 4) {
+        if (entry.m_type == GuildEventLogEntry::EVENT_PROMOTE || entry.m_type == GuildEventLogEntry::EVENT_DEMOTE) {
             uint8_t rank;
             msg->Get(rank);
             entry.m_rank = rank;
@@ -188,7 +188,7 @@ int32_t Packet_MSG_GUILD_EVENT_LOG_QUERY(void* param, NETMESSAGE msgId, uint32_t
 
 // VERIFY: 6089fd22 auto
 // OFFSET: 0x005CA870
-void CGGuildInfo::SetShowOffline(int32_t show) {
+void CGGuildInfo::SetShowOffline(BOOL show) {
     if (show == CGGuildInfo::m_showOffline) {
         return;
     }
@@ -216,7 +216,7 @@ void CGGuildInfo::EnterWorld() {
         ClientServices::Send2(&msg);
     }
 
-    for (int32_t i = 0; i < 6; i++) {
+    for (int32_t i = 0; i < MAX_GUILDBANK_TABS; i++) {
         CGGuildInfo::m_rankInfo[0].m_bankTabRights[i] = -1;
         CGGuildInfo::m_rankInfo[0].m_bankTabStacksPerDay[i] = -1;
     }
@@ -254,7 +254,7 @@ int32_t Packet_MSG_GUILD_PERMISSIONS(void* param, NETMESSAGE msgId, uint32_t tim
     msg->Get(numTabs);
     CGGuildBankInfo::m_numTabs = numTabs;
 
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < MAX_GUILDBANK_TABS; i++) {
         msg->Get(CGGuildInfo::m_rankInfo[rank].m_bankTabRights[i]);
         msg->Get(reinterpret_cast<uint32_t&>(CGGuildInfo::m_rankInfo[rank].m_bankTabStacksPerDay[i]));
     }
@@ -282,10 +282,10 @@ int32_t Packet_SMSG_GUILD_ROSTER(void* param, NETMESSAGE msgId, uint32_t time, C
 
     char motd[516];
     msg->GetString(motd, sizeof(motd));
-    ScrubString(motd, CGGuildInfo::m_motd, 129, sizeof(CGGuildInfo::m_motd), 1);
+    ScrubString(motd, CGGuildInfo::m_motd, 129, sizeof(CGGuildInfo::m_motd), SCRUB_FLAG_TRUNCATE_NEWLINES);
     char infoText[2004];
     msg->GetString(infoText, sizeof(infoText));
-    ScrubString(infoText, CGGuildInfo::m_infoText, 501, sizeof(CGGuildInfo::m_infoText), 0);
+    ScrubString(infoText, CGGuildInfo::m_infoText, 501, sizeof(CGGuildInfo::m_infoText), SCRUB_FLAG_NONE);
     msg->Get(CGGuildInfo::m_numRanks);
     uint32_t rank = 0;
 
@@ -294,13 +294,13 @@ int32_t Packet_SMSG_GUILD_ROSTER(void* param, NETMESSAGE msgId, uint32_t time, C
         msg->Get(info.m_rights);
         msg->Get(reinterpret_cast<uint32_t&>(info.m_bankMoneyPerDay));
 
-        for (uint32_t i = 0; i < 6; i++) {
+        for (uint32_t i = 0; i < MAX_GUILDBANK_TABS; i++) {
             msg->Get(info.m_bankTabRights[i]);
             msg->Get(reinterpret_cast<uint32_t&>(info.m_bankTabStacksPerDay[i]));
         }
     }
 
-    for (; rank < 10; rank++) {
+    for (; rank < MAX_GUILD_RANKS; rank++) {
         memset(&CGGuildInfo::m_rankInfo[rank], 0, sizeof(GuildRankInfo));
     }
 
@@ -327,18 +327,18 @@ int32_t Packet_SMSG_GUILD_ROSTER(void* param, NETMESSAGE msgId, uint32_t time, C
 
         if (member->m_online) {
             member->m_lastOnline = 0.0f;
-            CGAutoCompleteName::AddFlags(CGGuildInfo::m_roster.m_data[i]->m_guid, 34, 0, CGGuildInfo::m_roster.m_data[i]->m_name);
+            CGAutoCompleteName::AddFlags(CGGuildInfo::m_roster.m_data[i]->m_guid, AUTOCOMPLETE_FLAG_IN_GUILD | AUTOCOMPLETE_FLAG_ONLINE, 0, CGGuildInfo::m_roster.m_data[i]->m_name);
         } else {
             msg->Get(member->m_lastOnline);
-            CGAutoCompleteName::AddFlags(CGGuildInfo::m_roster.m_data[i]->m_guid, 2, 0, CGGuildInfo::m_roster.m_data[i]->m_name);
-            CGAutoCompleteName::RemoveFlags(CGGuildInfo::m_roster.m_data[i]->m_guid, 32);
+            CGAutoCompleteName::AddFlags(CGGuildInfo::m_roster.m_data[i]->m_guid, AUTOCOMPLETE_FLAG_IN_GUILD, 0, CGGuildInfo::m_roster.m_data[i]->m_name);
+            CGAutoCompleteName::RemoveFlags(CGGuildInfo::m_roster.m_data[i]->m_guid, AUTOCOMPLETE_FLAG_ONLINE);
         }
 
         char note[128];
         msg->GetString(note, sizeof(note));
-        ScrubString(note, CGGuildInfo::m_roster.m_data[i]->m_note, 32, sizeof(member->m_note), 1);
+        ScrubString(note, CGGuildInfo::m_roster.m_data[i]->m_note, 32, sizeof(member->m_note), SCRUB_FLAG_TRUNCATE_NEWLINES);
         msg->GetString(note, sizeof(note));
-        ScrubString(note, CGGuildInfo::m_roster.m_data[i]->m_officerNote, 32, sizeof(member->m_officerNote), 1);
+        ScrubString(note, CGGuildInfo::m_roster.m_data[i]->m_officerNote, 32, sizeof(member->m_officerNote), SCRUB_FLAG_TRUNCATE_NEWLINES);
 
         if (CGGuildInfo::m_roster.m_data[i]->m_online) {
             CGGuildInfo::m_numOnlineMembers++;
@@ -358,7 +358,7 @@ int32_t Packet_SMSG_GUILD_ROSTER(void* param, NETMESSAGE msgId, uint32_t time, C
 // VERIFY: a337f7c7 auto
 // OFFSET: 0x005A41C0
 uint32_t CGGuildInfo::GetGuildBankTabPermissionsByRankID(uint8_t tab, uint32_t rank) {
-    if (tab >= 6) {
+    if (tab >= MAX_GUILDBANK_TABS) {
         return 0;
     }
 
@@ -368,7 +368,7 @@ uint32_t CGGuildInfo::GetGuildBankTabPermissionsByRankID(uint8_t tab, uint32_t r
 // VERIFY: 1ea3ac33 auto
 // OFFSET: 0x005A41F0
 int32_t CGGuildInfo::GetNumGuildBankTabItemWithdrawalsByRankID(uint8_t tab, uint32_t rank) {
-    if (tab >= 6) {
+    if (tab >= MAX_GUILDBANK_TABS) {
         return 0;
     }
 
@@ -378,13 +378,13 @@ int32_t CGGuildInfo::GetNumGuildBankTabItemWithdrawalsByRankID(uint8_t tab, uint
 // VERIFY: e01e8061 auto
 // OFFSET: 0x005CA060
 void CGGuildInfo::SetMOTD(const char* motd) {
-    ScrubString(motd, CGGuildInfo::m_motd, 129, sizeof(CGGuildInfo::m_motd), 1);
+    ScrubString(motd, CGGuildInfo::m_motd, 129, sizeof(CGGuildInfo::m_motd), SCRUB_FLAG_TRUNCATE_NEWLINES);
 }
 
 // VERIFY: 8962a32a auto
 // OFFSET: 0x005CA0F0
-void UpdateGuildRoster(int32_t a1) {
-    if (a1) {
+void UpdateGuildRoster(BOOL canRequestUpdate) {
+    if (canRequestUpdate) {
         CGGuildInfo::m_nextAllowedQuery = 0;
         FrameScript_SignalEvent(SCRIPT_EVENT_GUILD_ROSTER_UPDATE, "%d", 1);
     } else {
@@ -403,15 +403,15 @@ int32_t QSortRoster(const void* a, const void* b) {
     GuildMemberInfo* right = *static_cast<GuildMemberInfo* const*>(b);
 
     if (!CGGuildInfo::m_showOffline && (!left->m_online || !right->m_online) && left->m_online != right->m_online) {
-        return 2 * (left->m_online == 0) - 1;
+        return left->m_online ? -1 : 1;
     }
 
-    for (uint32_t i = 0; i < 8; i++) {
+    for (uint32_t i = 0; i < NUM_GUILD_ROSTER_SORT_COLUMNS; i++) {
         GuildRosterSortCriteria* criteria = &CGGuildInfo::m_sortCriteria[i];
         int32_t result;
 
         switch (criteria->m_column) {
-            case 0: {
+            case GUILD_ROSTER_SORT_RANK: {
                 if (right->m_rank == left->m_rank) {
                     continue;
                 }
@@ -420,21 +420,21 @@ int32_t QSortRoster(const void* a, const void* b) {
                 break;
             }
 
-            case 1: {
+            case GUILD_ROSTER_SORT_LEVEL: {
                 if (left->m_level == right->m_level) {
                     continue;
                 }
 
-                result = 2 * (left->m_level >= right->m_level) - 1;
+                result = left->m_level >= right->m_level ? 1 : -1;
                 break;
             }
 
-            case 2: {
+            case GUILD_ROSTER_SORT_NAME: {
                 result = SStrCmpUTF8I(left->m_name, right->m_name, STORM_MAX_STR);
                 break;
             }
 
-            case 3: {
+            case GUILD_ROSTER_SORT_ZONE: {
                 AreaTableRec* leftArea = g_areaTableDB.GetRecord(left->m_zoneID);
                 AreaTableRec* rightArea = g_areaTableDB.GetRecord(right->m_zoneID);
 
@@ -446,7 +446,7 @@ int32_t QSortRoster(const void* a, const void* b) {
                 break;
             }
 
-            case 4: {
+            case GUILD_ROSTER_SORT_CLASS: {
                 ChrClassesRec* leftClass = g_chrClassesDB.GetRecord(left->m_class);
                 ChrClassesRec* rightClass = g_chrClassesDB.GetRecord(right->m_class);
 
@@ -458,13 +458,13 @@ int32_t QSortRoster(const void* a, const void* b) {
                 break;
             }
 
-            case 6: {
+            case GUILD_ROSTER_SORT_ONLINE: {
                 if (left->m_online && right->m_online) {
                     continue;
                 }
 
                 if (left->m_online != right->m_online) {
-                    result = 2 * (left->m_online == 0) - 1;
+                    result = left->m_online ? -1 : 1;
                     break;
                 }
 
@@ -472,7 +472,7 @@ int32_t QSortRoster(const void* a, const void* b) {
                 return criteria->m_descending ? -result : result;
             }
 
-            case 7: {
+            case GUILD_ROSTER_SORT_NOTE: {
                 if (right->unk_0051) {
                     right->unk_0051 = 0;
                 }
@@ -519,13 +519,13 @@ void CGGuildInfo::QueryRosterAndRanks() {
 void CGGuildInfo::SortRoster(int32_t column) {
     uint32_t index;
 
-    for (index = 0; index < 8; index++) {
+    for (index = 0; index < NUM_GUILD_ROSTER_SORT_COLUMNS; index++) {
         if (CGGuildInfo::m_sortCriteria[index].m_column == column) {
             break;
         }
     }
 
-    if (index < 8) {
+    if (index < NUM_GUILD_ROSTER_SORT_COLUMNS) {
         int32_t descending = CGGuildInfo::m_sortCriteria[index].m_descending;
 
         if (!index) {
@@ -615,7 +615,7 @@ bool CGGuildInfo::CanEditGuildEvent() {
         return false;
     }
 
-    return (CGGuildInfo::m_rankInfo[player->m_player->m_playerGuildrank].m_rights >> 20) & 1;
+    return (CGGuildInfo::m_rankInfo[player->m_player->m_playerGuildrank].m_rights & GUILD_RIGHT_EDIT_GUILD_EVENT) != 0;
 }
 
 // VERIFY: 24e11556 manual

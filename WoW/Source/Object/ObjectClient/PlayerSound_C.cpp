@@ -13,7 +13,7 @@ uint32_t CGPlayer_C::GetImpactType() const {
     CGItem_C* item = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(guid, TYPE_ITEM, __FILE__, __LINE__));
     const CGUnitVirtualItem* chest = item ? &item->m_virtualItem : nullptr;
 
-    if (!chest || chest->m_classID != 4) {
+    if (!chest || chest->m_classID != ITEM_CLASS::ITEM_CLASS_ARMOR) {
         return 0;
     }
 
@@ -23,9 +23,9 @@ uint32_t CGPlayer_C::GetImpactType() const {
         return 0;
     }
 
-    if (rec->m_flags & 0x2) {
+    if (rec->m_flags & MATERIAL_FLAG_PLATE) {
         return 2;
     }
 
-    return (static_cast<int8_t>(rec->m_flags) & 0x4) >> 2;
+    return (rec->m_flags & MATERIAL_FLAG_CHAIN) ? 1 : 0;
 }

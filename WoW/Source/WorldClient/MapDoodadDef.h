@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Storm/H/stpl.h"
@@ -17,7 +18,7 @@ class CMapObjDef;
 class CMapDoodadDef : public CMapStaticEntity, public TSHashObject<CMapDoodadDef, HASHKEY_DWORD> {
     public:
     ~CMapDoodadDef() override;
-    static void CreateModel(const char* fileName, CMapDoodadDef* doodadDef, int32_t waitForLoad, int32_t a4);
+    static void CreateModel(const char* fileName, CMapDoodadDef* doodadDef, BOOL waitForLoad, BOOL initializeOnDemand);
     static void ExtendBounds(CMapDoodadDef* doodadDef, CMapBaseObj* parent);
     static void Purge(CMapDoodadDef* doodadDef);
 
@@ -25,11 +26,11 @@ class CMapDoodadDef : public CMapStaticEntity, public TSHashObject<CMapDoodadDef
     /* 00B0 */ int32_t m_cullPassStamp;
     /* 00B4 */ int32_t unused_00B4;
     /* 00B8 */ WOWGUID m_collisionGuid;
-    /* 00C0 */ CAaBox m_bboxDoodadDef;
+    /* 00C0 */ CAaBox m_collideExt;
     /* 00D8 */ C44Matrix m_mat;
-    /* 0118 */ C44Matrix m_identity;
+    /* 0118 */ C44Matrix m_lMat; // Local-to-WMO transform, composed with the parent into m_mat.
     /* 0158 */ SE2SoundKitObject m_soundKitObject;
-    /* 016C */ uint16_t m_doodadSet;
+    /* 016C */ uint16_t wmoSpecialDoodadSet;
     /* 016E */ uint8_t unused_016E[2];
 
     virtual void SelectLights(CM2Lighting* lighting);
@@ -39,7 +40,7 @@ class CMapDoodadDef : public CMapStaticEntity, public TSHashObject<CMapDoodadDef
     CMapDoodadDef();
     void UpdateBounds();
     void ExtendChunkBounds();
-    void UpdateMatrixOnly(const C44Matrix& matrix);
+    void Update(const C44Matrix& matrix);
 };
 
 #endif

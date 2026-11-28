@@ -7,8 +7,24 @@
 
 class EffectGlow : public FFX::Effect {
     public:
+    enum {
+        NUM_PARAMS = 3,
+    };
+
+    enum PASS_STAGE : uint32_t {
+        DOWNSAMPLE_PASS = 0,
+        BLUR_PASS = 1,
+        COMBINE_PASS = 2,
+        PASS_COUNT = 3,
+    };
+
+    enum PASS_SEQUENCE : int32_t {
+        STANDARD_PASSES = 0,
+        ALTERNATE_PASSES = 1,
+    };
+
     /* 001C */ TSGrowableArray<FFX::Pass*> m_altPasses;
-    /* 002C */ int32_t m_mode;
+    /* 002C */ PASS_SEQUENCE m_mode;
 
     virtual ~EffectGlow();
     virtual bool Valid();

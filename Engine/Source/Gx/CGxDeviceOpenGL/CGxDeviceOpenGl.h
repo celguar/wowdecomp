@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Gx/CGxDeviceOpenGL/GlExt.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Storm/H/stpl.h"
@@ -12,6 +13,14 @@
 
 class CGxDeviceOpenGl : public CGxDevice {
     public:
+    enum MATERIAL_DIRTY_FLAGS : int32_t {
+        MATERIAL_DIRTY_NONE = 0,
+        MATERIAL_DIRTY_DIFFUSE = 0x1,
+        MATERIAL_DIRTY_SPECULAR = 0x2,
+        MATERIAL_DIRTY_EMISSIVE = 0x4,
+        MATERIAL_DIRTY_ALL = 7,
+    };
+
     enum EDeviceState {
         Ds_DepthMask = 0,
         Ds_ColorMask = 1,
@@ -45,11 +54,18 @@ class CGxDeviceOpenGl : public CGxDevice {
         DeviceStates_Last = 90,
     };
 
+    // m_renderTargetMode; named after the IDeviceSetRenderTarget* path
+    // DeviceSetRenderTarget picks for each value.
+    enum RENDER_TARGET_MODE : int32_t {
+        RENDER_TARGET_MODE_COPY = 0,
+        RENDER_TARGET_MODE_FBO = 1,
+    };
+
     /* 3968 */ uint32_t m_deviceStates [DeviceStates_Last];
     /* 3AD0 */ uint32_t unused_3AD0;
     /* 3AD4 */ uint32_t m_materialDirty;
     /* 3AD8 */ GLenum m_sphereMapMode;
-    /* 3ADC */ int32_t m_renderTargetMode;
+    /* 3ADC */ int32_t m_renderTargetMode; // RENDER_TARGET_MODE
     /* 3AE0 */ const GLubyte* m_glVendor;
     /* 3AE4 */ const GLubyte* m_glRenderer;
     /* 3AE8 */ const GLubyte* m_glVersion;
@@ -73,8 +89,8 @@ class CGxDeviceOpenGl : public CGxDevice {
     /* 3B54 */ uintptr_t m_indexPtr;
     /* 3B58 */ int32_t m_viewDirty;
     /* 3B5C */ uint32_t unused_3B5C;
-    /* 3B60 */ int32_t m_useVboBroker [2][3];
-    /* 3B78 */ int32_t m_useVbo [2][3];
+    /* 3B60 */ int32_t m_useVboBroker [2][GxPoolUsages_Last];
+    /* 3B78 */ int32_t m_useVbo [2][GxPoolUsages_Last];
     /* 3B90 */ GLuint m_boundTexture;
     /* 3B94 */ GLuint m_fbo;
     /* 3B98 */ GLuint m_boundFbo;
@@ -146,7 +162,7 @@ class CGxDeviceOpenGl : public CGxDevice {
     void DeviceDestroyPoolAPI();
     void DeviceQueryPbuffer();
     void DsInit();
-    void DsSet(EDeviceState state, uint32_t value, int32_t force);
+    void DsSet(EDeviceState state, uint32_t value, BOOL force);
     int32_t IDevAttachGlContext(const CGxFormat& format);
     void IDevRemoveGlContext();
     void IDevSetFocus(int32_t focus, const CGxFormat& format);

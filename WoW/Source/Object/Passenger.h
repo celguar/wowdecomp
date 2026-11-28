@@ -13,10 +13,26 @@ class C44Matrix;
 #pragma pack(push, 4)
 class CPassenger {
     public:
+    // Runtime passenger kind and facing representation; raw storage remains a byte.
+    enum : uint8_t {
+        PASSENGER_NONE = 0,
+        PASSENGER_MOVEMENT = 0x1,
+        PASSENGER_QUATERNION_FACING = 0x2,
+    };
+
+    // INLINED
+    int32_t UsesQuat() const {
+        return this->m_passengerFlags & PASSENGER_QUATERNION_FACING;
+    }
+
     /* 0000 */ TSLink<void> m_link;
-    /* 0008 */ WOWGUID m_transportGuid;
+    protected:
+    /* 0008 */ WOWGUID m_transportGUID;
+
+    public:
+    const WOWGUID& GetTransportGUID() const { return this->m_transportGUID; } // (inferred)
     /* 0010 */ C3Vector m_position;
-    /* 001C */ uint32_t unused_001C;
+    /* 001C */ uint32_t unknown_001C;
     /* 0020 */ float m_facing;
     /* 0024 */ float m_pitch;
     /* 0028 */ const WOWGUID* m_ownerGuid;
@@ -25,6 +41,26 @@ class CPassenger {
     CPassenger(const WOWGUID& transportGuid, const C3Vector& position, const WOWGUID& ownerGuid);
     void PostInit(const C3Vector& position);
     void Reenable();
+    void SetRawFacing(float facing) { // (inferred)
+        STORM_ASSERT(!UsesQuat());
+        this->m_facing = facing;
+    }
+
+    float GetFacing() const { // (inferred)
+        STORM_ASSERT(!UsesQuat());
+        return this->GetFacing(this->m_facing);
+    }
+
+    float GetRawFacing() const { // (inferred)
+        STORM_ASSERT(!UsesQuat());
+        return this->m_facing;
+    }
+
+    float GetPitch() const { // (inferred)
+        STORM_ASSERT(!UsesQuat());
+        return this->m_pitch;
+    }
+
     float GetFacing(float facing) const;
     float GetRawFacing(float facing) const;
     C3Vector GetPosition(const C3Vector& position) const;

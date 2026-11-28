@@ -44,13 +44,13 @@ static HSLOG s_log;
 static uint32_t s_logFlags;
 
 // STATIC: 0x00D437D8
-static int32_t s_cacheBytes;
+static int32_t s_nSoundCacheSizeInBytes;
 
 // STATIC: 0x00D437DC
 static int32_t s_cacheBytesPeak;
 
 // STATIC: 0x00D437E0
-static int32_t s_cacheCount;
+static int32_t s_nNumCachedSounds;
 
 // STATIC: 0x00D437E4
 static int32_t s_cacheCountPeak;
@@ -71,13 +71,13 @@ static uint32_t s_soundsCreated;
 static uint32_t s_streamsCreated;
 
 // STATIC: 0x00D43800
-static FMOD::System* s_system;
+static FMOD::System* s_pGameSystem;
 
 // STATIC: 0x00D43804
 static FMOD::System* s_enumSystem;
 
 // STATIC: 0x00D43808
-static FMOD::System* s_chatSystem;
+static FMOD::System* s_pChatSystem;
 
 // STATIC: 0x00D4380C
 static bool (*s_positionCallback)(uint64_t, C3Vector*);
@@ -98,13 +98,13 @@ static uint32_t s_captureChannels;
 static uint32_t s_captureLastPosition;
 
 // STATIC: 0x00D43824
-static int32_t s_capturing;
+static int32_t s_bCaptureWorkEnabled;
 
 // STATIC: 0x00D43828
 static int32_t s_reverbEnabled;
 
 // STATIC: 0x00D4382C
-static FMOD::Sound* s_captureSound;
+static FMOD::Sound* s_pCaptureSound;
 
 // STATIC: 0x00D43830
 static SECaptureCallbacks* s_primaryCaptureCallbacks;
@@ -143,7 +143,7 @@ static SCritSect s_createCritSect;
 static TSHashTable<SOUND_INTERNAL_LOOKUP, HASHKEY_NONE> s_soundLookup;
 
 // STATIC: 0x00D438F4
-static TSGrowableArray<SEChannelGroup> s_channelGroups;
+static TSGrowableArray<SEChannelGroup> s_aChannelGroups;
 
 // STATIC: 0x00D43904
 static SCritSect s_heartBeatCritSect;
@@ -329,11 +329,12 @@ static FMOD_RESULT F_CALLBACK SEOpenCallback(const char* name, int unicode, unsi
         return FMOD_ERR_FILE_NOTFOUND;
     }
 
-    SEFileSound* sound = static_cast<SEFileSound*>(lookup->m_sound);
-    *filesize = SFileGetFileSize(sound->m_file, nullptr);
-    *handle = sound->m_file;
+    SEFileSound* pSEDiskSound = static_cast<SEFileSound*>(lookup->m_sound);
+    STORM_ASSERT(pSEDiskSound->m_file != NULL);
+    *filesize = SFileGetFileSize(pSEDiskSound->m_file, nullptr);
+    *handle = pSEDiskSound->m_file;
     *userdata = nullptr;
-    sound->m_file = nullptr;
+    pSEDiskSound->m_file = nullptr;
 
     s_soundListCritSect.Leave();
 
@@ -374,31 +375,35 @@ static FMOD_RESULT F_CALLBACK SESeekCallback(void* handle, unsigned int pos, voi
 // VERIFY: ee2176eb manual
 // OFFSET: 0x0087B180
 static FMOD_RESULT F_CALLBACK SENonBlockCallback(FMOD_SOUND* fmodSound, FMOD_RESULT result) {
-    void* userdata = nullptr;
-    FMOD_RESULT r = reinterpret_cast<FMOD::Sound*>(fmodSound)->getUserData(&userdata);
+    void* uHashKey = nullptr;
+    FMOD_RESULT r = reinterpret_cast<FMOD::Sound*>(fmodSound)->getUserData(&uHashKey);
+
+    SE_ERRCHECK(r);
+    STORM_ASSERT(uHashKey);
 
     if (r != FMOD_OK) {
-        SE_ERRCHECK(r);
+        STORM_ASSERT(0);
         return r;
     }
 
     s_soundListCritSect.Enter();
 
-    SOUND_INTERNAL_LOOKUP* lookup = s_soundLookup.Ptr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(userdata)), s_lookupKey);
+    SOUND_INTERNAL_LOOKUP* lookup = s_soundLookup.Ptr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(uHashKey)), s_lookupKey);
 
     if (!lookup) {
         s_soundListCritSect.Leave();
         return FMOD_OK;
     }
 
-    SEFileSound* sound = static_cast<SEFileSound*>(lookup->m_sound);
+    SEFileSound* self = static_cast<SEFileSound*>(lookup->m_sound);
 
     if (result != FMOD_OK) {
-        sound->m_deleteDelay = 0;
-        s_deleteList.LinkToTail(sound);
+        self->m_deleteDelay = 0;
+        STORM_ASSERT(self->m_pFMODChannel == NULL);
+        s_deleteList.LinkToTail(self);
 
         for (SESoundInternal* other = s_soundList.Head(); other; other = s_soundList.Next(other)) {
-            if (other->m_type == SESOUNDTYPE_FILE && static_cast<SEFileSound*>(other)->m_sound == reinterpret_cast<FMOD::Sound*>(fmodSound) && !other->m_channel) {
+            if (other->m_type == SESOUNDTYPE_FILE && static_cast<SEFileSound*>(other)->m_pFMODSound == reinterpret_cast<FMOD::Sound*>(fmodSound) && !other->m_pFMODChannel) {
                 s_deleteList.LinkToTail(other);
             }
         }
@@ -408,7 +413,7 @@ static FMOD_RESULT F_CALLBACK SENonBlockCallback(FMOD_SOUND* fmodSound, FMOD_RES
     }
 
     for (SESoundInternal* other = s_soundList.Head(); other; other = s_soundList.Next(other)) {
-        if (other->m_type == SESOUNDTYPE_FILE && static_cast<SEFileSound*>(other)->m_sound == reinterpret_cast<FMOD::Sound*>(fmodSound) && !other->m_channel) {
+        if (other->m_type == SESOUNDTYPE_FILE && static_cast<SEFileSound*>(other)->m_pFMODSound == reinterpret_cast<FMOD::Sound*>(fmodSound) && !other->m_pFMODChannel) {
             s_goList.LinkToTail(other);
         }
     }
@@ -417,8 +422,9 @@ static FMOD_RESULT F_CALLBACK SENonBlockCallback(FMOD_SOUND* fmodSound, FMOD_RES
 
     s_createCritSect.Enter();
 
-    if (sound->m_cached) {
-        sound->m_waveData->m_loaded = 1;
+    if (self->m_cached) {
+        STORM_ASSERT(self->m_pSoundCacheNode);
+        self->m_pSoundCacheNode->m_loaded = 1;
     }
 
     s_createCritSect.Leave();
@@ -433,13 +439,14 @@ static FMOD_RESULT F_CALLBACK SoundEndedCallback(FMOD_CHANNEL* channel, FMOD_CHA
         return FMOD_OK;
     }
 
-    void* userdata = nullptr;
-    FMOD_RESULT r = reinterpret_cast<FMOD::Channel*>(channel)->getUserData(&userdata);
+    void* uHashKey = nullptr;
+    FMOD_RESULT r = reinterpret_cast<FMOD::Channel*>(channel)->getUserData(&uHashKey);
     SE_ERRCHECK(r);
+    STORM_ASSERT(uHashKey);
 
     s_soundListCritSect.Enter();
 
-    SOUND_INTERNAL_LOOKUP* lookup = s_soundLookup.Ptr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(userdata)), s_lookupKey);
+    SOUND_INTERNAL_LOOKUP* lookup = s_soundLookup.Ptr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(uHashKey)), s_lookupKey);
 
     if (!lookup) {
         s_soundListCritSect.Leave();
@@ -452,8 +459,7 @@ static FMOD_RESULT F_CALLBACK SoundEndedCallback(FMOD_CHANNEL* channel, FMOD_CHA
         SESound handle;
 
         if (!sound->m_handle) {
-            sound->m_handle = &handle;
-            handle.m_internal = sound;
+            sound->AttachHandle(handle);
         }
 
         if (sound->m_finishedCallback) {
@@ -464,7 +470,7 @@ static FMOD_RESULT F_CALLBACK SoundEndedCallback(FMOD_CHANNEL* channel, FMOD_CHA
             sound->m_finishedCallback2(sound->m_handle, sound->m_finishedParam2);
         }
 
-        sound->m_channel = nullptr;
+        sound->m_pFMODChannel = nullptr;
         s_deleteList.LinkToTail(sound);
     }
 
@@ -507,6 +513,7 @@ FMOD_RESULT F_CALLBACK SEChatSound::DSPReadCallback(FMOD_DSP_STATE* dspState, fl
     SEChatSound* sound = static_cast<SEChatSound*>(userdata);
 
     if (!sound || !sound->m_callbacks) {
+        STORM_ASSERT(!"sound has been nuked already");
         return FMOD_OK;
     }
 
@@ -560,13 +567,13 @@ int32_t SE2::GetNumInputDrivers(int32_t chatSystem) {
     FMOD::System* system;
 
     if (chatSystem) {
-        system = s_chatSystem;
+        system = s_pChatSystem;
 
         if (!system) {
             system = s_enumSystem;
         }
     } else {
-        system = s_system;
+        system = s_pGameSystem;
     }
 
     int32_t numDrivers = 0;
@@ -588,13 +595,13 @@ bool SE2::GetInputDriverName(int32_t index, char* name, int32_t nameLength, int3
     FMOD::System* system;
 
     if (chatSystem) {
-        system = s_chatSystem;
+        system = s_pChatSystem;
 
         if (!system) {
             system = s_enumSystem;
         }
     } else {
-        system = s_system;
+        system = s_pGameSystem;
     }
 
     if (!system) {
@@ -624,13 +631,13 @@ int32_t SE2::GetNumOutputDrivers(int32_t chatSystem) {
     FMOD::System* system;
 
     if (chatSystem) {
-        system = s_chatSystem;
+        system = s_pChatSystem;
 
         if (!system) {
             system = s_enumSystem;
         }
     } else {
-        system = s_system;
+        system = s_pGameSystem;
     }
 
     int32_t numDrivers = 0;
@@ -652,13 +659,13 @@ bool SE2::GetOutputDriverName(int32_t index, char* name, int32_t nameLength, int
     FMOD::System* system;
 
     if (chatSystem) {
-        system = s_chatSystem;
+        system = s_pChatSystem;
 
         if (!system) {
             system = s_enumSystem;
         }
     } else {
-        system = s_system;
+        system = s_pGameSystem;
     }
 
     if (!system) {
@@ -759,13 +766,13 @@ bool SE2::GetInputDriverName_Cached(int32_t index, char* name, int32_t nameLengt
     FMOD::System* system;
 
     if (chatSystem) {
-        system = s_chatSystem;
+        system = s_pChatSystem;
 
         if (!system) {
             system = s_enumSystem;
         }
     } else {
-        system = s_system;
+        system = s_pGameSystem;
     }
 
     if (!system) {
@@ -798,13 +805,13 @@ bool SE2::GetOutputDriverName_Cached(int32_t index, char* name, int32_t nameLeng
     FMOD::System* system;
 
     if (chatSystem) {
-        system = s_chatSystem;
+        system = s_pChatSystem;
 
         if (!system) {
             system = s_enumSystem;
         }
     } else {
-        system = s_system;
+        system = s_pGameSystem;
     }
 
     if (!system) {
@@ -879,18 +886,18 @@ static FMOD_RESULT F_CALLBACK SystemCallback(FMOD_SYSTEM* system, FMOD_SYSTEM_CA
 // OFFSET: 0x0087ACC0
 FMOD_RESULT SE2::SetDeviceChangeCallback(void (*callback)()) {
     s_deviceChangeCallback = callback;
-    return s_system->setCallback(FMOD_SYSTEM_CALLBACKTYPE_DEVICELISTCHANGED, SystemCallback);
+    return s_pGameSystem->setCallback(FMOD_SYSTEM_CALLBACKTYPE_DEVICELISTCHANGED, SystemCallback);
 }
 
 // VERIFY: a64b076d auto
 // OFFSET: 0x00878290
-void SE2::EnableReverb(int32_t enable) {
+void SE2::EnableReverb(BOOL enable) {
     s_reverbEnabled = enable;
 }
 
 // VERIFY: 9f66d261 auto
 // OFFSET: 0x008782A0
-int32_t SE2::IsReverbEnabled() {
+BOOL SE2::IsReverbEnabled() {
     return s_reverbEnabled;
 }
 
@@ -908,20 +915,20 @@ void SE2::UnlockSoundList() {
 
 // VERIFY: d2076f78 auto
 // OFFSET: 0x00878CB0
-int32_t SE2::IsInitialized() {
+BOOL SE2::IsInitialized() {
     return s_initialized;
 }
 
 // VERIFY: f294f661 auto
 // OFFSET: 0x00878CC0
-int32_t SE2::IsChatSoundInitialized() {
+BOOL SE2::IsChatSoundInitialized() {
     return SE2::sm_bCaptureInitialized;
 }
 
 // VERIFY: 6032fe76 auto
 // OFFSET: 0x00878D00
 FMOD_RESULT SE2::CreateDSPByType(FMOD_DSP_TYPE type, FMOD::DSP** dsp) {
-    return s_system->createDSPByType(type, dsp);
+    return s_pGameSystem->createDSPByType(type, dsp);
 }
 
 // VERIFY: 8707a03f auto
@@ -967,9 +974,10 @@ FMOD_RESULT SE2::ConnectDspToChannelGroup(FMOD::DSP* dsp, FMOD::ChannelGroup* ch
 
 // VERIFY: abe7e5f3 auto
 // OFFSET: 0x00878DF0
-int32_t SE2::GetChannelGroupNumChannels(FMOD::ChannelGroup* channelGroup) {
+int32_t SE2::GetChannelGroupNumChannels(FMOD::ChannelGroup* pChannelGroup) {
+    STORM_ASSERT(pChannelGroup);
     int32_t numChannels = 0;
-    channelGroup->getNumChannels(&numChannels);
+    pChannelGroup->getNumChannels(&numChannels);
     return numChannels;
 }
 
@@ -977,7 +985,7 @@ int32_t SE2::GetChannelGroupNumChannels(FMOD::ChannelGroup* channelGroup) {
 // OFFSET: 0x00878E10
 FMOD::ChannelGroup* SE2::CreateChannelGroup(const char* name) {
     FMOD::ChannelGroup* channelGroup = nullptr;
-    s_system->createChannelGroup(name, &channelGroup);
+    s_pGameSystem->createChannelGroup(name, &channelGroup);
     return channelGroup;
 }
 
@@ -1006,21 +1014,21 @@ void SE2::SetListenerAttributes(const C3Vector* position, const C3Vector* forwar
         return;
     }
 
-    s_system->set3DListenerAttributes(0, reinterpret_cast<const FMOD_VECTOR*>(position), reinterpret_cast<const FMOD_VECTOR*>(velocity), reinterpret_cast<const FMOD_VECTOR*>(forward), reinterpret_cast<const FMOD_VECTOR*>(up));
+    s_pGameSystem->set3DListenerAttributes(0, reinterpret_cast<const FMOD_VECTOR*>(position), reinterpret_cast<const FMOD_VECTOR*>(velocity), reinterpret_cast<const FMOD_VECTOR*>(forward), reinterpret_cast<const FMOD_VECTOR*>(up));
 }
 
 // VERIFY: 78a13624 manual
 // OFFSET: 0x00879350
 bool SE2::GetListenerPosition(C3Vector* position) {
-    return s_initialized && position && s_system->get3DListenerAttributes(0, reinterpret_cast<FMOD_VECTOR*>(position), nullptr, nullptr, nullptr) == FMOD_OK;
+    return s_initialized && position && s_pGameSystem->get3DListenerAttributes(0, reinterpret_cast<FMOD_VECTOR*>(position), nullptr, nullptr, nullptr) == FMOD_OK;
 }
 
 // VERIFY: 908e27b2 auto
 // OFFSET: 0x00879460
 void SE2::SetMasterVolume(float volume) {
     if (s_initialized && volume >= 0.0f && volume <= 1.0f) {
-        s_channelGroups[0].m_volume = volume;
-        s_channelGroups[0].m_dirty = 1;
+        s_aChannelGroups[0].m_volume = volume;
+        s_aChannelGroups[0].m_dirty = 1;
     }
 }
 
@@ -1028,8 +1036,8 @@ void SE2::SetMasterVolume(float volume) {
 // OFFSET: 0x008794A0
 void SE2::MuteAllSound(bool mute) {
     if (s_initialized) {
-        s_channelGroups[0].m_muteVolume = mute ? 0.0f : 1.0f;
-        s_channelGroups[0].m_dirty = 1;
+        s_aChannelGroups[0].m_muteVolume = mute ? 0.0f : 1.0f;
+        s_aChannelGroups[0].m_dirty = 1;
     }
 }
 
@@ -1040,7 +1048,7 @@ void SE2::SetReverb(const FMOD_REVERB_PROPERTIES* properties) {
         return;
     }
 
-    s_system->setReverbProperties(properties);
+    s_pGameSystem->setReverbProperties(properties);
 }
 
 // VERIFY: d9256c5e manual
@@ -1052,9 +1060,9 @@ static SEChannelGroup* FindOrCreateChannelGroup(const char* name, bool create, b
 
     uint32_t hash = SStrHashHT(name);
 
-    for (uint32_t i = 1; i < s_channelGroups.Count(); i++) {
-        if (hash == s_channelGroups[i].m_hash) {
-            return &s_channelGroups[i];
+    for (uint32_t i = 1; i < s_aChannelGroups.Count(); i++) {
+        if (hash == s_aChannelGroups[i].m_hash) {
+            return &s_aChannelGroups[i];
         }
     }
 
@@ -1062,7 +1070,7 @@ static SEChannelGroup* FindOrCreateChannelGroup(const char* name, bool create, b
         return nullptr;
     }
 
-    SEChannelGroup* group = s_channelGroups.New();
+    SEChannelGroup* group = s_aChannelGroups.New();
     group->m_volume = 1.0f;
     group->m_hash = hash;
     group->m_muteVolume = 1.0f;
@@ -1076,9 +1084,10 @@ static SEChannelGroup* FindOrCreateChannelGroup(const char* name, bool create, b
 // OFFSET: 0x0087A850
 void SE2::SetChannelGroupVolume(const char* name, float volume) {
     if (s_initialized && volume >= 0.0f && volume <= 1.0f && name) {
-        SEChannelGroup* group = FindOrCreateChannelGroup(name, true, true);
-        group->m_volume = volume;
-        group->m_dirty = 1;
+        SEChannelGroup* pSEGroup = FindOrCreateChannelGroup(name, true, true);
+        STORM_ASSERT(pSEGroup != nullptr); // 12213: "pSEGroup != __null"
+        pSEGroup->m_volume = volume;
+        pSEGroup->m_dirty = 1;
     }
 }
 
@@ -1126,15 +1135,15 @@ void SE2::StopAllSounds(const char* channelGroup, float fadeOutTime) {
         return;
     }
 
-    int32_t index = group - s_channelGroups.Ptr();
+    int32_t index = group - s_aChannelGroups.Ptr();
 
     s_soundListCritSect.Enter();
 
     for (SESoundInternal* sound = s_soundList.Head(); sound; sound = s_soundList.Next(sound)) {
         if (sound->m_channelGroup == index) {
             sound->m_fadeOutTime = fadeOutTime;
-            sound->m_fadingIn = 0;
-            sound->m_fadingOut = 1;
+            sound->m_bFadingIn = 0;
+            sound->m_bFadingOut = 1;
         }
     }
 
@@ -1146,7 +1155,7 @@ void SE2::StopAllSounds(const char* channelGroup, float fadeOutTime) {
 FMOD::SoundGroup* SE2::CreateSoundGroup(const char* name, int32_t maxAudible) {
     FMOD::SoundGroup* soundGroup = nullptr;
 
-    FMOD_RESULT result = s_system->createSoundGroup(name, &soundGroup);
+    FMOD_RESULT result = s_pGameSystem->createSoundGroup(name, &soundGroup);
     SE_ERRCHECK(result);
 
     result = soundGroup->setMaxAudible(maxAudible);
@@ -1157,7 +1166,7 @@ FMOD::SoundGroup* SE2::CreateSoundGroup(const char* name, int32_t maxAudible) {
 
 // VERIFY: d9c047a9 manual
 // OFFSET: 0x00878B60
-void SE2::SetSoundGroupMaxAudibleBehavior(FMOD::SoundGroup* soundGroup, int32_t behavior, float muteFadeSpeed) {
+void SE2::SetSoundGroupMaxAudibleBehavior(FMOD::SoundGroup* soundGroup, SE2_MAX_AUDIBLE_BEHAVIOR behavior, float muteFadeSpeed) {
     if (!soundGroup) {
         return;
     }
@@ -1165,19 +1174,19 @@ void SE2::SetSoundGroupMaxAudibleBehavior(FMOD::SoundGroup* soundGroup, int32_t 
     FMOD_RESULT result;
 
     switch (behavior) {
-        case 0:
+        case SE2_MAX_AUDIBLE_MUTE:
             result = soundGroup->setMaxAudibleBehavior(FMOD_SOUNDGROUP_BEHAVIOR_MUTE);
             SE_ERRCHECK(result);
             result = soundGroup->setMuteFadeSpeed(muteFadeSpeed);
             SE_ERRCHECK(result);
             break;
 
-        case 1:
+        case SE2_MAX_AUDIBLE_STEAL_LOWEST:
             result = soundGroup->setMaxAudibleBehavior(FMOD_SOUNDGROUP_BEHAVIOR_STEALLOWEST);
             SE_ERRCHECK(result);
             break;
 
-        case 2:
+        case SE2_MAX_AUDIBLE_FAIL:
             result = soundGroup->setMaxAudibleBehavior(FMOD_SOUNDGROUP_BEHAVIOR_FAIL);
             SE_ERRCHECK(result);
             break;
@@ -1203,7 +1212,7 @@ void SE2::SetUserMonitorDSPCallback(void (*callback)(float*, uint32_t)) {
 // VERIFY: 73c92b66 auto
 // OFFSET: 0x00878940
 FMOD_RESULT SE2::AttachMonitorDSP(SESound* sound) {
-    return sound->m_internal->m_channel->addDSP(s_monitorDSP);
+    return sound->m_pMySESound->m_pFMODChannel->addDSP(s_monitorDSP);
 }
 
 // VERIFY: 82b7c600 auto
@@ -1229,7 +1238,7 @@ static FMOD::DSP* CreateMonitorDSP() {
     description.read = MonitorDSPCallback;
     description.userdata = reinterpret_cast<void*>(0x12345);
 
-    s_chatSystem->createDSP(&description, &s_monitorDSP);
+    s_pChatSystem->createDSP(&description, &s_monitorDSP);
 
     return s_monitorDSP;
 }
@@ -1273,11 +1282,11 @@ void SE2::ActivatePrimaryCaptureCallback() {
 bool SE2::IsCapturing() {
     bool recording = false;
 
-    if (!s_chatSystem) {
+    if (!s_pChatSystem) {
         return false;
     }
 
-    s_chatSystem->isRecording(&recording);
+    s_pChatSystem->isRecording(&recording);
 
     return recording;
 }
@@ -1285,14 +1294,14 @@ bool SE2::IsCapturing() {
 // VERIFY: 114728bb manual
 // OFFSET: 0x008787E0
 void SE2::CaptureWork() {
-    if (!s_capturing) {
+    if (!s_bCaptureWorkEnabled) {
         return;
     }
 
     s_heartBeatCritSect.Enter();
 
     uint32_t position = 0;
-    FMOD_RESULT result = s_chatSystem->getRecordPosition(&position);
+    FMOD_RESULT result = s_pChatSystem->getRecordPosition(&position);
     SE_ERRCHECK(result);
 
     if (position != s_captureLastPosition) {
@@ -1308,7 +1317,7 @@ void SE2::CaptureWork() {
             uint32_t len1;
             uint32_t len2;
 
-            result = s_captureSound->lock(s_captureLastPosition * s_captureChannels * sizeof(int16_t), samples * s_captureChannels * sizeof(int16_t), &ptr1, &ptr2, &len1, &len2);
+            result = s_pCaptureSound->lock(s_captureLastPosition * s_captureChannels * sizeof(int16_t), samples * s_captureChannels * sizeof(int16_t), &ptr1, &ptr2, &len1, &len2);
 
             if (ptr1 && len1) {
                 s_captureCallbacks->ProcessData(static_cast<int16_t*>(ptr1), len1 / sizeof(int16_t));
@@ -1320,7 +1329,7 @@ void SE2::CaptureWork() {
                 s_captureCallbacks->ProcessData(static_cast<int16_t*>(ptr2), len2 / sizeof(int16_t));
             }
 
-            s_captureSound->unlock(ptr1, ptr2, len1, len2);
+            s_pCaptureSound->unlock(ptr1, ptr2, len1, len2);
         }
     }
 
@@ -1332,21 +1341,21 @@ void SE2::CaptureWork() {
 // VERIFY: 07f8cfc0 manual
 // OFFSET: 0x00879500
 void SE2::StartCapture() {
-    if (!s_chatSystem) {
+    if (!s_pChatSystem) {
         return;
     }
 
-    s_capturing = 1;
+    s_bCaptureWorkEnabled = 1;
 
     if (!SE2::sm_bCaptureInitialized) {
         return;
     }
 
     bool recording = false;
-    s_chatSystem->isRecording(&recording);
+    s_pChatSystem->isRecording(&recording);
 
     if (!recording) {
-        FMOD_RESULT result = s_chatSystem->recordStart(s_captureSound, true);
+        FMOD_RESULT result = s_pChatSystem->recordStart(s_pCaptureSound, true);
         SE_ERRCHECK(result);
     }
 }
@@ -1354,15 +1363,15 @@ void SE2::StartCapture() {
 // VERIFY: a900c6d0 manual
 // OFFSET: 0x00879580
 void SE2::StopCapture() {
-    if (!s_chatSystem || !SE2::sm_bCaptureInitialized) {
+    if (!s_pChatSystem || !SE2::sm_bCaptureInitialized) {
         return;
     }
 
     bool recording = false;
-    s_chatSystem->isRecording(&recording);
+    s_pChatSystem->isRecording(&recording);
 
     if (recording) {
-        FMOD_RESULT result = s_chatSystem->recordStop();
+        FMOD_RESULT result = s_pChatSystem->recordStop();
         SE_ERRCHECK(result);
     }
 }
@@ -1370,12 +1379,12 @@ void SE2::StopCapture() {
 // VERIFY: cb40798f auto
 // OFFSET: 0x0087C540
 void SE2::ShutDownCapture() {
-    s_capturing = 0;
+    s_bCaptureWorkEnabled = 0;
 
     bool recording = false;
 
-    if (s_chatSystem) {
-        s_chatSystem->isRecording(&recording);
+    if (s_pChatSystem) {
+        s_pChatSystem->isRecording(&recording);
 
         if (recording) {
             SE2::StopCapture();
@@ -1388,9 +1397,9 @@ void SE2::ShutDownCapture() {
 // VERIFY: be2a4fb0 manual
 // OFFSET: 0x0087AD40
 SEWaveDataNode::SEWaveDataNode() {
-    this->m_sound = nullptr;
+    this->pSound = nullptr;
     this->m_hash = 0;
-    this->m_refCount = 0;
+    this->nRefCount = 0;
     this->m_loaded = 0;
     s_waveDataList.LinkToTail(this);
 }
@@ -1398,9 +1407,9 @@ SEWaveDataNode::SEWaveDataNode() {
 // VERIFY: 8989fc79 manual
 // OFFSET: 0x0087ACE0
 SEWaveDataNode::~SEWaveDataNode() {
-    this->m_sound = nullptr;
+    this->pSound = nullptr;
     this->m_hash = 0;
-    this->m_refCount = 0;
+    this->nRefCount = 0;
 }
 
 // VERIFY: f5aa5a13 manual
@@ -1409,8 +1418,8 @@ SESoundInternal::SESoundInternal() {
     this->m_position.x = s_invalid;
     this->m_position.y = s_invalid;
     this->m_position.z = s_invalid;
-    this->m_minDistance = s_invalid;
-    this->m_maxDistance = s_invalid;
+    this->m_distanceRange.m_l = s_invalid;
+    this->m_distanceRange.m_h = s_invalid;
     this->m_channelGroup = 0;
     this->m_mode = 0;
     this->m_frequency = 0.0f;
@@ -1419,15 +1428,15 @@ SESoundInternal::SESoundInternal() {
     this->m_pitch = 1.0f;
     this->m_randomStart = 0;
     this->m_software = 0;
-    this->m_priority = -1;
+    this->m_priority = SE2_PRIORITY_UNSET;
     this->m_coneOrientation.x = 0.0f;
     this->m_coneOrientation.y = 0.0f;
     this->m_coneOrientation.z = 0.0f;
     this->m_volume = 1.0f;
     this->m_userData = nullptr;
-    this->m_fadingIn = 0;
+    this->m_bFadingIn = 0;
     this->m_fadeVolume = 0.0f;
-    this->m_fadingOut = 0;
+    this->m_bFadingOut = 0;
     this->m_fadeInTime = 0.0f;
     this->m_playTime = 0;
     this->m_fadeOutTime = 0.0f;
@@ -1441,9 +1450,9 @@ SESoundInternal::SESoundInternal() {
     this->m_coneOutsideVolume = 1.0f;
     this->m_finishedParam2 = nullptr;
     this->m_dspChainCallback = nullptr;
-    this->m_dspChainName = nullptr;
+    this->m_pszCustomDSPChainName = nullptr;
     this->m_objectGUID = 0;
-    this->m_channel = nullptr;
+    this->m_pFMODChannel = nullptr;
     this->m_handle = nullptr;
     this->m_type = SESOUNDTYPE_NONE;
     this->m_reverb = 0;
@@ -1472,10 +1481,10 @@ SESoundInternal::~SESoundInternal() {
         this->m_handle->Detach();
     }
 
-    if (this->m_channel) {
-        this->m_channel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, nullptr, 0);
-        this->m_channel->stop();
-        this->m_channel = nullptr;
+    if (this->m_pFMODChannel) {
+        this->m_pFMODChannel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, nullptr, 0);
+        this->m_pFMODChannel->stop();
+        this->m_pFMODChannel = nullptr;
     }
 
     if (this->m_userData) {
@@ -1483,28 +1492,28 @@ SESoundInternal::~SESoundInternal() {
         this->m_userData = nullptr;
     }
 
-    if (this->m_dspChainName) {
-        delete[] this->m_dspChainName;
-        this->m_dspChainName = nullptr;
+    if (this->m_pszCustomDSPChainName) {
+        delete[] this->m_pszCustomDSPChainName;
+        this->m_pszCustomDSPChainName = nullptr;
     }
 }
 
 // VERIFY: 7abdae88 auto
 // OFFSET: 0x008C8DE0
-int32_t SESoundInternal::IsReadyForRelease() {
+BOOL SESoundInternal::IsReadyForRelease() {
     return 1;
 }
 
 // VERIFY: 3135d777 auto
 // OFFSET: 0x008785A0
 int32_t SESoundInternal::Set3DMinMaxDistance(float minDistance, float maxDistance) {
-    this->m_minDistance = minDistance;
-    this->m_maxDistance = maxDistance;
+    this->m_distanceRange.m_l = minDistance;
+    this->m_distanceRange.m_h = maxDistance;
 
     FMOD_RESULT result = FMOD_ERR_INTERNAL;
 
-    if (this->m_channel) {
-        result = this->m_channel->set3DMinMaxDistance(minDistance, maxDistance);
+    if (this->m_pFMODChannel) {
+        result = this->m_pFMODChannel->set3DMinMaxDistance(minDistance, maxDistance);
     }
 
     return result == FMOD_OK;
@@ -1517,15 +1526,17 @@ float SESoundInternal::GetScaledVolume() {
         return 0.0f;
     }
 
+    STORM_ASSERT(!(m_bFadingIn && m_bFadingOut));
+
     float volume = this->m_volume;
 
-    if (this->m_fadingIn || this->m_fadingOut) {
+    if (this->m_bFadingIn || this->m_bFadingOut) {
         volume *= this->m_fadeVolume;
     }
 
-    if (s_channelGroups.Count()) {
-        for (int32_t group = this->m_channelGroup; group != -1; group = s_channelGroups[group].m_parent) {
-            volume = volume * s_channelGroups[group].m_volume * s_channelGroups[group].m_muteVolume;
+    if (s_aChannelGroups.Count()) {
+        for (int32_t group = this->m_channelGroup; group != -1; group = s_aChannelGroups[group].m_parent) {
+            volume = volume * s_aChannelGroups[group].m_volume * s_aChannelGroups[group].m_muteVolume;
         }
     } else {
         volume = 0.0f;
@@ -1541,33 +1552,37 @@ float SESoundInternal::GetScaledVolume() {
 // VERIFY: fe1b36c1 auto
 // OFFSET: 0x008796F0
 void SESoundInternal::UpdateVolume() {
-    if (this->m_channel) {
-        this->m_channel->setVolume(this->GetScaledVolume());
+    if (this->m_pFMODChannel) {
+        this->m_pFMODChannel->setVolume(this->GetScaledVolume());
     }
 }
 
 // VERIFY: a6a3b94a manual
 // OFFSET: 0x00879760
 void SESoundInternal::Play() {
+    STORM_ASSERT(m_pFMODChannel);
+
     FMOD_MODE mode;
 
-    if (this->m_type == SESOUNDTYPE_FILE && this->m_randomStart && this->m_channel->getMode(&mode) == FMOD_OK && (mode & FMOD_LOOP_NORMAL)) {
+    if (this->m_type == SESOUNDTYPE_FILE && this->m_randomStart && this->m_pFMODChannel->getMode(&mode) == FMOD_OK && (mode & FMOD_LOOP_NORMAL)) {
         uint32_t length = 0;
-        static_cast<SEFileSound*>(this)->m_sound->getLength(&length, FMOD_TIMEUNIT_PCMBYTES);
-        uint32_t random = CRandom::uint32_(g_rndSeed);
-        this->m_channel->setPosition(static_cast<uint32_t>((static_cast<uint64_t>(random) * (length >> 1)) >> 32) & ~7u, FMOD_TIMEUNIT_PCMBYTES);
+        FMOD_RESULT result = static_cast<SEFileSound*>(this)->m_pFMODSound->getLength(&length, FMOD_TIMEUNIT_PCMBYTES);
+        STORM_ASSERT(result == FMOD_OK);
+        result = this->m_pFMODChannel->setPosition(CRandom::dice_(length >> 1, g_rndSeed) & ~7u, FMOD_TIMEUNIT_PCMBYTES);
+        STORM_ASSERT(result == FMOD_OK);
     }
 
     if (this->m_fadeInTime > 0.0f) {
-        this->m_fadingOut = 0;
-        this->m_fadingIn = 1;
+        this->m_bFadingOut = 0;
+        this->m_bFadingIn = 1;
     } else {
         this->m_fadeVolume = 1.0f;
     }
 
     this->UpdateVolume();
 
-    FMOD_RESULT result = this->m_channel->setPaused(false);
+    STORM_ASSERT(m_pFMODChannel != NULL);
+    FMOD_RESULT result = this->m_pFMODChannel->setPaused(false);
     SE_ERRCHECK(result);
 }
 
@@ -1577,11 +1592,11 @@ SEFileSound::SEFileSound() {
     this->m_file = nullptr;
     this->unused_00E4 = 0;
     this->unused_00E8 = 0;
-    this->m_sound = nullptr;
+    this->m_pFMODSound = nullptr;
     this->m_loadSoundGroup = nullptr;
     this->m_soundGroup = nullptr;
     this->m_loadCompleted = 0;
-    this->m_waveData = nullptr;
+    this->m_pSoundCacheNode = nullptr;
 
     s_soundListCritSect.Enter();
     s_soundList.LinkToTail(this);
@@ -1596,26 +1611,26 @@ SEFileSound::SEFileSound() {
 // VERIFY: 2bfa301f auto
 // OFFSET: [0x0087BDF0, 0x0087C400]
 SEFileSound::~SEFileSound() {
-    if (this->m_waveData) {
-        this->m_waveData->m_refCount--;
+    if (this->m_pSoundCacheNode) {
+        this->m_pSoundCacheNode->nRefCount--;
     }
 
-    if (!this->m_waveData && this->m_sound) {
-        this->m_sound->release();
-        this->m_sound = nullptr;
+    if (!this->m_pSoundCacheNode && this->m_pFMODSound) {
+        this->m_pFMODSound->release();
+        this->m_pFMODSound = nullptr;
     }
 }
 
 // VERIFY: c201109e auto
 // OFFSET: 0x0087BE80
-int32_t SEFileSound::IsReadyForRelease() {
+BOOL SEFileSound::IsReadyForRelease() {
     bool ready;
 
-    if (!this->m_sound) {
+    if (!this->m_pFMODSound) {
         return 1;
     }
 
-    this->m_sound->readyForRelease(&ready);
+    this->m_pFMODSound->readyForRelease(&ready);
 
     return ready;
 }
@@ -1623,25 +1638,25 @@ int32_t SEFileSound::IsReadyForRelease() {
 // VERIFY: 3a718434 manual
 // OFFSET: 0x0087A070
 void SEFileSound::AbortNonBlockingLoad(FMOD_RESULT result) {
-    if (this->m_sound) {
+    if (this->m_pFMODSound) {
         if (result != FMOD_ERR_MAXAUDIBLE) {
             char name[256];
-            this->m_sound->getName(name, sizeof(name));
+            this->m_pFMODSound->getName(name, sizeof(name));
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, "##### ERROR In CompleteNonBlockingLoad()! Aborting this sound! %s", name);
         }
 
-        if (this->m_channel) {
-            this->m_channel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, nullptr, 0);
-            this->m_channel->stop();
-            this->m_channel = nullptr;
+        if (this->m_pFMODChannel) {
+            this->m_pFMODChannel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, nullptr, 0);
+            this->m_pFMODChannel->stop();
+            this->m_pFMODChannel = nullptr;
         }
     }
 
     s_soundListCritSect.Enter();
 
-    if (this->m_waveData) {
+    if (this->m_pSoundCacheNode) {
         for (SESoundInternal* sound = s_soundList.Head(); sound; sound = s_soundList.Next(sound)) {
-            if (sound->m_type == SESOUNDTYPE_FILE && static_cast<SEFileSound*>(sound)->m_sound == this->m_sound && !sound->m_channel) {
+            if (sound->m_type == SESOUNDTYPE_FILE && static_cast<SEFileSound*>(sound)->m_pFMODSound == this->m_pFMODSound && !sound->m_pFMODChannel) {
                 sound->m_deleteDelay = 0;
                 s_deleteList.LinkToTail(sound);
             }
@@ -1663,13 +1678,13 @@ void SEFileSound::CompleteNonBlockingLoad() {
         return;
     }
 
-    if (!this->m_sound) {
+    if (!this->m_pFMODSound) {
         SE2::Log_Write(__LINE__, __FILE__, FMOD_ERR_INTERNAL, "##### ERROR! INVALID m_pFMODSound");
         this->AbortNonBlockingLoad(FMOD_OK);
         return;
     }
 
-    FMOD_RESULT result = this->m_system->playSound(FMOD_CHANNEL_FREE, this->m_sound, true, &this->m_channel);
+    FMOD_RESULT result = this->m_system->playSound(FMOD_CHANNEL_FREE, this->m_pFMODSound, true, &this->m_pFMODChannel);
 
     if (result != FMOD_OK) {
         if (result != FMOD_ERR_MAXAUDIBLE) {
@@ -1680,7 +1695,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
         return;
     }
 
-    result = this->m_channel->setUserData(reinterpret_cast<void*>(static_cast<uintptr_t>(this->m_id)));
+    result = this->m_pFMODChannel->setUserData(reinterpret_cast<void*>(static_cast<uintptr_t>(this->m_id)));
 
     if (result != FMOD_OK) {
         SE2::Log_Write(__LINE__, __FILE__, result, "CNBL: setUserData Failed");
@@ -1688,7 +1703,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
         return;
     }
 
-    result = this->m_channel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, SoundEndedCallback, 0);
+    result = this->m_pFMODChannel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, SoundEndedCallback, 0);
 
     if (result != FMOD_OK) {
         SE2::Log_Write(__LINE__, __FILE__, result, "CNBL: setCallback Failed");
@@ -1697,7 +1712,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
     }
 
     FMOD_MODE mode;
-    result = this->m_channel->getMode(&mode);
+    result = this->m_pFMODChannel->getMode(&mode);
 
     if (result != FMOD_OK) {
         SE2::Log_Write(__LINE__, __FILE__, result, "CNBL: getMode Failed");
@@ -1706,11 +1721,11 @@ void SEFileSound::CompleteNonBlockingLoad() {
     }
 
     FMOD_REVERB_CHANNELPROPERTIES properties = { 0, 0, 0, 0, 0, 0.0f, 0, 0.25f, 1.5f, 1.0f, 0, 1.0f, 0, 0.0f, 0.0f, 0.0f, 1.0f, FMOD_REVERB_CHANNELFLAGS_DEFAULT };
-    this->m_channel->setReverbProperties(&properties);
+    this->m_pFMODChannel->setReverbProperties(&properties);
 
     if (mode & FMOD_2D) {
         if (mode & FMOD_SOFTWARE) {
-            result = this->m_channel->setSpeakerMix(s_speakerMixFront, s_speakerMixFront, s_speakerMixCenter, s_speakerMixLFE, s_speakerMixBack, s_speakerMixBack, s_speakerMixSide, s_speakerMixSide);
+            result = this->m_pFMODChannel->setSpeakerMix(s_speakerMixFront, s_speakerMixFront, s_speakerMixCenter, s_speakerMixLFE, s_speakerMixBack, s_speakerMixBack, s_speakerMixSide, s_speakerMixSide);
 
             if (result != FMOD_OK) {
                 SE2::Log_Write(__LINE__, __FILE__, result, "");
@@ -1720,13 +1735,13 @@ void SEFileSound::CompleteNonBlockingLoad() {
         }
 
         if (!this->m_reverb) {
-            this->m_channel->getReverbProperties(&properties);
+            this->m_pFMODChannel->getReverbProperties(&properties);
             properties.Room = -10000;
-            this->m_channel->setReverbProperties(&properties);
+            this->m_pFMODChannel->setReverbProperties(&properties);
         }
     } else if (mode & FMOD_SOFTWARE) {
         if (this->m_software) {
-            result = this->m_channel->setSpeakerMix(s_speakerMixFront, s_speakerMixFront, s_speakerMixCenter, s_speakerMixLFE, s_speakerMixBack, s_speakerMixBack, s_speakerMixSide, s_speakerMixSide);
+            result = this->m_pFMODChannel->setSpeakerMix(s_speakerMixFront, s_speakerMixFront, s_speakerMixCenter, s_speakerMixLFE, s_speakerMixBack, s_speakerMixBack, s_speakerMixSide, s_speakerMixSide);
 
             if (result != FMOD_OK) {
                 SE2::Log_Write(__LINE__, __FILE__, result, "");
@@ -1734,7 +1749,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
                 return;
             }
         } else {
-            result = this->m_channel->setSpeakerMix(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            result = this->m_pFMODChannel->setSpeakerMix(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 
             if (result != FMOD_OK) {
                 SE2::Log_Write(__LINE__, __FILE__, result, "");
@@ -1745,7 +1760,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
     }
 
     if (!IsNaN(this->m_position.x)) {
-        result = this->m_channel->set3DAttributes(reinterpret_cast<FMOD_VECTOR*>(&this->m_position), nullptr);
+        result = this->m_pFMODChannel->set3DAttributes(reinterpret_cast<FMOD_VECTOR*>(&this->m_position), nullptr);
 
         if (result != FMOD_OK) {
             SE2::Log_Write(__LINE__, __FILE__, result, "");
@@ -1754,7 +1769,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
         }
     }
 
-    if (!IsNaN(this->m_minDistance) && !IsNaN(this->m_maxDistance) && !this->Set3DMinMaxDistance(this->m_minDistance, this->m_maxDistance)) {
+    if (!IsNaN(this->m_distanceRange.m_l) && !IsNaN(this->m_distanceRange.m_h) && !this->Set3DMinMaxDistance(this->m_distanceRange.m_l, this->m_distanceRange.m_h)) {
         SE2::Log_Write(__LINE__, __FILE__, FMOD_ERR_INTERNAL, "");
         this->AbortNonBlockingLoad(result);
         return;
@@ -1763,7 +1778,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
     this->UpdateVolume();
 
     if (this->m_pitch != 1.0f) {
-        FMOD_RESULT frequencyResult = this->m_channel->getFrequency(&this->m_frequency);
+        FMOD_RESULT frequencyResult = this->m_pFMODChannel->getFrequency(&this->m_frequency);
 
         if (frequencyResult != FMOD_OK) {
             SE2::Log_Write(__LINE__, __FILE__, frequencyResult, "");
@@ -1771,7 +1786,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
             return;
         }
 
-        result = this->m_channel->setFrequency(this->m_pitch * this->m_frequency);
+        result = this->m_pFMODChannel->setFrequency(this->m_pitch * this->m_frequency);
 
         if (result != FMOD_OK) {
             SE2::Log_Write(__LINE__, __FILE__, result, "");
@@ -1780,8 +1795,8 @@ void SEFileSound::CompleteNonBlockingLoad() {
         }
     }
 
-    if (static_cast<uint32_t>(this->m_priority) != 128 && static_cast<uint32_t>(this->m_priority) <= 256 && this->m_channel) {
-        result = this->m_channel->setPriority(this->m_priority);
+    if (static_cast<uint32_t>(this->m_priority) != SE2_PRIORITY_DEFAULT && static_cast<uint32_t>(this->m_priority) <= SE2_PRIORITY_MAX && this->m_pFMODChannel) {
+        result = this->m_pFMODChannel->setPriority(this->m_priority);
 
         if (result != FMOD_OK) {
             SE2::Log_Write(__LINE__, __FILE__, result, "");
@@ -1791,7 +1806,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
     }
 
     if (this->m_software && (this->m_coneOrientation.x != 0.0f || this->m_coneOrientation.y != 0.0f || this->m_coneOrientation.z != 0.0f)) {
-        FMOD_RESULT coneResult = this->m_channel->set3DConeSettings(this->m_coneInsideAngle, this->m_coneOutsideAngle, this->m_coneOutsideVolume);
+        FMOD_RESULT coneResult = this->m_pFMODChannel->set3DConeSettings(this->m_coneInsideAngle, this->m_coneOutsideAngle, this->m_coneOutsideVolume);
 
         if (coneResult != FMOD_OK) {
             SE2::Log_Write(__LINE__, __FILE__, coneResult, "");
@@ -1799,7 +1814,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
             return;
         }
 
-        if (sqrt(this->m_coneOrientation.x * this->m_coneOrientation.x + this->m_coneOrientation.y * this->m_coneOrientation.y + this->m_coneOrientation.z * this->m_coneOrientation.z) < 0.0001f) {
+        if (sqrt(this->m_coneOrientation.SquaredMag()) < 0.0001f) {
             this->m_coneOrientation.x = 0.0f;
             this->m_coneOrientation.y = 0.0f;
             this->m_coneOrientation.z = 1.0f;
@@ -1812,7 +1827,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
         orientation.y = this->m_coneOrientation.y;
         orientation.z = -this->m_coneOrientation.z;
 
-        result = this->m_channel->set3DConeOrientation(&orientation);
+        result = this->m_pFMODChannel->set3DConeOrientation(&orientation);
 
         if (result != FMOD_OK) {
             SE2::Log_Write(__LINE__, __FILE__, result, "");
@@ -1822,7 +1837,7 @@ void SEFileSound::CompleteNonBlockingLoad() {
     }
 
     if (this->m_dspChainCallback) {
-        this->m_dspChainCallback(this->m_channel, this->m_dspChainName);
+        this->m_dspChainCallback(this->m_pFMODChannel, this->m_pszCustomDSPChainName);
     }
 
     this->m_playTime = OsGetAsyncTimeMs();
@@ -1868,7 +1883,7 @@ SEChatSound::SEChatSound() {
 // VERIFY: 8dda86da auto
 // OFFSET: [0x0087BEB0, 0x0087C480]
 SEChatSound::~SEChatSound() {
-    if (s_chatSystem && this->m_dsp) {
+    if (s_pChatSystem && this->m_dsp) {
         this->m_dsp->release();
         this->m_dsp = nullptr;
     }
@@ -1881,45 +1896,47 @@ SEChatSound::~SEChatSound() {
 
 // INLINED
 SESound::SESound() {
-    this->m_internal = nullptr;
+    this->m_pMySESound = nullptr;
 }
 
 // VERIFY: 117baaa5 manual
 // OFFSET: 0x008799E0
 SESound::~SESound() {
-    if (this->m_internal) {
-        this->m_internal->m_handle = nullptr;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_handle = nullptr;
 
         if (this->IsLooping()) {
             this->Stop(0, 0.5f);
         }
     }
 
-    this->m_internal = nullptr;
+    this->m_pMySESound = nullptr;
 }
 
 // VERIFY: 9aa39190 auto
 // OFFSET: 0x00878270
 void SESound::Detach() {
-    if (this->m_internal) {
-        this->m_internal->m_handle = nullptr;
-        this->m_internal = nullptr;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_handle = nullptr;
+        this->m_pMySESound = nullptr;
     }
 }
 
 // VERIFY: 4d2a7376 auto
 // OFFSET: 0x00878560
-void SESound::SetUserData(SESoundUserData* userData) {
-    if (this->m_internal) {
-        this->m_internal->m_userData = userData;
+void SESound::SetUserData(SESoundUserData* pUserData) {
+    STORM_ASSERT(pUserData);
+
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_userData = pUserData;
     }
 }
 
 // VERIFY: 0fc7828e auto
 // OFFSET: 0x00878580
 SESoundUserData* SESound::GetUserData() {
-    if (this->m_internal) {
-        return this->m_internal->m_userData;
+    if (this->m_pMySESound) {
+        return this->m_pMySESound->m_userData;
     }
 
     return nullptr;
@@ -1928,8 +1945,8 @@ SESoundUserData* SESound::GetUserData() {
 // VERIFY: 8be60cb2 auto
 // OFFSET: 0x00878590
 uint32_t SESound::GetID() {
-    if (this->m_internal) {
-        return this->m_internal->m_id;
+    if (this->m_pMySESound) {
+        return this->m_pMySESound->m_id;
     }
 
     return 0;
@@ -1938,30 +1955,30 @@ uint32_t SESound::GetID() {
 // VERIFY: eeac044f auto
 // OFFSET: 0x008785F0
 void SESound::SetFadeInTime(float seconds) {
-    if (this->m_internal) {
-        this->m_internal->m_fadeInTime = seconds;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_fadeInTime = seconds;
     }
 }
 
 // VERIFY: 5c2eeb49 auto
 // OFFSET: 0x00878610
 void SESound::SetFadeOutTime(float seconds) {
-    if (this->m_internal) {
-        this->m_internal->m_fadeOutTime = seconds;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_fadeOutTime = seconds;
     }
 }
 
 // VERIFY: 0db996e0 auto
 // OFFSET: 0x00878630
 uint32_t SESound::GetPosition() {
-    if (!this->m_internal) {
+    if (!this->m_pMySESound) {
         return 0;
     }
 
     uint32_t position = 0;
 
-    if (this->m_internal->m_channel) {
-        this->m_internal->m_channel->getPosition(&position, FMOD_TIMEUNIT_MS);
+    if (this->m_pMySESound->m_pFMODChannel) {
+        this->m_pMySESound->m_pFMODChannel->getPosition(&position, FMOD_TIMEUNIT_MS);
     }
 
     return position;
@@ -1970,36 +1987,40 @@ uint32_t SESound::GetPosition() {
 // VERIFY: 6d3ec9fa auto
 // OFFSET: 0x00878660
 void SESound::SetPosition(uint32_t position) {
-    if (this->m_internal && this->m_internal->m_channel) {
-        this->m_internal->m_channel->setPosition(position, FMOD_TIMEUNIT_MS);
+    if (this->m_pMySESound && this->m_pMySESound->m_pFMODChannel) {
+        this->m_pMySESound->m_pFMODChannel->setPosition(position, FMOD_TIMEUNIT_MS);
     }
 }
 
 // VERIFY: 50de3d0d auto
 // OFFSET: 0x00878680
 void SESound::SetFinishedCallback(void (*callback)(SESound*, void*), void* param) {
-    if (this->m_internal) {
-        this->m_internal->m_finishedCallback = callback;
-        this->m_internal->m_finishedParam = param;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_finishedCallback = callback;
+        this->m_pMySESound->m_finishedParam = param;
     }
 }
 
 // VERIFY: b0b93c11 auto
 // OFFSET: 0x008786B0
 void SESound::SetFinishedCallback2(void (*callback)(SESound*, void*), void* param) {
-    if (this->m_internal) {
-        this->m_internal->m_finishedCallback2 = callback;
-        this->m_internal->m_finishedParam2 = param;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_finishedCallback2 = callback;
+        this->m_pMySESound->m_finishedParam2 = param;
     }
 }
 
 // VERIFY: a553fb84 manual
 // OFFSET: 0x008786E0
-void SESound::SetAttachCustomDSPChainCallback(void (*callback)(FMOD::Channel*, char*), const char* name) {
-    if (this->m_internal) {
-        this->m_internal->m_dspChainCallback = callback;
-        this->m_internal->m_dspChainName = static_cast<char*>(SMemAlloc(128, __FILE__, __LINE__, SMEM_FLAG_ZEROMEMORY));
-        SStrCopy(this->m_internal->m_dspChainName, name, 128);
+void SESound::SetAttachCustomDSPChainCallback(void (*fpCallback)(FMOD::Channel*, char*), const char* pszCustomDSPChainName) {
+    STORM_ASSERT(fpCallback);
+    STORM_ASSERT(pszCustomDSPChainName);
+
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_dspChainCallback = fpCallback;
+        STORM_ASSERT(m_pMySESound->m_pszCustomDSPChainName == NULL);
+        this->m_pMySESound->m_pszCustomDSPChainName = static_cast<char*>(SMemAlloc(128, __FILE__, __LINE__, SMEM_FLAG_ZEROMEMORY));
+        SStrCopy(this->m_pMySESound->m_pszCustomDSPChainName, pszCustomDSPChainName, 128);
     }
 }
 
@@ -2008,14 +2029,14 @@ void SESound::SetAttachCustomDSPChainCallback(void (*callback)(FMOD::Channel*, c
 bool SESound::IsPlaying() {
     bool isPlaying = false;
 
-    if (!this->m_internal) {
+    if (!this->m_pMySESound) {
         return false;
     }
 
-    isPlaying = this->m_internal->m_play;
+    isPlaying = this->m_pMySESound->m_play;
 
-    if (this->m_internal->m_channel) {
-        this->m_internal->m_channel->isPlaying(&isPlaying);
+    if (this->m_pMySESound->m_pFMODChannel) {
+        this->m_pMySESound->m_pFMODChannel->isPlaying(&isPlaying);
     }
 
     return isPlaying;
@@ -2024,45 +2045,45 @@ bool SESound::IsPlaying() {
 // VERIFY: 3ce55de5 auto
 // OFFSET: 0x00878760
 void SESound::SetPitch(float pitch) {
-    if (!this->m_internal) {
+    if (!this->m_pMySESound) {
         return;
     }
 
-    this->m_internal->m_pitch = pitch;
+    this->m_pMySESound->m_pitch = pitch;
 
-    if (this->m_internal->m_channel) {
-        if (this->m_internal->m_frequency == 0.0f) {
-            this->m_internal->m_channel->getFrequency(&this->m_internal->m_frequency);
+    if (this->m_pMySESound->m_pFMODChannel) {
+        if (this->m_pMySESound->m_frequency == 0.0f) {
+            this->m_pMySESound->m_pFMODChannel->getFrequency(&this->m_pMySESound->m_frequency);
         }
 
-        this->m_internal->m_channel->setFrequency(this->m_internal->m_frequency * pitch);
+        this->m_pMySESound->m_pFMODChannel->setFrequency(this->m_pMySESound->m_frequency * pitch);
     }
 }
 
 // VERIFY: 0cdbb285 auto
 // OFFSET: 0x008787B0
 void SESound::Set3DPanLevel(float level) {
-    if (this->m_internal && this->m_internal->m_channel) {
-        this->m_internal->m_channel->set3DPanLevel(level);
+    if (this->m_pMySESound && this->m_pMySESound->m_pFMODChannel) {
+        this->m_pMySESound->m_pFMODChannel->set3DPanLevel(level);
     }
 }
 
 // VERIFY: 7dcd0c8f auto
 // OFFSET: 0x00879390
 void SESound::Set3DMinMaxDistance(float minDistance, float maxDistance) {
-    if (this->m_internal) {
-        this->m_internal->Set3DMinMaxDistance(minDistance, maxDistance);
+    if (this->m_pMySESound) {
+        this->m_pMySESound->Set3DMinMaxDistance(minDistance, maxDistance);
     }
 }
 
 // VERIFY: 5d840bfb auto
 // OFFSET: 0x008793C0
 void SESound::Set3DPosition(const C3Vector& position) {
-    if (this->m_internal) {
-        this->m_internal->m_position = position;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_position = position;
 
-        if (this->m_internal->m_channel) {
-            this->m_internal->m_channel->set3DAttributes(reinterpret_cast<const FMOD_VECTOR*>(&position), nullptr);
+        if (this->m_pMySESound->m_pFMODChannel) {
+            this->m_pMySESound->m_pFMODChannel->set3DAttributes(reinterpret_cast<const FMOD_VECTOR*>(&position), nullptr);
         }
     }
 }
@@ -2070,37 +2091,37 @@ void SESound::Set3DPosition(const C3Vector& position) {
 // VERIFY: 131148dd auto
 // OFFSET: 0x00879400
 void SESound::FadeInNow() {
-    if (this->m_internal) {
-        this->m_internal->m_fadingOut = 0;
-        this->m_internal->m_fadingIn = 1;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_bFadingOut = 0;
+        this->m_pMySESound->m_bFadingIn = 1;
     }
 }
 
 // VERIFY: 9978edc1 auto
 // OFFSET: 0x00879410
 void SESound::FadeOutNow() {
-    if (this->m_internal) {
-        this->m_internal->m_fadingIn = 0;
-        this->m_internal->m_fadingOut = 1;
+    if (this->m_pMySESound) {
+        this->m_pMySESound->m_bFadingIn = 0;
+        this->m_pMySESound->m_bFadingOut = 1;
     }
 }
 
 // VERIFY: 9ecc861e manual
 // OFFSET: 0x00879420
 bool SESound::Is3D() {
-    return this->m_internal && (this->m_internal->m_mode & FMOD_3D);
+    return this->m_pMySESound && (this->m_pMySESound->m_mode & FMOD_3D);
 }
 
 // VERIFY: 3738544c manual
 // OFFSET: 0x00879440
 bool SESound::IsLooping() {
-    return this->m_internal && (this->m_internal->m_mode & FMOD_LOOP_NORMAL);
+    return this->m_pMySESound && (this->m_pMySESound->m_mode & FMOD_LOOP_NORMAL);
 }
 
 // VERIFY: 34a01b76 auto
 // OFFSET: 0x00879710
 void SESound::SetVolume(float volume) {
-    if (!this->m_internal) {
+    if (!this->m_pMySESound) {
         return;
     }
 
@@ -2114,27 +2135,27 @@ void SESound::SetVolume(float volume) {
         }
     }
 
-    this->m_internal->m_volume = clamped;
-    this->m_internal->UpdateVolume();
+    this->m_pMySESound->m_volume = clamped;
+    this->m_pMySESound->UpdateVolume();
 }
 
 // VERIFY: 048d9e21 manual
 // OFFSET: 0x00879840
-void SESound::Stop(int32_t immediate, float fadeOutTime) {
-    if (!this->m_internal) {
+void SESound::Stop(BOOL immediate, float fadeOutTime) {
+    if (!this->m_pMySESound) {
         return;
     }
 
     if (fadeOutTime >= 0.0f) {
-        this->m_internal->m_fadeOutTime = fadeOutTime;
+        this->m_pMySESound->m_fadeOutTime = fadeOutTime;
     }
 
-    if (immediate || !(this->m_internal->m_fadeOutTime > 0.0f)) {
-        this->m_internal->m_stop = 1;
+    if (immediate || !(this->m_pMySESound->m_fadeOutTime > 0.0f)) {
+        this->m_pMySESound->m_stop = 1;
 
-        if (this->m_internal->m_channel) {
-            this->m_internal->m_channel->stop();
-            this->m_internal->m_channel = nullptr;
+        if (this->m_pMySESound->m_pFMODChannel) {
+            this->m_pMySESound->m_pFMODChannel->stop();
+            this->m_pMySESound->m_pFMODChannel = nullptr;
         }
     } else {
         this->FadeOutNow();
@@ -2146,78 +2167,90 @@ void SESound::Stop(int32_t immediate, float fadeOutTime) {
 // VERIFY: e48bd7ae auto
 // OFFSET: 0x00879A60
 void SESound::Play() {
-    if (!this->m_internal) {
+    if (!this->m_pMySESound) {
         return;
     }
 
-    this->m_internal->UpdateVolume();
-    this->m_internal->m_play = 1;
+    this->m_pMySESound->UpdateVolume();
+    this->m_pMySESound->m_play = 1;
 
-    if (this->m_internal->m_channel) {
-        this->m_internal->Play();
+    if (this->m_pMySESound->m_pFMODChannel) {
+        this->m_pMySESound->Play();
     }
 }
 
 // VERIFY: 6a068ae9 auto
 // OFFSET: 0x00879AA0
 void SESound::AttachToObject(uint64_t guid) {
-    this->m_internal->m_objectGUID = guid;
+    this->m_pMySESound->m_objectGUID = guid;
 
     s_soundListCritSect.Enter();
-    s_objectList.LinkToTail(this->m_internal);
+    s_objectList.LinkToTail(this->m_pMySESound);
     s_soundListCritSect.Leave();
 }
 
 // VERIFY: e4e47b40 auto
 // OFFSET: 0x0087A7E0
 void SESound::SetChannelGroup(const char* name, bool childOfMaster) {
-    if (s_initialized && this->m_internal && name) {
-        this->m_internal->m_channelGroup = FindOrCreateChannelGroup(name, true, childOfMaster) - s_channelGroups.Ptr();
-        this->m_internal->UpdateVolume();
+    if (s_initialized && this->m_pMySESound && name) {
+        SEChannelGroup* pSEGroup = FindOrCreateChannelGroup(name, true, childOfMaster);
+        STORM_ASSERT(pSEGroup != nullptr); // 12213: "pSEGroup != __null"
+        this->m_pMySESound->m_channelGroup = pSEGroup - s_aChannelGroups.Ptr();
+        this->m_pMySESound->UpdateVolume();
     }
 }
 
 // VERIFY: 977f6a36 auto
 // OFFSET: 0x0087BF00
 void SESound::CompleteNonBlockingLoad() {
-    if (this->m_internal && this->m_internal->m_type == SESOUNDTYPE_FILE && this->m_internal->m_loaded) {
-        static_cast<SEFileSound*>(this->m_internal)->CompleteNonBlockingLoad();
+    if (this->m_pMySESound && this->m_pMySESound->m_type == SESOUNDTYPE_FILE && this->m_pMySESound->m_loaded) {
+        static_cast<SEFileSound*>(this->m_pMySESound)->CompleteNonBlockingLoad();
     }
 }
 
+#if defined(WOWDECOMP_ASSERTIONS)
+static bool ValidateSoundFilename(const char* pszFilename) {
+    return pszFilename[strcspn(pszFilename, "%:")] == '\0';
+}
+#endif
+
 // VERIFY: 81b27631 manual
 // OFFSET: 0x0087F7A0
-int32_t SESound::Create2D(const char* filename, int32_t looping, FMOD::SoundGroup* loadSoundGroup, FMOD::SoundGroup* soundGroup, bool randomStart, bool streaming, int32_t reverb, int32_t priority, uint32_t decodeBufferSize) {
+int32_t SESound::Create2D(const char* pszFilename, int32_t looping, FMOD::SoundGroup* loadSoundGroup, FMOD::SoundGroup* soundGroup, bool randomStart, bool streaming, int32_t reverb, int32_t priority, uint32_t decodeBufferSize) {
     if (!s_initialized) {
         return 0;
     }
 
-    return SE2::CreateWaveData(s_system, filename, (looping ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF) | FMOD_2D | FMOD_SOFTWARE, this, loadSoundGroup, soundGroup, randomStart, priority, reverb, streaming, decodeBufferSize, 0, 360.0f, 360.0f, 1.0f, nullptr);
+    STORM_ASSERT(ValidateSoundFilename(pszFilename));
+
+    return SE2::CreateWaveData(s_pGameSystem, pszFilename, (looping ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF) | FMOD_2D | FMOD_SOFTWARE, this, loadSoundGroup, soundGroup, randomStart, priority, reverb, streaming, decodeBufferSize, 0, 360.0f, 360.0f, 1.0f, nullptr);
 }
 
 // VERIFY: ea443bba manual
 // OFFSET: 0x0087F810
-int32_t SESound::Create3D(const char* filename, int32_t looping, FMOD::SoundGroup* loadSoundGroup, FMOD::SoundGroup* soundGroup, bool randomStart, bool streaming, int32_t priority, int32_t software, float coneInsideAngle, float coneOutsideAngle, float coneOutsideVolume, const C3Vector* coneOrientation) {
+int32_t SESound::Create3D(const char* pszFilename, int32_t looping, FMOD::SoundGroup* loadSoundGroup, FMOD::SoundGroup* soundGroup, bool randomStart, bool streaming, int32_t priority, int32_t software, float coneInsideAngle, float coneOutsideAngle, float coneOutsideVolume, const C3Vector* coneOrientation) {
     if (!s_initialized) {
         return 0;
     }
 
-    return SE2::CreateWaveData(s_system, filename, (looping ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF) | (software ? FMOD_SOFTWARE : FMOD_HARDWARE) | FMOD_3D, this, loadSoundGroup, soundGroup, randomStart, priority, 0, streaming, 0, software, coneInsideAngle, coneOutsideAngle, coneOutsideVolume, coneOrientation);
+    STORM_ASSERT(ValidateSoundFilename(pszFilename));
+
+    return SE2::CreateWaveData(s_pGameSystem, pszFilename, (looping ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF) | (software ? FMOD_SOFTWARE : FMOD_HARDWARE) | FMOD_3D, this, loadSoundGroup, soundGroup, randomStart, priority, 0, streaming, 0, software, coneInsideAngle, coneOutsideAngle, coneOutsideVolume, coneOrientation);
 }
 
 // VERIFY: cc377922 auto
 // OFFSET: 0x0087F890
 void SESound::PlaySoundFromMemory(const char* data, uint32_t length, int32_t chatSystem) {
     if (s_initialized) {
-        SE2::PlaySoundFromMemory(chatSystem ? s_chatSystem : s_system, data, length, FMOD_LOOP_OFF | FMOD_2D | FMOD_SOFTWARE | FMOD_OPENMEMORY, this);
+        SE2::PlaySoundFromMemory(chatSystem ? s_pChatSystem : s_pGameSystem, data, length, FMOD_LOOP_OFF | FMOD_2D | FMOD_SOFTWARE | FMOD_OPENMEMORY, this);
     }
 }
 
 // VERIFY: 32afecb8 auto
 // OFFSET: 0x0087F8D0
 void SESound::CreateChatSound(SEStreamCallbacks* callbacks, int32_t chatSystem) {
-    if (SE2::sm_bCaptureInitialized) {
-        SE2::CreateChatSound(chatSystem ? s_chatSystem : s_system, callbacks, FMOD_LOOP_OFF | FMOD_2D | FMOD_SOFTWARE, this);
+    if (SE2::IsChatSoundInitialized()) {
+        SE2::CreateChatSound(chatSystem ? s_pChatSystem : s_pGameSystem, callbacks, FMOD_LOOP_OFF | FMOD_2D | FMOD_SOFTWARE, this);
     }
 }
 
@@ -2235,7 +2268,7 @@ SESound* SE2::GetSoundFromID(uint32_t id, int32_t* created) {
     if (!lookup->m_sound->m_handle) {
         SESound* handle = new (SMemAlloc(sizeof(SESound), __FILE__, __LINE__, 0)) SESound();
         lookup->m_sound->m_handle = handle;
-        handle->m_internal = lookup->m_sound;
+        handle->m_pMySESound = lookup->m_sound;
         *created = 1;
     }
 
@@ -2244,7 +2277,7 @@ SESound* SE2::GetSoundFromID(uint32_t id, int32_t* created) {
 
 // VERIFY: 13fd5be3 manual
 // OFFSET: 0x00879AE0
-int32_t SE2::GetChannelInfo(bool fadingOnly, SEChannelInfo* info, int32_t maxCount, int32_t playing, int32_t isVirtual, int32_t loading, int32_t other, uint32_t* hardwareCount, uint32_t* softwareCount, uint32_t* virtualCount, uint32_t* loadingCount, uint32_t* otherCount) {
+int32_t SE2::GetChannelInfo(bool fadingOnly, SEChannelInfo* info, int32_t maxCount, int32_t playing, BOOL isVirtual, int32_t loading, int32_t other, uint32_t* hardwareCount, uint32_t* softwareCount, uint32_t* virtualCount, uint32_t* loadingCount, uint32_t* otherCount) {
     if (!info || maxCount <= 0) {
         return 0;
     }
@@ -2260,7 +2293,7 @@ int32_t SE2::GetChannelInfo(bool fadingOnly, SEChannelInfo* info, int32_t maxCou
     int32_t count = 0;
 
     if (s_initialized) {
-        s_system->get3DListenerAttributes(0, reinterpret_cast<FMOD_VECTOR*>(&listener), nullptr, nullptr, nullptr);
+        s_pGameSystem->get3DListenerAttributes(0, reinterpret_cast<FMOD_VECTOR*>(&listener), nullptr, nullptr, nullptr);
     }
 
     s_soundListCritSect.Enter();
@@ -2270,31 +2303,31 @@ int32_t SE2::GetChannelInfo(bool fadingOnly, SEChannelInfo* info, int32_t maxCou
 
         info->m_looping = (sound->m_mode & FMOD_LOOP_NORMAL) != 0;
         info->m_userData = sound->m_userData;
-        info->m_fadingIn = sound->m_fadingIn;
-        info->m_fadingOut = sound->m_fadingOut;
+        info->m_fadingIn = sound->m_bFadingIn;
+        info->m_fadingOut = sound->m_bFadingOut;
         info->m_fadeVolume = sound->m_fadeVolume;
         info->m_is3D = (sound->m_mode & FMOD_3D) != 0;
 
         int32_t include;
 
-        if (sound->m_channel) {
+        if (sound->m_pFMODChannel) {
             bool isPlaying;
-            FMOD_RESULT result = sound->m_channel->isPlaying(&isPlaying);
+            FMOD_RESULT result = sound->m_pFMODChannel->isPlaying(&isPlaying);
             SE_ERRCHECK(result);
 
-            result = sound->m_channel->getAudibility(&info->m_audibility);
+            result = sound->m_pFMODChannel->getAudibility(&info->m_audibility);
             SE_ERRCHECK(result);
 
-            result = sound->m_channel->getFadeVolume(&info->m_channelFadeVolume);
+            result = sound->m_pFMODChannel->getFadeVolume(&info->m_channelFadeVolume);
             SE_ERRCHECK(result);
 
             if (info->m_is3D) {
-                result = sound->m_channel->get3DPanLevel(&info->m_panLevel);
+                result = sound->m_pFMODChannel->get3DPanLevel(&info->m_panLevel);
                 SE_ERRCHECK(result);
             }
 
             if (isPlaying && info->m_is3D) {
-                result = sound->m_channel->get3DAttributes(reinterpret_cast<FMOD_VECTOR*>(&info->m_position), nullptr);
+                result = sound->m_pFMODChannel->get3DAttributes(reinterpret_cast<FMOD_VECTOR*>(&info->m_position), nullptr);
                 SE_ERRCHECK(result);
 
                 float dz = listener.z - info->m_position.z;
@@ -2302,27 +2335,27 @@ int32_t SE2::GetChannelInfo(bool fadingOnly, SEChannelInfo* info, int32_t maxCou
                 float dx = listener.x - info->m_position.x;
                 info->m_distanceSquared = dx * dx + dy * dy + dz * dz;
 
-                result = sound->m_channel->get3DMinMaxDistance(&info->m_minDistance, &info->m_maxDistance);
+                result = sound->m_pFMODChannel->get3DMinMaxDistance(&info->m_distanceRange.m_l, &info->m_distanceRange.m_h);
                 SE_ERRCHECK(result);
             } else {
                 info->m_distanceSquared = 0.0f;
-                info->m_minDistance = 0.0f;
-                info->m_maxDistance = 0.0f;
+                info->m_distanceRange.m_l = 0.0f;
+                info->m_distanceRange.m_h = 0.0f;
             }
 
             bool virt;
-            result = sound->m_channel->isVirtual(&virt);
+            result = sound->m_pFMODChannel->isVirtual(&virt);
             SE_ERRCHECK(result);
 
-            result = sound->m_channel->getVolume(&info->m_volume);
+            result = sound->m_pFMODChannel->getVolume(&info->m_volume);
             SE_ERRCHECK(result);
 
-            result = sound->m_channel->getPriority(&info->m_priority);
+            result = sound->m_pFMODChannel->getPriority(&info->m_priority);
             SE_ERRCHECK(result);
 
             FMOD_MODE mode;
 
-            if (sound->m_channel->getMode(&mode) == FMOD_OK) {
+            if (sound->m_pFMODChannel->getMode(&mode) == FMOD_OK) {
                 info->m_hardware = (mode & FMOD_HARDWARE) != 0;
             } else {
                 info->m_hardware = 0;
@@ -2353,7 +2386,7 @@ int32_t SE2::GetChannelInfo(bool fadingOnly, SEChannelInfo* info, int32_t maxCou
             continue;
         }
 
-        if (sound->m_channel && fadingOnly && !info->m_fadingIn && !info->m_fadingOut) {
+        if (sound->m_pFMODChannel && fadingOnly && !info->m_fadingIn && !info->m_fadingOut) {
             continue;
         }
 
@@ -2372,7 +2405,7 @@ int32_t SE2::GetChannelInfo(bool fadingOnly, SEChannelInfo* info, int32_t maxCou
 
 // VERIFY: 3893736c auto
 // OFFSET: 0x00879F30
-int32_t SE2::GetChannelInfo(SEChannelInfo* info, int32_t maxCount, int32_t playing, int32_t isVirtual, int32_t loading, int32_t other, uint32_t* hardwareCount, uint32_t* softwareCount, uint32_t* virtualCount, uint32_t* loadingCount, uint32_t* otherCount) {
+int32_t SE2::GetChannelInfo(SEChannelInfo* info, int32_t maxCount, int32_t playing, BOOL isVirtual, int32_t loading, int32_t other, uint32_t* hardwareCount, uint32_t* softwareCount, uint32_t* virtualCount, uint32_t* loadingCount, uint32_t* otherCount) {
     return SE2::GetChannelInfo(false, info, maxCount, playing, isVirtual, loading, other, hardwareCount, softwareCount, virtualCount, loadingCount, otherCount);
 }
 
@@ -2391,8 +2424,8 @@ static void UpdateObjectPositions() {
         if (s_positionCallback(sound->m_objectGUID, &position)) {
             sound->m_position = position;
 
-            if (sound->m_channel) {
-                sound->m_channel->set3DAttributes(reinterpret_cast<FMOD_VECTOR*>(&position), nullptr);
+            if (sound->m_pFMODChannel) {
+                sound->m_pFMODChannel->set3DAttributes(reinterpret_cast<FMOD_VECTOR*>(&position), nullptr);
             }
         } else {
             sound->m_objectLink.Unlink();
@@ -2421,7 +2454,7 @@ static void StopChatSounds() {
 
 // VERIFY: aff3b6de auto
 // OFFSET: 0x0087A210
-static void ProcessDeleteList(int32_t force) {
+static void ProcessDeleteList(BOOL force) {
     // STATIC: 0x00D43930
     static uint32_t s_lastTime = OsGetAsyncTimeMs();
 
@@ -2438,16 +2471,16 @@ static void ProcessDeleteList(int32_t force) {
         sound->m_deleteDelay -= elapsed;
 
         if (force || (sound->m_deleteDelay <= 0 && sound->IsReadyForRelease())) {
-            if (sound->m_channel) {
+            if (sound->m_pFMODChannel) {
                 bool isPlaying = false;
-                sound->m_channel->isPlaying(&isPlaying);
+                sound->m_pFMODChannel->isPlaying(&isPlaying);
 
                 if (isPlaying) {
-                    sound->m_channel->stop();
+                    sound->m_pFMODChannel->stop();
                 }
             }
 
-            sound->m_channel = nullptr;
+            sound->m_pFMODChannel = nullptr;
             sound->~SESoundInternal();
             SMemFree(sound, typeid(SESoundInternal).raw_name(), SLOG_OBJECT, 0);
         }
@@ -2479,13 +2512,14 @@ static void ProcessFadeList() {
         return;
     }
 
-    uint32_t groupCount = s_channelGroups.Count();
+    STORM_ASSERT(s_aChannelGroups.Count() < 8192);
+    uint32_t groupCount = s_aChannelGroups.Count();
     uint8_t* dirty = static_cast<uint8_t*>(alloca(groupCount));
     memset(dirty, 0, groupCount);
 
-    for (uint32_t i = 0; i < s_channelGroups.Count(); i++) {
-        if (s_channelGroups[i].m_dirty) {
-            s_channelGroups[i].m_dirty = 0;
+    for (uint32_t i = 0; i < s_aChannelGroups.Count(); i++) {
+        if (s_aChannelGroups[i].m_dirty) {
+            s_aChannelGroups[i].m_dirty = 0;
             dirty[i] = 1;
         }
     }
@@ -2495,8 +2529,8 @@ static void ProcessFadeList() {
     do {
         changed = false;
 
-        for (uint32_t i = 0; i < s_channelGroups.Count(); i++) {
-            if (!dirty[i] && dirty[s_channelGroups[i].m_parent]) {
+        for (uint32_t i = 0; i < s_aChannelGroups.Count(); i++) {
+            if (!dirty[i] && dirty[s_aChannelGroups[i].m_parent]) {
                 dirty[i] = 1;
                 changed = true;
             }
@@ -2512,7 +2546,7 @@ static void ProcessFadeList() {
 
         sound->UpdateVolume();
 
-        if (sound->m_fadingOut) {
+        if (sound->m_bFadingOut) {
             if (sound->m_fadeOutTime <= 0.0f || (sound->m_fadeVolume -= seconds / sound->m_fadeOutTime) < 0.0f) {
                 sound->m_fadeVolume = 0.0f;
             }
@@ -2521,11 +2555,10 @@ static void ProcessFadeList() {
                 SESound handle;
 
                 if (!sound->m_handle) {
-                    sound->m_handle = &handle;
-                    handle.m_internal = sound;
+                    sound->AttachHandle(handle);
                 }
 
-                sound->m_fadingOut = 0;
+                sound->m_bFadingOut = 0;
 
                 if (sound->m_fadeOutCallback) {
                     sound->m_fadeOutCallback(sound->m_handle);
@@ -2535,7 +2568,7 @@ static void ProcessFadeList() {
                     sound->m_handle->Stop(1, -1.0f);
                 }
             }
-        } else if (sound->m_fadingIn) {
+        } else if (sound->m_bFadingIn) {
             sound->m_fadeVolume += seconds / sound->m_fadeInTime;
 
             if (sound->m_fadeVolume > 1.0f) {
@@ -2545,7 +2578,7 @@ static void ProcessFadeList() {
             sound->UpdateVolume();
 
             if (sound->m_fadeVolume == 1.0f) {
-                sound->m_fadingIn = 0;
+                sound->m_bFadingIn = 0;
             }
         } else if (dirty[sound->m_channelGroup]) {
             sound->UpdateVolume();
@@ -2574,21 +2607,21 @@ static void KillVirtualSounds() {
         if (sound->m_type == SESOUNDTYPE_FILE) {
             SEFileSound* fileSound = static_cast<SEFileSound*>(sound);
 
-            if (fileSound->m_loadCompleted && fileSound->m_channel) {
+            if (fileSound->m_loadCompleted && fileSound->m_pFMODChannel) {
                 bool isVirtual = false;
-                fileSound->m_channel->isVirtual(&isVirtual);
+                fileSound->m_pFMODChannel->isVirtual(&isVirtual);
 
-                if (fileSound->m_priority == 128 || fileSound->m_priority == -1) {
+                if (fileSound->m_priority == SE2_PRIORITY_DEFAULT || fileSound->m_priority == SE2_PRIORITY_UNSET) {
                     bool isPlaying = false;
-                    fileSound->m_channel->isPlaying(&isPlaying);
+                    fileSound->m_pFMODChannel->isPlaying(&isPlaying);
 
                     if (isPlaying && !isVirtual) {
                         FMOD_MODE mode;
-                        fileSound->m_channel->getMode(&mode);
+                        fileSound->m_pFMODChannel->getMode(&mode);
 
                         if (!(mode & FMOD_LOOP_NORMAL)) {
-                            fileSound->m_priority = 127;
-                            fileSound->m_channel->setPriority(127);
+                            fileSound->m_priority = SE2_PRIORITY_PLAYING;
+                            fileSound->m_pFMODChannel->setPriority(SE2_PRIORITY_PLAYING);
                         }
                     }
                 }
@@ -2600,14 +2633,14 @@ static void KillVirtualSounds() {
                     uint32_t window = s_virtualPlayWindow ? s_virtualPlayWindow->m_intValue : 400;
 
                     if (now - fileSound->m_playTime > window) {
-                        if (fileSound->m_loadSoundGroup && fileSound->m_sound) {
-                            fileSound->m_sound->setSoundGroup(fileSound->m_soundGroup);
+                        if (fileSound->m_loadSoundGroup && fileSound->m_pFMODSound) {
+                            fileSound->m_pFMODSound->setSoundGroup(fileSound->m_soundGroup);
                             fileSound->m_loadSoundGroup = nullptr;
                         }
 
                         if (isVirtual) {
-                            fileSound->m_channel->stop();
-                            fileSound->m_channel = nullptr;
+                            fileSound->m_pFMODChannel->stop();
+                            fileSound->m_pFMODChannel = nullptr;
                         }
                     }
                 }
@@ -2622,7 +2655,7 @@ static void KillVirtualSounds() {
 
 // VERIFY: bd8b4ce2 manual
 // OFFSET: 0x0087B010
-static void ProcessWaveDataDeleteList(int32_t force) {
+static void ProcessWaveDataDeleteList(BOOL force) {
     // STATIC: 0x00D43948
     static CVar* s_maxCacheSize;
 
@@ -2638,28 +2671,35 @@ static void ProcessWaveDataDeleteList(int32_t force) {
         }
     }
 
-    if (s_cacheBytes <= maxCacheSize && !force) {
+    if (s_nSoundCacheSizeInBytes <= maxCacheSize && !force) {
         return;
     }
 
-    SEWaveDataNode* node = s_waveDataList.Head();
+    SEWaveDataNode* pSoundCacheNode = s_waveDataList.Head();
 
-    while (node) {
-        SEWaveDataNode* next = s_waveDataList.Next(node);
+    while (pSoundCacheNode) {
+        SEWaveDataNode* next = s_waveDataList.Next(pSoundCacheNode);
 
-        if (!node->m_refCount) {
-            if (s_cacheBytes <= maxCacheSize && !force) {
+        STORM_ASSERT(pSoundCacheNode->pSound);
+        STORM_ASSERT(pSoundCacheNode->nRefCount >= 0);
+
+        if (!pSoundCacheNode->nRefCount) {
+            if (s_nSoundCacheSizeInBytes <= maxCacheSize && !force) {
                 return;
             }
 
-            node->m_sound->release();
-            s_cacheCount--;
-            s_cacheBytes -= node->m_size;
-            node->m_sound = reinterpret_cast<FMOD::Sound*>(0xBEEFEE);
-            delete node;
+            pSoundCacheNode->pSound->release();
+            s_nNumCachedSounds--;
+            STORM_ASSERT(s_nNumCachedSounds >= 0);
+            s_nSoundCacheSizeInBytes -= pSoundCacheNode->m_size;
+            STORM_ASSERT(s_nSoundCacheSizeInBytes >= 0);
+            pSoundCacheNode->pSound = reinterpret_cast<FMOD::Sound*>(0xBEEFEE);
+            delete pSoundCacheNode;
+        } else if (force) {
+            STORM_ASSERT(0);
         }
 
-        node = next;
+        pSoundCacheNode = next;
     }
 }
 
@@ -2687,7 +2727,7 @@ static void ProcessGoGoGoList() {
 // OFFSET: 0x0087C4B0
 int32_t SE2::HeartBeat(const void* data, void* param) {
     if (!s_initialized) {
-        s_system->update();
+        s_pGameSystem->update();
         return 1;
     }
 
@@ -2700,10 +2740,10 @@ int32_t SE2::HeartBeat(const void* data, void* param) {
     ProcessGoGoGoList();
     g_soundCache.Update();
 
-    s_system->update();
+    s_pGameSystem->update();
 
-    if (SE2::sm_bCaptureInitialized && s_chatSystem != s_system) {
-        s_chatSystem->update();
+    if (SE2::sm_bCaptureInitialized && s_pChatSystem != s_pGameSystem) {
+        s_pChatSystem->update();
     }
 
     KillVirtualSounds();
@@ -2731,8 +2771,8 @@ void SE2::StopAllSounds(int32_t restart) {
             if (sound->m_type != SESOUNDTYPE_CHAT) {
                 sound->m_stop = 1;
 
-                if (sound->m_channel) {
-                    sound->m_channel->stop();
+                if (sound->m_pFMODChannel) {
+                    sound->m_pFMODChannel->stop();
                 }
             }
         }
@@ -2778,9 +2818,9 @@ void SE2::StopAllSounds(int32_t restart) {
                     if (sound->m_type == SESOUNDTYPE_FILE) {
                         SEFileSound* fileSound = static_cast<SEFileSound*>(sound);
 
-                        if (!fileSound->m_waveData && fileSound->m_sound) {
-                            *pendingRelease.New() = fileSound->m_sound;
-                            fileSound->m_sound = nullptr;
+                        if (!fileSound->m_pSoundCacheNode && fileSound->m_pFMODSound) {
+                            *pendingRelease.New() = fileSound->m_pFMODSound;
+                            fileSound->m_pFMODSound = nullptr;
                         }
                     } else if (sound->m_type == SESOUNDTYPE_MEMORY) {
                         SEMemorySound* memorySound = static_cast<SEMemorySound*>(sound);
@@ -2812,38 +2852,41 @@ void SE2::StopAllSounds(int32_t restart) {
 
 // VERIFY: 675bfdff manual
 // OFFSET: 0x0087EE60
-int32_t SE2::CreateWaveData(FMOD::System* system, const char* filename, FMOD_MODE mode, SESound* sound, FMOD::SoundGroup* loadSoundGroup, FMOD::SoundGroup* soundGroup, bool randomStart, int32_t priority, int32_t reverb, bool streaming, uint32_t decodeBufferSize, int32_t software, float coneInsideAngle, float coneOutsideAngle, float coneOutsideVolume, const C3Vector* coneOrientation) {
+int32_t SE2::CreateWaveData(FMOD::System* pSystem, const char* filename, FMOD_MODE mode, SESound* pSoundHandle, FMOD::SoundGroup* loadSoundGroup, FMOD::SoundGroup* soundGroup, bool randomStart, int32_t priority, int32_t reverb, bool streaming, uint32_t decodeBufferSize, int32_t software, float coneInsideAngle, float coneOutsideAngle, float coneOutsideVolume, const C3Vector* coneOrientation) {
     s_createCritSect.Enter();
+
+    STORM_ASSERT(pSoundHandle);
+    STORM_ASSERT(pSystem);
 
     SEWaveDataNode* waveData = nullptr;
 
-    if (!sound || !system || !filename || !*filename) {
+    if (!pSoundHandle || !pSystem || !filename || !*filename) {
         s_createCritSect.Leave();
         return 0;
     }
 
-    sound->Stop(1, -1.0f);
+    pSoundHandle->Stop(1, -1.0f);
 
-    SEFileSound* internal = new (SMemAlloc(sizeof(SEFileSound), __FILE__, __LINE__, 0)) SEFileSound();
+    SEFileSound* pNewSESound = new (SMemAlloc(sizeof(SEFileSound), __FILE__, __LINE__, 0)) SEFileSound();
 
-    internal->m_coneInsideAngle = coneInsideAngle;
-    internal->m_coneOutsideAngle = coneOutsideAngle;
-    internal->m_priority = priority;
-    internal->m_coneOutsideVolume = coneOutsideVolume;
-    internal->m_system = system;
-    internal->m_mode = mode;
-    internal->m_type = SESOUNDTYPE_FILE;
-    internal->m_reverb = reverb;
-    internal->m_streaming = streaming;
-    internal->m_cached = 0;
-    internal->m_channel = nullptr;
+    pNewSESound->m_coneInsideAngle = coneInsideAngle;
+    pNewSESound->m_coneOutsideAngle = coneOutsideAngle;
+    pNewSESound->m_priority = priority;
+    pNewSESound->m_coneOutsideVolume = coneOutsideVolume;
+    pNewSESound->m_system = pSystem;
+    pNewSESound->m_mode = mode;
+    pNewSESound->m_type = SESOUNDTYPE_FILE;
+    pNewSESound->m_reverb = reverb;
+    pNewSESound->m_streaming = streaming;
+    pNewSESound->m_cached = 0;
+    pNewSESound->m_pFMODChannel = nullptr;
 
     if (coneOrientation) {
-        internal->m_coneOrientation = *coneOrientation;
+        pNewSESound->m_coneOrientation = *coneOrientation;
     }
 
-    internal->m_handle = sound;
-    sound->m_internal = internal;
+    pNewSESound->m_handle = pSoundHandle;
+    pSoundHandle->m_pMySESound = pNewSESound;
 
     FMOD_CREATESOUNDEXINFO exinfo;
     exinfo.cbsize = sizeof(exinfo);
@@ -2863,7 +2906,7 @@ int32_t SE2::CreateWaveData(FMOD::System* system, const char* filename, FMOD_MOD
     exinfo.dlsname = nullptr;
     exinfo.encryptionkey = nullptr;
     exinfo.maxpolyphony = 0;
-    exinfo.userdata = reinterpret_cast<void*>(static_cast<uintptr_t>(internal->m_id));
+    exinfo.userdata = reinterpret_cast<void*>(static_cast<uintptr_t>(pNewSESound->m_id));
     exinfo.suggestedsoundtype = FMOD_SOUND_TYPE_UNKNOWN;
     exinfo.useropen = SEOpenCallback;
     exinfo.userclose = SECloseCallback;
@@ -2888,27 +2931,28 @@ int32_t SE2::CreateWaveData(FMOD::System* system, const char* filename, FMOD_MOD
     }
 
     char name[300];
-    SStrPrintf(name, sizeof(name), "%-24d%s", internal->m_id, filename);
+    SStrPrintf(name, sizeof(name), "%-24d%s", pNewSESound->m_id, filename);
 
     char key[400];
     SStrPrintf(key, sizeof(key), "%s%s%s", filename, (mode & FMOD_2D) ? "_2D_" : "_3D_", (mode & FMOD_LOOP_NORMAL) ? "_LOOP_" : "_NOLOOP_");
 
-    internal->m_randomStart = randomStart;
+    pNewSESound->m_randomStart = randomStart;
 
     uint32_t hash = SStrHash(key, 0, 0);
-    int32_t loaded;
+    BOOL loaded;
 
     if (cacheable) {
-        for (SEWaveDataNode* node = s_waveDataList.Head(); node; node = s_waveDataList.Next(node)) {
-            if (hash == node->m_hash) {
-                internal->m_sound = node->m_sound;
-                internal->m_cached = 1;
-                internal->m_waveData = node;
-                node->m_refCount++;
+        for (SEWaveDataNode* pSoundCacheNode = s_waveDataList.Head(); pSoundCacheNode; pSoundCacheNode = s_waveDataList.Next(pSoundCacheNode)) {
+            if (hash == pSoundCacheNode->m_hash) {
+                pNewSESound->m_pFMODSound = pSoundCacheNode->pSound;
+                pNewSESound->m_cached = 1;
+                pNewSESound->m_pSoundCacheNode = pSoundCacheNode;
+                pSoundCacheNode->nRefCount++;
+                STORM_ASSERT(pSoundCacheNode->pSound);
 
                 loaded = 0;
 
-                if (node->m_loaded) {
+                if (pSoundCacheNode->m_loaded) {
                     s_cacheHitsLoaded++;
                     loaded = 1;
                 } else {
@@ -2920,7 +2964,7 @@ int32_t SE2::CreateWaveData(FMOD::System* system, const char* filename, FMOD_MOD
         }
     }
 
-    if (!SFile::OpenEx(nullptr, filename, 1, &internal->m_file)) {
+    if (!SFile::OpenEx(nullptr, filename, 1, &pNewSESound->m_file)) {
         SE2::Log_Write(__LINE__, __FILE__, FMOD_ERR_FILE_NOTFOUND, filename);
         s_soundListCritSect.Enter();
         goto fail;
@@ -2946,12 +2990,12 @@ int32_t SE2::CreateWaveData(FMOD::System* system, const char* filename, FMOD_MOD
         uint32_t fileSize = 0;
         FMOD_RESULT result;
 
-        if ((internal->m_file && (fileSize = SFileGetFileSize(internal->m_file, nullptr)) > maxCacheableSize) || !cacheable) {
+        if ((pNewSESound->m_file && (fileSize = SFileGetFileSize(pNewSESound->m_file, nullptr)) > maxCacheableSize) || !cacheable) {
             cacheable = false;
-            result = system->createStream(name, createMode, &exinfo, &internal->m_sound);
+            result = pSystem->createStream(name, createMode, &exinfo, &pNewSESound->m_pFMODSound);
             s_streamsCreated++;
         } else {
-            result = system->createSound(name, createMode, &exinfo, &internal->m_sound);
+            result = pSystem->createSound(name, createMode, &exinfo, &pNewSESound->m_pFMODSound);
             s_soundsCreated++;
         }
 
@@ -2961,52 +3005,54 @@ int32_t SE2::CreateWaveData(FMOD::System* system, const char* filename, FMOD_MOD
             }
 
             s_soundListCritSect.Enter();
-            SFileCloseFile(internal->m_file);
-            internal->m_file = nullptr;
+            SFileCloseFile(pNewSESound->m_file);
+            pNewSESound->m_file = nullptr;
             goto fail;
         }
 
         SE_ERRCHECK(result);
 
         if (cacheable) {
+            STORM_ASSERT(pNewSESound->m_pFMODSound);
             waveData = new (SMemAlloc(sizeof(SEWaveDataNode), __FILE__, __LINE__, 0)) SEWaveDataNode();
-            waveData->m_sound = internal->m_sound;
+            waveData->pSound = pNewSESound->m_pFMODSound;
             waveData->m_hash = hash;
             SStrCopy(waveData->m_name, filename, sizeof(waveData->m_name));
 
-            internal->m_cached = 1;
+            pNewSESound->m_cached = 1;
             waveData->m_size = fileSize;
 
-            s_cacheBytes += fileSize;
+            s_nSoundCacheSizeInBytes += fileSize;
 
-            if (s_cacheBytes > s_cacheBytesPeak) {
-                s_cacheBytesPeak = s_cacheBytes;
+            if (s_nSoundCacheSizeInBytes > s_cacheBytesPeak) {
+                s_cacheBytesPeak = s_nSoundCacheSizeInBytes;
             }
 
-            s_cacheCount++;
+            s_nNumCachedSounds++;
 
-            if (s_cacheCount > s_cacheCountPeak) {
-                s_cacheCountPeak = s_cacheCount;
+            if (s_nNumCachedSounds > s_cacheCountPeak) {
+                s_cacheCountPeak = s_nNumCachedSounds;
             }
 
-            internal->m_waveData = waveData;
-            waveData->m_refCount = 1;
+            pNewSESound->m_pSoundCacheNode = waveData;
+            waveData->nRefCount = 1;
         }
     }
 
 done:
-    internal->m_soundGroup = soundGroup;
-    internal->m_loadSoundGroup = streaming ? nullptr : loadSoundGroup;
-    internal->m_software = software;
-    internal->m_loaded = loaded;
+    pNewSESound->m_soundGroup = soundGroup;
+    pNewSESound->m_loadSoundGroup = streaming ? nullptr : loadSoundGroup;
+    pNewSESound->m_software = software;
+    pNewSESound->m_loaded = loaded;
 
     s_createCritSect.Leave();
 
     return 1;
 
 fail:
-    internal->m_deleteDelay = 0;
-    s_deleteList.LinkToTail(internal);
+    pNewSESound->m_deleteDelay = 0;
+    STORM_ASSERT(pNewSESound->m_pFMODChannel == NULL);
+    s_deleteList.LinkToTail(pNewSESound);
     s_soundListCritSect.Leave();
 
     s_createCritSect.Leave();
@@ -3016,33 +3062,37 @@ fail:
 
 // VERIFY: 18ad04a7 manual
 // OFFSET: 0x0087F380
-void SE2::PlaySoundFromMemory(FMOD::System* system, const char* data, uint32_t length, FMOD_MODE mode, SESound* sound) {
-    if (!sound || !system) {
+void SE2::PlaySoundFromMemory(FMOD::System* pSystem, const char* data, uint32_t length, FMOD_MODE mode, SESound* pSoundHandle) {
+    STORM_ASSERT(pSoundHandle);
+    STORM_ASSERT(pSystem);
+
+    if (!pSoundHandle || !pSystem) {
         return;
     }
 
-    sound->Stop(1, -1.0f);
+    pSoundHandle->Stop(1, -1.0f);
 
-    SEMemorySound* internal = new (SMemAlloc(sizeof(SEMemorySound), __FILE__, __LINE__, 0)) SEMemorySound();
+    SEMemorySound* pNewSESound = new (SMemAlloc(sizeof(SEMemorySound), __FILE__, __LINE__, 0)) SEMemorySound();
 
-    internal->m_mode = mode;
-    internal->m_system = system;
-    internal->m_type = SESOUNDTYPE_MEMORY;
+    pNewSESound->m_mode = mode;
+    pNewSESound->m_system = pSystem;
+    pNewSESound->m_type = SESOUNDTYPE_MEMORY;
 
     FMOD_CREATESOUNDEXINFO exinfo;
     memset(&exinfo, 0, sizeof(exinfo));
     exinfo.cbsize = sizeof(exinfo);
     exinfo.length = length;
-    exinfo.userdata = internal;
+    exinfo.userdata = pNewSESound;
 
-    FMOD_RESULT result = system->createStream(data, mode, &exinfo, &internal->m_sound);
+    FMOD_RESULT result = pSystem->createStream(data, mode, &exinfo, &pNewSESound->m_sound);
 
     if (result != FMOD_OK) {
         SE_ERRCHECK(result);
 
         s_soundListCritSect.Enter();
-        internal->m_deleteDelay = 0;
-        s_deleteList.LinkToTail(internal);
+        pNewSESound->m_deleteDelay = 0;
+        STORM_ASSERT(pNewSESound->m_pFMODChannel == NULL);
+        s_deleteList.LinkToTail(pNewSESound);
         s_soundListCritSect.Leave();
 
         s_createCritSect.Leave();
@@ -3050,85 +3100,96 @@ void SE2::PlaySoundFromMemory(FMOD::System* system, const char* data, uint32_t l
         return;
     }
 
-    result = system->playSound(FMOD_CHANNEL_FREE, internal->m_sound, true, &internal->m_channel);
+    result = pSystem->playSound(FMOD_CHANNEL_FREE, pNewSESound->m_sound, true, &pNewSESound->m_pFMODChannel);
     SE_ERRCHECK(result);
 
-    result = internal->m_channel->setUserData(reinterpret_cast<void*>(static_cast<uintptr_t>(internal->m_id)));
+    result = pNewSESound->m_pFMODChannel->setUserData(reinterpret_cast<void*>(static_cast<uintptr_t>(pNewSESound->m_id)));
     SE_ERRCHECK(result);
 
-    result = internal->m_channel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, SoundEndedCallback, 0);
+    result = pNewSESound->m_pFMODChannel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, SoundEndedCallback, 0);
 
     if (result != FMOD_OK) {
         SE_ERRCHECK(result);
 
-        internal->m_sound->release();
+        pNewSESound->m_sound->release();
 
         s_soundListCritSect.Enter();
-        internal->m_deleteDelay = 0;
-        s_deleteList.LinkToTail(internal);
+        pNewSESound->m_deleteDelay = 0;
+        STORM_ASSERT(pNewSESound->m_pFMODChannel == NULL);
+        s_deleteList.LinkToTail(pNewSESound);
         s_soundListCritSect.Leave();
 
         return;
     }
 
-    internal->m_channel->getFrequency(&internal->m_frequency);
+    pNewSESound->m_pFMODChannel->getFrequency(&pNewSESound->m_frequency);
 
-    internal->m_handle = sound;
-    sound->m_internal = internal;
+    pNewSESound->m_handle = pSoundHandle;
+    pSoundHandle->m_pMySESound = pNewSESound;
 }
 
 // VERIFY: 9b2127c2 manual
 // OFFSET: 0x0087F5E0
-void SE2::CreateChatSound(FMOD::System* system, SEStreamCallbacks* callbacks, FMOD_MODE mode, SESound* sound) {
-    if (!SE2::sm_bCaptureInitialized || !sound || !system || !callbacks) {
+void SE2::CreateChatSound(FMOD::System* pSystem, SEStreamCallbacks* callbacks, FMOD_MODE mode, SESound* pSoundHandle) {
+    if (!SE2::sm_bCaptureInitialized) {
         return;
     }
 
-    sound->Stop(1, -1.0f);
+    STORM_ASSERT(pSoundHandle);
+    STORM_ASSERT(pSystem);
+    STORM_ASSERT(callbacks);
 
-    SEChatSound* internal = new (SMemAlloc(sizeof(SEChatSound), __FILE__, __LINE__, 0)) SEChatSound();
+    if (!pSoundHandle || !pSystem || !callbacks) {
+        return;
+    }
 
-    internal->m_callbacks = callbacks;
-    internal->m_mode = mode;
-    internal->m_system = system;
-    internal->m_type = SESOUNDTYPE_CHAT;
-    internal->m_handle = sound;
-    sound->m_internal = internal;
+    pSoundHandle->Stop(1, -1.0f);
 
-    FMOD_DSP_DESCRIPTION description = { "SEStreamedSound", 1000, 1, nullptr, nullptr, nullptr, SEChatSound::DSPReadCallback, SEChatSound::DSPSeekCallback, 0, nullptr, nullptr, nullptr, nullptr, 0, 0, internal };
+    SEChatSound* pNewSESound = new (SMemAlloc(sizeof(SEChatSound), __FILE__, __LINE__, 0)) SEChatSound();
 
-    FMOD_RESULT result = system->createDSP(&description, &internal->m_dsp);
+    pNewSESound->m_callbacks = callbacks;
+    pNewSESound->m_mode = mode;
+    pNewSESound->m_system = pSystem;
+    pNewSESound->m_type = SESOUNDTYPE_CHAT;
+    pNewSESound->m_handle = pSoundHandle;
+    pSoundHandle->m_pMySESound = pNewSESound;
+
+    FMOD_DSP_DESCRIPTION description = { "SEStreamedSound", 1000, 1, nullptr, nullptr, nullptr, SEChatSound::DSPReadCallback, SEChatSound::DSPSeekCallback, 0, nullptr, nullptr, nullptr, nullptr, 0, 0, pNewSESound };
+
+    FMOD_RESULT result = pSystem->createDSP(&description, &pNewSESound->m_dsp);
     SE_ERRCHECK(result);
 
-    result = system->playDSP(FMOD_CHANNEL_FREE, internal->m_dsp, true, &internal->m_channel);
+    result = pSystem->playDSP(FMOD_CHANNEL_FREE, pNewSESound->m_dsp, true, &pNewSESound->m_pFMODChannel);
     SE_ERRCHECK(result);
 
-    if (internal->m_channel) {
-        result = internal->m_channel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, SoundEndedCallback, 0);
+    STORM_ASSERT(pNewSESound->m_pFMODChannel);
+
+    if (pNewSESound->m_pFMODChannel) {
+        result = pNewSESound->m_pFMODChannel->setCallback(FMOD_CHANNEL_CALLBACKTYPE_END, SoundEndedCallback, 0);
         SE_ERRCHECK(result);
 
-        result = internal->m_channel->setUserData(reinterpret_cast<void*>(static_cast<uintptr_t>(internal->m_id)));
+        result = pNewSESound->m_pFMODChannel->setUserData(reinterpret_cast<void*>(static_cast<uintptr_t>(pNewSESound->m_id)));
         SE_ERRCHECK(result);
     }
 
-    internal->m_frequency = 1.0f;
-    internal->m_channel->setFrequency(1.0f);
-    internal->m_deleteDelay = 0;
+    pNewSESound->m_frequency = 1.0f;
+    pNewSESound->m_pFMODChannel->setFrequency(1.0f);
+    pNewSESound->m_deleteDelay = 0;
 }
 
 // VERIFY: 5f70d806 manual
 // OFFSET: 0x0087C710
-int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vector*), int32_t enableReverb, int32_t enableSoftwareHRTF, int32_t* numChannels, int32_t* outputDriverIndex, const char* outputDriverName, float (*volumeCallback)(SESoundUserData*), int32_t restart) {
+int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vector*), BOOL enableReverb, BOOL enableSoftwareHRTF, int32_t* numChannels, int32_t* outputDriverIndex, const char* outputDriverName, float (*volumeCallback)(SESoundUserData*), int32_t restart) {
     FMOD_INITFLAGS flags = FMOD_INIT_NORMAL;
-    int32_t success = 1;
+    BOOL success = 1;
 
     s_gameOutputDeviceName[0] = '\0';
     s_chatOutputDeviceName[0] = '\0';
     s_chatInputDeviceName[0] = '\0';
 
-    s_cacheBytes = 0;
+    s_nSoundCacheSizeInBytes = 0;
     s_cacheBytesPeak = 0;
-    s_cacheCount = 0;
+    s_nNumCachedSounds = 0;
     s_cacheCountPeak = 0;
     s_unused_unknownStat = 0;
     s_cacheHitsLoaded = 0;
@@ -3155,11 +3216,12 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
 
     g_soundCache.Initialize();
 
-    s_system = nullptr;
+    STORM_ASSERT(s_pGameSystem == NULL);
+    s_pGameSystem = nullptr;
 
     SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - FMOD System Create");
 
-    FMOD_RESULT result = FMOD::System_Create(&s_system);
+    FMOD_RESULT result = FMOD::System_Create(&s_pGameSystem);
 
     if (result != FMOD_OK) {
         SE_ERRCHECK(result);
@@ -3174,13 +3236,13 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
         s_enumSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
     }
 
-    s_system->setOutput(FMOD_OUTPUTTYPE_AUTODETECT);
+    s_pGameSystem->setOutput(FMOD_OUTPUTTYPE_AUTODETECT);
 
     EventRegister(EVENT_ID_POLL, SE2::HeartBeat);
 
     {
         uint32_t version;
-        result = s_system->getVersion(&version);
+        result = s_pGameSystem->getVersion(&version);
 
         if (result != FMOD_OK) {
             SE_ERRCHECK(result);
@@ -3216,7 +3278,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
         if (openAL) {
             if (hardware) {
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - OpenAL is ENABLED");
-                SE_ERRCHECK(s_system->setOutput(FMOD_OUTPUTTYPE_OPENAL));
+                SE_ERRCHECK(s_pGameSystem->setOutput(FMOD_OUTPUTTYPE_OPENAL));
             } else {
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# ERROR! OpenAL Mode requires Hardware to be enabled! NOT using OpenAL.");
@@ -3247,13 +3309,13 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
 
         int32_t driver = *outputDriverIndex ? *outputDriverIndex - 1 : 0;
 
-        s_system->getDriverName(driver, s_gameOutputDeviceName, sizeof(s_gameOutputDeviceName));
-        result = s_system->setDriver(driver);
+        s_pGameSystem->getDriverName(driver, s_gameOutputDeviceName, sizeof(s_gameOutputDeviceName));
+        result = s_pGameSystem->setDriver(driver);
 
         if (result != FMOD_OK) {
             SE_ERRCHECK(result);
             SE_LOG_INIT_FAILED(result);
-            s_system->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+            s_pGameSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
             success = 0;
             goto failed;
         }
@@ -3285,7 +3347,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - %d Channels Requested.", *numChannels);
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - Querying Sound Driver for Available Hardware Channels.", *numChannels);
 
-            result = s_system->init(256, FMOD_INIT_3D_RIGHTHANDED, nullptr);
+            result = s_pGameSystem->init(256, FMOD_INIT_3D_RIGHTHANDED, nullptr);
 
             if (result != FMOD_OK) {
                 SE_ERRCHECK(result);
@@ -3295,7 +3357,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
 
             int32_t numHardwareChannels = 0;
             int32_t num3DHardwareChannels = 0;
-            result = s_system->getHardwareChannels(nullptr, &numHardwareChannels, &num3DHardwareChannels);
+            result = s_pGameSystem->getHardwareChannels(nullptr, &numHardwareChannels, &num3DHardwareChannels);
             SE_ERRCHECK(result);
 
             if (result != FMOD_OK) {
@@ -3303,7 +3365,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
                 goto nosound;
             }
 
-            s_system->close();
+            s_pGameSystem->close();
 
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - Sound Driver Reports: %d Hardware Channels Available.", numHardwareChannels);
 
@@ -3315,7 +3377,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
 
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - Using %d channels.", *numChannels);
 
-                result = s_system->setHardwareChannels(0, 0, *numChannels, *numChannels);
+                result = s_pGameSystem->setHardwareChannels(0, 0, *numChannels, *numChannels);
                 SE_ERRCHECK(result);
 
                 if (result != FMOD_OK) {
@@ -3323,7 +3385,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
                     goto nosound;
                 }
 
-                result = s_system->setSoftwareChannels(16);
+                result = s_pGameSystem->setSoftwareChannels(16);
                 SE_ERRCHECK(result);
 
                 if (result != FMOD_OK) {
@@ -3363,7 +3425,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
         }
 
-        result = s_system->setHardwareChannels(0, 0, 0, 0);
+        result = s_pGameSystem->setHardwareChannels(0, 0, 0, 0);
         SE_ERRCHECK(result);
 
         if (result != FMOD_OK) {
@@ -3371,7 +3433,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
             goto nosound;
         }
 
-        result = s_system->setSoftwareChannels(*numChannels);
+        result = s_pGameSystem->setSoftwareChannels(*numChannels);
         SE_ERRCHECK(result);
 
         if (result != FMOD_OK) {
@@ -3388,7 +3450,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
 
         FMOD_CAPS caps;
         FMOD_SPEAKERMODE speakerMode;
-        result = s_system->getDriverCaps(driver, &caps, nullptr, nullptr, &speakerMode);
+        result = s_pGameSystem->getDriverCaps(driver, &caps, nullptr, nullptr, &speakerMode);
         SE_ERRCHECK(result);
 
         if (result != FMOD_OK) {
@@ -3442,12 +3504,12 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
                 numBuffers = 4;
             }
 
-            result = s_system->setDSPBufferSize(1024, numBuffers);
+            result = s_pGameSystem->setDSPBufferSize(1024, numBuffers);
             SE_ERRCHECK(result);
 
             if (result != FMOD_OK) {
                 SE_LOG_INIT_FAILED(result);
-                s_system->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+                s_pGameSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
                 success = 0;
                 goto failed;
             }
@@ -3456,7 +3518,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
         SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - Detected Control Panel Speaker Mode = %s", speakerModes[speakerMode]);
         SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - Setting WoW Speaker Mode to %s", speakerModes[speakerMode]);
 
-        result = s_system->setSpeakerMode(speakerMode);
+        result = s_pGameSystem->setSpeakerMode(speakerMode);
         SE_ERRCHECK(result);
 
         if (result != FMOD_OK) {
@@ -3470,9 +3532,9 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
         static CVar* s_outputQuality = CVar::Lookup("Sound_OutputQuality");
 
         if (s_outputQuality) {
-            if (s_outputQuality->m_intValue == 0) {
+            if (s_outputQuality->m_intValue == SE2_OUTPUT_QUALITY_LOW) {
                 sampleRate = 22050;
-            } else if (s_outputQuality->m_intValue == 1) {
+            } else if (s_outputQuality->m_intValue == SE2_OUTPUT_QUALITY_MEDIUM) {
                 sampleRate = 44100;
             }
         }
@@ -3480,7 +3542,7 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
         FMOD_DSP_RESAMPLER resampler = FMOD_DSP_RESAMPLER_LINEAR;
 
         if (s_outputQuality) {
-            resampler = static_cast<FMOD_DSP_RESAMPLER>(s_outputQuality->m_intValue == 2);
+            resampler = static_cast<FMOD_DSP_RESAMPLER>(s_outputQuality->m_intValue == SE2_OUTPUT_QUALITY_HIGH);
         }
 
         // STATIC: 0x00D43950
@@ -3490,21 +3552,21 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# NOTICE:   Using Mix Mode 2.");
 
-            if (s_enableMixMode2->m_intValue == 2) {
+            if (s_enableMixMode2->m_intValue == SE2_MIX_MODE_PCM24) {
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# 2 PCM24");
-                SE_ERRCHECK(s_system->setSoftwareFormat(sampleRate, FMOD_SOUND_FORMAT_PCM24, 0, 0, resampler));
-            } else if (s_enableMixMode2->m_intValue == 3) {
+                SE_ERRCHECK(s_pGameSystem->setSoftwareFormat(sampleRate, FMOD_SOUND_FORMAT_PCM24, 0, 0, resampler));
+            } else if (s_enableMixMode2->m_intValue == SE2_MIX_MODE_PCM32) {
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# 3 PCM32");
-                SE_ERRCHECK(s_system->setSoftwareFormat(sampleRate, FMOD_SOUND_FORMAT_PCM32, 0, 0, resampler));
+                SE_ERRCHECK(s_pGameSystem->setSoftwareFormat(sampleRate, FMOD_SOUND_FORMAT_PCM32, 0, 0, resampler));
             } else {
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# 1 PCMFLOAT");
-                SE_ERRCHECK(s_system->setSoftwareFormat(sampleRate, FMOD_SOUND_FORMAT_PCMFLOAT, 0, 0, resampler));
+                SE_ERRCHECK(s_pGameSystem->setSoftwareFormat(sampleRate, FMOD_SOUND_FORMAT_PCMFLOAT, 0, 0, resampler));
             }
 
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
         }
 
-        result = s_system->init(maxChannels, flags | FMOD_INIT_3D_RIGHTHANDED, nullptr);
+        result = s_pGameSystem->init(maxChannels, flags | FMOD_INIT_3D_RIGHTHANDED, nullptr);
 
         if (result == FMOD_ERR_OUTPUT_CREATEBUFFER) {
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
@@ -3517,21 +3579,21 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -#           Some speaker modes will fail to initialize if the sound driver is running in EMULATED mode.");
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
 
-            SE_ERRCHECK(s_system->close());
+            SE_ERRCHECK(s_pGameSystem->close());
 
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " - Setting WoW Speaker Mode to STEREO");
 
-            result = s_system->setSpeakerMode(FMOD_SPEAKERMODE_STEREO);
+            result = s_pGameSystem->setSpeakerMode(FMOD_SPEAKERMODE_STEREO);
             SE_ERRCHECK(result);
 
             if (result != FMOD_OK) {
                 SE_LOG_INIT_FAILED(result);
-                s_system->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+                s_pGameSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
                 success = 0;
                 goto failed;
             }
 
-            result = s_system->init(maxChannels, flags | FMOD_INIT_3D_RIGHTHANDED, nullptr);
+            result = s_pGameSystem->init(maxChannels, flags | FMOD_INIT_3D_RIGHTHANDED, nullptr);
             SE_ERRCHECK(result);
 
             if (result != FMOD_OK) {
@@ -3540,14 +3602,14 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -#           Reverting to most compatible configuration (Hardware DISABLED,STEREO,MixMode2 DISABLED,Control Panel default output device)");
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
 
-                s_system->getDriverName(0, s_gameOutputDeviceName, sizeof(s_gameOutputDeviceName));
-                SE_ERRCHECK(s_system->setDriver(0));
-                SE_ERRCHECK(s_system->setSpeakerMode(FMOD_SPEAKERMODE_STEREO));
-                SE_ERRCHECK(s_system->setSoftwareFormat(sampleRate, FMOD_SOUND_FORMAT_PCM16, 0, 0, resampler));
-                SE_ERRCHECK(s_system->setHardwareChannels(0, 0, 0, 0));
-                SE_ERRCHECK(s_system->setSoftwareChannels(*numChannels));
+                s_pGameSystem->getDriverName(0, s_gameOutputDeviceName, sizeof(s_gameOutputDeviceName));
+                SE_ERRCHECK(s_pGameSystem->setDriver(0));
+                SE_ERRCHECK(s_pGameSystem->setSpeakerMode(FMOD_SPEAKERMODE_STEREO));
+                SE_ERRCHECK(s_pGameSystem->setSoftwareFormat(sampleRate, FMOD_SOUND_FORMAT_PCM16, 0, 0, resampler));
+                SE_ERRCHECK(s_pGameSystem->setHardwareChannels(0, 0, 0, 0));
+                SE_ERRCHECK(s_pGameSystem->setSoftwareChannels(*numChannels));
 
-                result = s_system->init(maxChannels, flags | FMOD_INIT_3D_RIGHTHANDED, nullptr);
+                result = s_pGameSystem->init(maxChannels, flags | FMOD_INIT_3D_RIGHTHANDED, nullptr);
             }
         }
 
@@ -3561,17 +3623,17 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
         s_positionCallback = positionCallback;
         s_volumeCallback = volumeCallback;
 
-        result = s_system->set3DSettings(1.0f, 1.0f, 4.0f);
+        result = s_pGameSystem->set3DSettings(1.0f, 1.0f, 4.0f);
         SE_ERRCHECK(result);
 
         if (result != FMOD_OK) {
             SE_LOG_INIT_FAILED(result);
-            s_system->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+            s_pGameSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
             success = 0;
             goto failed;
         }
 
-        result = s_system->set3DRolloffCallback(RolloffCallback);
+        result = s_pGameSystem->set3DRolloffCallback(RolloffCallback);
         SE_ERRCHECK(result);
 
         if (result != FMOD_OK) {
@@ -3579,10 +3641,10 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
             goto nosound;
         }
 
-        if (!s_channelGroups.Count()) {
-            s_channelGroups.Clear();
+        if (!s_aChannelGroups.Count()) {
+            s_aChannelGroups.Clear();
 
-            SEChannelGroup* master = s_channelGroups.New();
+            SEChannelGroup* master = s_aChannelGroups.New();
             uint32_t hash = SStrHashHT("<master>");
             master->m_volume = 1.0f;
             master->m_hash = hash;
@@ -3601,12 +3663,12 @@ int32_t SE2::Init(int32_t maxChannels, bool (*positionCallback)(uint64_t, C3Vect
     }
 
 nosound:
-    s_system->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+    s_pGameSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
     success = 0;
     goto failed;
 
 disable:
-    s_system->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+    s_pGameSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
     success = 0;
 
 failed:
@@ -3616,7 +3678,7 @@ done:
     SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " ");
 
     if (!success) {
-        s_system->init(32, flags | FMOD_INIT_3D_RIGHTHANDED, nullptr);
+        s_pGameSystem->init(32, flags | FMOD_INIT_3D_RIGHTHANDED, nullptr);
     }
 
     return success;
@@ -3629,15 +3691,15 @@ void SE2::ShutDown(int32_t restart) {
     SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, "=> Shutting Down Game Sound");
 
     if (!restart) {
-        s_channelGroups.Clear();
+        s_aChannelGroups.Clear();
     }
 
-    if (s_system) {
+    if (s_pGameSystem) {
         ProcessWaveDataDeleteList(1);
 
-        s_system->close();
-        s_system->release();
-        s_system = nullptr;
+        s_pGameSystem->close();
+        s_pGameSystem->release();
+        s_pGameSystem = nullptr;
 
         if (s_enumSystem) {
             s_enumSystem->close();
@@ -3660,6 +3722,10 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
     SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " ");
     SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, "=> Setting up Voice Chat:");
 
+    STORM_ASSERT(!SE2::IsChatSoundInitialized()); // 12213: "!SESound::IsChatSoundInitialized()"
+    STORM_ASSERT(s_pChatSystem == NULL);
+    STORM_ASSERT(s_pCaptureSound == NULL);
+
     if (!s_initialized) {
         return;
     }
@@ -3670,27 +3736,27 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
         SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# Voice Chat DISABLED.");
         SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
         SE_LOG_CHAT_INIT_FAILED();
-        s_chatSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+        s_pChatSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
         goto failed;
     }
 
     {
         FMOD_RESULT result;
 
-        if (!s_chatSystem && (result = FMOD::System_Create(&s_chatSystem)) != FMOD_OK) {
+        if (!s_pChatSystem && (result = FMOD::System_Create(&s_pChatSystem)) != FMOD_OK) {
             SE_ERRCHECK(result);
             SE_LOG_CHAT_INIT_FAILED();
-            s_chatSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+            s_pChatSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
             goto failed;
         }
 
         uint32_t version;
-        result = s_chatSystem->getVersion(&version);
+        result = s_pChatSystem->getVersion(&version);
 
         if (result != FMOD_OK) {
             SE_ERRCHECK(result);
             SE_LOG_CHAT_INIT_FAILED();
-            s_chatSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+            s_pChatSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
             goto failed;
         }
 
@@ -3742,7 +3808,7 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -#############################################################################################");
         }
 
-        result = s_chatSystem->setHardwareChannels(0, 0, 0, 0);
+        result = s_pChatSystem->setHardwareChannels(0, 0, 0, 0);
 
         if (result != FMOD_OK) {
             SE_ERRCHECK(result);
@@ -3750,7 +3816,7 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
             goto nosound;
         }
 
-        result = s_chatSystem->setSoftwareChannels(8);
+        result = s_pChatSystem->setSoftwareChannels(8);
 
         if (result != FMOD_OK) {
             SE_ERRCHECK(result);
@@ -3763,8 +3829,8 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
 
         int32_t outputDriver = *outputDriverIndex ? *outputDriverIndex - 1 : 0;
 
-        s_chatSystem->getDriverName(outputDriver, s_chatOutputDeviceName, sizeof(s_chatOutputDeviceName));
-        result = s_chatSystem->setDriver(outputDriver);
+        s_pChatSystem->getDriverName(outputDriver, s_chatOutputDeviceName, sizeof(s_chatOutputDeviceName));
+        result = s_pChatSystem->setDriver(outputDriver);
 
         if (result != FMOD_OK) {
             SE_ERRCHECK(result);
@@ -3778,8 +3844,8 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
             inputDriver--;
         }
 
-        s_chatSystem->getRecordDriverName(inputDriver, s_chatInputDeviceName, sizeof(s_chatInputDeviceName));
-        result = s_chatSystem->setRecordDriver(inputDriver);
+        s_pChatSystem->getRecordDriverName(inputDriver, s_chatInputDeviceName, sizeof(s_chatInputDeviceName));
+        result = s_pChatSystem->setRecordDriver(inputDriver);
         SE_ERRCHECK(result);
 
         int32_t outputRate = 48000;
@@ -3788,9 +3854,9 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
         static CVar* s_outputQuality = CVar::Lookup("Sound_OutputQuality");
 
         if (s_outputQuality) {
-            if (s_outputQuality->m_intValue == 0) {
+            if (s_outputQuality->m_intValue == SE2_OUTPUT_QUALITY_LOW) {
                 outputRate = 22050;
-            } else if (s_outputQuality->m_intValue == 1) {
+            } else if (s_outputQuality->m_intValue == SE2_OUTPUT_QUALITY_MEDIUM) {
                 outputRate = 44100;
             }
         }
@@ -3798,7 +3864,7 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
         FMOD_DSP_RESAMPLER resampler = FMOD_DSP_RESAMPLER_LINEAR;
 
         if (s_outputQuality) {
-            resampler = static_cast<FMOD_DSP_RESAMPLER>(s_outputQuality->m_intValue == 2);
+            resampler = static_cast<FMOD_DSP_RESAMPLER>(s_outputQuality->m_intValue == SE2_OUTPUT_QUALITY_HIGH);
         }
 
         CVar* enableMixMode2 = CVar::Lookup("Sound_EnableMixMode2");
@@ -3807,21 +3873,21 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# NOTICE:   Using Mix Mode 2.");
 
-            if (enableMixMode2->m_intValue == 2) {
+            if (enableMixMode2->m_intValue == SE2_MIX_MODE_PCM24) {
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# 2 PCM24");
-                SE_ERRCHECK(s_system->setSoftwareFormat(outputRate, FMOD_SOUND_FORMAT_PCM24, 0, 0, resampler));
-            } else if (enableMixMode2->m_intValue == 3) {
+                SE_ERRCHECK(s_pGameSystem->setSoftwareFormat(outputRate, FMOD_SOUND_FORMAT_PCM24, 0, 0, resampler));
+            } else if (enableMixMode2->m_intValue == SE2_MIX_MODE_PCM32) {
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# 3 PCM32");
-                SE_ERRCHECK(s_system->setSoftwareFormat(outputRate, FMOD_SOUND_FORMAT_PCM32, 0, 0, resampler));
+                SE_ERRCHECK(s_pGameSystem->setSoftwareFormat(outputRate, FMOD_SOUND_FORMAT_PCM32, 0, 0, resampler));
             } else {
                 SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -# 1 PCMFLOAT");
-                SE_ERRCHECK(s_system->setSoftwareFormat(outputRate, FMOD_SOUND_FORMAT_PCMFLOAT, 0, 0, resampler));
+                SE_ERRCHECK(s_pGameSystem->setSoftwareFormat(outputRate, FMOD_SOUND_FORMAT_PCMFLOAT, 0, 0, resampler));
             }
 
             SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " -###########################################################################################");
         }
 
-        result = s_chatSystem->init(8, FMOD_INIT_3D_RIGHTHANDED, nullptr);
+        result = s_pChatSystem->init(8, FMOD_INIT_3D_RIGHTHANDED, nullptr);
 
         if (result != FMOD_OK) {
             SE_ERRCHECK(result);
@@ -3842,7 +3908,7 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
         s_captureExInfo.numchannels = 1;
         s_captureExInfo.length = s_captureExInfo.defaultfrequency * sizeof(int16_t) * 2;
 
-        result = s_chatSystem->createSound(nullptr, FMOD_2D | FMOD_SOFTWARE | FMOD_OPENUSER, &s_captureExInfo, &s_captureSound);
+        result = s_pChatSystem->createSound(nullptr, FMOD_2D | FMOD_SOFTWARE | FMOD_OPENUSER, &s_captureExInfo, &s_pCaptureSound);
         SE_ERRCHECK(result);
 
         if (result != FMOD_OK) {
@@ -3851,18 +3917,20 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
         }
 
         uint32_t length;
-        s_captureSound->getLength(&length, FMOD_TIMEUNIT_PCM);
+        s_pCaptureSound->getLength(&length, FMOD_TIMEUNIT_PCM);
 
+        STORM_ASSERT(!s_bCaptureWorkEnabled);
         s_captureChannels = s_captureExInfo.numchannels;
+        STORM_ASSERT(!s_bCaptureWorkEnabled);
         s_captureLength = length;
-        s_capturing = 1;
+        s_bCaptureWorkEnabled = 1;
         s_primaryCaptureCallbacks = nullptr;
         s_alternateCaptureCallbacks = nullptr;
         s_captureCallbacks = nullptr;
 
         CreateMonitorDSP();
 
-        result = s_chatSystem->set3DSettings(1.0f, 1.0f, 4.0f);
+        result = s_pChatSystem->set3DSettings(1.0f, 1.0f, 4.0f);
         SE_ERRCHECK(result);
 
         if (result != FMOD_OK) {
@@ -3879,10 +3947,10 @@ void SE2::InitCapture(int32_t* outputDriverIndex, const char* outputDriverName, 
     }
 
 nosound:
-    s_chatSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
+    s_pChatSystem->setOutput(FMOD_OUTPUTTYPE_NOSOUND);
 
 failed:
-    if (s_chatSystem && s_chatSystem != s_system) {
+    if (s_pChatSystem && s_pChatSystem != s_pGameSystem) {
         SE2::DestroyChatSystem();
     }
 
@@ -3894,19 +3962,19 @@ failed:
 // VERIFY: 1cc3690f manual
 // OFFSET: 0x0087C580
 void SE2::DestroyChatSystem() {
-    if (!s_chatSystem) {
+    if (!s_pChatSystem) {
         return;
     }
 
     SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, " ");
     SE2::Log_Write(__LINE__, __FILE__, FMOD_OK, "=> Shutting Down Voice Chat");
 
-    s_capturing = 0;
+    s_bCaptureWorkEnabled = 0;
 
     bool recording = false;
 
-    if (s_chatSystem) {
-        s_chatSystem->isRecording(&recording);
+    if (s_pChatSystem) {
+        s_pChatSystem->isRecording(&recording);
 
         if (recording) {
             SE2::StopCapture();
@@ -3918,9 +3986,9 @@ void SE2::DestroyChatSystem() {
     StopChatSounds();
     ProcessDeleteList(1);
 
-    if (s_captureSound) {
-        s_captureSound->release();
-        s_captureSound = nullptr;
+    if (s_pCaptureSound) {
+        s_pCaptureSound->release();
+        s_pCaptureSound = nullptr;
     }
 
     if (s_monitorDSP) {
@@ -3928,9 +3996,9 @@ void SE2::DestroyChatSystem() {
         s_monitorDSP = nullptr;
     }
 
-    s_chatSystem->close();
-    s_chatSystem->release();
-    s_chatSystem = nullptr;
+    s_pChatSystem->close();
+    s_pChatSystem->release();
+    s_pChatSystem = nullptr;
 
     s_userMonitorDSPCallback = nullptr;
     SE2::sm_bCaptureInitialized = 0;

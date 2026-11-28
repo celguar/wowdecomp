@@ -27,7 +27,7 @@ TEXTEMOTELOOKUP::TEXTEMOTELOOKUP() {
 int32_t SI2::GetTextEmoteSoundID(uint32_t emotesTextId, uint32_t race, uint32_t sex) {
     TEXTEMOTELOOKUP* lookup;
 
-    if (emotesTextId < s_textEmoteLookupById.Count() && (lookup = s_textEmoteLookupById[emotesTextId]) != nullptr && race < 22 && sex < 2) {
+    if (emotesTextId < s_textEmoteLookupById.Count() && (lookup = s_textEmoteLookupById[emotesTextId]) != nullptr && race < NUM_RACES + 1 && sex < UNITSEX_NONE) {
         return lookup->m_soundIds[race][sex];
     }
 
@@ -40,7 +40,7 @@ int32_t SI2::GetTextEmoteSoundIndex(uint32_t emotesTextId, uint32_t race, uint32
     TEXTEMOTELOOKUP* lookup;
     int32_t soundKitId;
 
-    if (emotesTextId < s_textEmoteLookupById.Count() && (lookup = s_textEmoteLookupById[emotesTextId]) != nullptr && race < 22 && sex < 2) {
+    if (emotesTextId < s_textEmoteLookupById.Count() && (lookup = s_textEmoteLookupById[emotesTextId]) != nullptr && race < NUM_RACES + 1 && sex < UNITSEX_NONE) {
         soundKitId = lookup->m_soundIds[race][sex];
     } else {
         soundKitId = 0;
@@ -53,25 +53,25 @@ int32_t SI2::GetTextEmoteSoundIndex(uint32_t emotesTextId, uint32_t race, uint32
     }
 
     int32_t index = 0;
-    def->SelectFile(2, &index, -1, 5);
+    def->SelectFile(SE2_FILE_SELECT_WEIGHTED_CYCLE, &index, -1, 5);
     return index;
 }
 
 // VERIFY: bf97a618 auto
 // OFFSET: 0x004CECB0
 void SI2::InitEmoteSounds() {
-    if (!g_emotesTextDB.m_numRecords || !g_emotesTextSoundDB.m_numRecords) {
+    if (!g_emotesTextDB.GetNumRecords() || !g_emotesTextSoundDB.GetNumRecords()) {
         return;
     }
 
-    s_textEmoteLookupById.SetCount(g_emotesTextDB.m_maxID + 1);
+    s_textEmoteLookupById.SetCount(g_emotesTextDB.GetMaxID() + 1);
     memset(s_textEmoteLookupById.Ptr(), 0, sizeof(TEXTEMOTELOOKUP*) * s_textEmoteLookupById.Count());
 
     int32_t last = -1;
     int32_t count = 0;
 
-    for (int32_t i = 0; i < g_emotesTextSoundDB.m_numRecords; i++) {
-        EmotesTextSoundRec* rec = (i < 0 || i >= g_emotesTextSoundDB.m_numRecords) ? nullptr : &g_emotesTextSoundDB.m_records[i];
+    for (int32_t i = 0; i < g_emotesTextSoundDB.GetNumRecords(); i++) {
+        EmotesTextSoundRec* rec = (i < 0 || i >= g_emotesTextSoundDB.GetNumRecords()) ? nullptr : &g_emotesTextSoundDB.m_records[i];
 
         if (last == -1 || last != rec->m_emotesTextID) {
             last = rec->m_emotesTextID;
@@ -81,8 +81,8 @@ void SI2::InitEmoteSounds() {
 
     s_numTextEmotes = count;
 
-    for (int32_t i = 0; i < g_emotesTextSoundDB.m_numRecords; i++) {
-        EmotesTextSoundRec* rec = (i < 0 || i >= g_emotesTextSoundDB.m_numRecords) ? nullptr : &g_emotesTextSoundDB.m_records[i];
+    for (int32_t i = 0; i < g_emotesTextSoundDB.GetNumRecords(); i++) {
+        EmotesTextSoundRec* rec = (i < 0 || i >= g_emotesTextSoundDB.GetNumRecords()) ? nullptr : &g_emotesTextSoundDB.m_records[i];
         uint32_t id = rec->m_emotesTextID;
 
         if (id >= s_textEmoteLookupById.Count()) {
@@ -96,7 +96,7 @@ void SI2::InitEmoteSounds() {
             (*slot)->m_emotesTextId = rec->m_emotesTextID;
         }
 
-        if (static_cast<uint32_t>(rec->m_raceID) < 22 && static_cast<uint32_t>(rec->m_sexID) < 2) {
+        if (static_cast<uint32_t>(rec->m_raceID) < NUM_RACES + 1 && static_cast<uint32_t>(rec->m_sexID) < 2) {
             (*slot)->m_soundIds[rec->m_raceID][rec->m_sexID] = rec->m_soundID;
         }
     }

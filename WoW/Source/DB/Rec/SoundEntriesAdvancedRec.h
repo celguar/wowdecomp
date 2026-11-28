@@ -5,6 +5,8 @@
 #include <cstdint>
 
 class SFileImpl;
+enum SI2_SOUND_USAGE : int32_t;
+enum SI2_SOUND_GROUP : int32_t;
 
 class SoundEntriesAdvancedRec {
     public:
@@ -20,10 +22,10 @@ class SoundEntriesAdvancedRec {
     /* 0014 */ int32_t m_timeC;
     /* 0018 */ int32_t m_timeD;
     /* 001C */ int32_t m_randomOffsetRange;
-    /* 0020 */ int32_t m_usage;
+    /* 0020 */ SI2_SOUND_USAGE m_usage;
     /* 0024 */ int32_t m_timeIntervalMin;
     /* 0028 */ int32_t m_timeIntervalMax;
-    /* 002C */ int32_t m_volumeSliderCategory;
+    /* 002C */ SI2_SOUND_GROUP m_volumeSliderCategory;
     /* 0030 */ float m_duckToSfx;
     /* 0034 */ float m_duckToMusic;
     /* 0038 */ float m_duckToAmbience;

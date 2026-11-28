@@ -21,6 +21,11 @@
 #include "WoW/Source/Ui/Types.h"
 #include "WoW/Source/Ui/UIBindings.h"
 
+// Interface version this client accepts from .toc files, and the oldest one
+// it still treats as compatible (inferred names).
+static const uint32_t CODE_INTERFACE_VERSION = 30300;
+static const uint32_t MIN_ADDON_INTERFACE_VERSION = 20000;
+
 // STATIC: 0x00AD17B4
 static const char* s_addOnLoadableTokens[12] = { "LOADABLE", "MISSING", "DISABLED", "BANNED", "CORRUPT", "INSECURE", "DEMAND_LOADED", "INTERFACE_VERSION", "INCOMPATIBLE", "SECURE", "INSECURE", "BANNED" };
 
@@ -96,7 +101,7 @@ static void ReadDataInterfaceVersion() {
 // VERIFY: 99fcd940 auto
 // OFFSET: 0x005F4C10
 uint32_t GetCodeInterfaceVersion() {
-    return 30300;
+    return CODE_INTERFACE_VERSION;
 }
 
 // VERIFY: 75e0f3ca auto
@@ -123,7 +128,7 @@ char* AddOnUnloadableToken(UIADDON_LOADABLE_REASON reason, UIADDON_LOADABLE_REAS
 
 // VERIFY: 200fce53 auto
 // OFFSET: 0x005F4C90
-const char* AddOnSecurityToken(int32_t security) {
+const char* AddOnSecurityToken(UIADDON_SECURITY security) {
     return s_addOnLoadableTokens[UIADDON_SECURE + security];
 }
 
@@ -389,7 +394,7 @@ UIADDON::UIADDON() {
     this->m_checkingLoadable = 0;
     this->m_url = nullptr;
     this->m_numFiles = 0;
-    this->m_status = 1;
+    this->m_status = UIADDON_SECURITY_INSECURE;
     this->m_enabledByDefault = true;
     this->m_outOfDate = 0;
     this->m_hasPublicKey = false;
@@ -519,7 +524,7 @@ static int32_t ComputeAddOnEnableState(const char* name) {
     UIADDON* addon = s_addons.Ptr(name);
 
     if (!addon) {
-        return 0;
+        return ADDON_ENABLE_STATE_DISABLED;
     }
 
     uint32_t total = 0;
@@ -538,14 +543,14 @@ static int32_t ComputeAddOnEnableState(const char* name) {
     }
 
     if (!total) {
-        return addon->m_enabledByDefault ? 2 : 0;
+        return addon->m_enabledByDefault ? ADDON_ENABLE_STATE_ALL : ADDON_ENABLE_STATE_DISABLED;
     }
 
     if (!enabled) {
-        return 0;
+        return ADDON_ENABLE_STATE_DISABLED;
     }
 
-    return 2 - (enabled < total);
+    return enabled < total ? ADDON_ENABLE_STATE_SOME : ADDON_ENABLE_STATE_ALL;
 }
 
 // VERIFY: 8a5c7a5a auto
@@ -697,16 +702,16 @@ void SetAddOnInfoRequest(CDataStore* msg) {
             WriteURL(path, addon->m_url);
         }
 
-        addon->m_status = 1;
+        addon->m_status = UIADDON_SECURITY_INSECURE;
         addon->m_signed = false;
 
-        if (state == 2) {
+        if (state == ADDON_INFO_STATE_BLIZZARD) {
             addon->m_blizzard = true;
         } else {
             addon->m_blizzard = false;
 
-            if (!state) {
-                addon->m_status = 2;
+            if (state == ADDON_INFO_STATE_BANNED) {
+                addon->m_status = UIADDON_SECURITY_BANNED;
                 continue;
             }
         }
@@ -719,10 +724,10 @@ void SetAddOnInfoRequest(CDataStore* msg) {
 
         int32_t result = FrameXML_CheckSignature(toc, bindings, addon->m_hasPublicKey ? addon->m_publicKey : nullptr, addon->m_digest);
 
-        if (result == 2) {
+        if (result == XML_SIGNATURE_MODIFIED) {
             addon->m_signed = true;
-        } else if (result == 3) {
-            addon->m_status = 0;
+        } else if (result == XML_SIGNATURE_VALID) {
+            addon->m_status = UIADDON_SECURITY_SECURE;
         }
     }
 
@@ -754,7 +759,7 @@ void SetAddOnInfoRequest(CDataStore* msg) {
         UIADDON::METADATA* version = addon->m_metadata.Ptr("Version");
 
         if (IsBannedAddOn(name, version ? version->m_value : nullptr)) {
-            addon->m_status = 2;
+            addon->m_status = UIADDON_SECURITY_BANNED;
         }
     }
 
@@ -777,7 +782,7 @@ int32_t GetAddOnEnableState(const char* name, const char* character, bool comput
     UIADDON* addon = s_addons.Ptr(name);
 
     if (!addon) {
-        return 0;
+        return ADDON_ENABLE_STATE_DISABLED;
     }
 
     uint32_t total = 0;
@@ -795,15 +800,15 @@ int32_t GetAddOnEnableState(const char* name, const char* character, bool comput
             state = addonState->m_enabled;
         } else if (compute) {
             switch (ComputeAddOnEnableState(name)) {
-                case 0:
+                case ADDON_ENABLE_STATE_DISABLED:
                     state = false;
                     break;
 
-                case 1:
+                case ADDON_ENABLE_STATE_SOME:
                     state = addon->m_enabledByDefault;
                     break;
 
-                case 2:
+                case ADDON_ENABLE_STATE_ALL:
                     state = true;
                     break;
             }
@@ -823,14 +828,14 @@ int32_t GetAddOnEnableState(const char* name, const char* character, bool comput
     }
 
     if (!total) {
-        return addon->m_enabledByDefault ? 2 : 0;
+        return addon->m_enabledByDefault ? ADDON_ENABLE_STATE_ALL : ADDON_ENABLE_STATE_DISABLED;
     }
 
     if (!enabled) {
-        return 0;
+        return ADDON_ENABLE_STATE_DISABLED;
     }
 
-    return 2 - (enabled < total);
+    return enabled < total ? ADDON_ENABLE_STATE_SOME : ADDON_ENABLE_STATE_ALL;
 }
 
 // VERIFY: 34f50be6 manual
@@ -852,7 +857,7 @@ bool IsAddOnLoadable(const char* name, bool demandLoad, UIADDON_LOADABLE_REASON&
         return false;
     }
 
-    if (addon->m_status == 2) {
+    if (addon->m_status == UIADDON_SECURITY_BANNED) {
         reason = UIADDON_BANNED;
         return false;
     }
@@ -862,12 +867,12 @@ bool IsAddOnLoadable(const char* name, bool demandLoad, UIADDON_LOADABLE_REASON&
         return false;
     }
 
-    if (addon->m_interfaceVersion < 20000) {
+    if (addon->m_interfaceVersion < MIN_ADDON_INTERFACE_VERSION) {
         reason = UIADDON_INCOMPATIBLE;
         return false;
     }
 
-    if (addon->m_interfaceVersion != 30300) {
+    if (addon->m_interfaceVersion != CODE_INTERFACE_VERSION) {
         reason = UIADDON_INTERFACE_VERSION;
 
         if (g_checkAddonVersionVar->m_intValue) {
@@ -990,10 +995,11 @@ static void LoadAddOnMetadata(UIADDON* addon, const char* line) {
         end++;
     }
 
-    uint32_t keyLength = keyEnd - line;
-    char* key = static_cast<char*>(alloca(keyLength + 1));
-    memcpy(key, line, keyLength);
-    key[keyLength] = '\0';
+    uint32_t len = keyEnd - line;
+    STORM_ASSERT(len > 0);
+    char* key = static_cast<char*>(alloca(len + 1));
+    memcpy(key, line, len);
+    key[len] = '\0';
 
     addon->SetMetadata(key, end);
 }
@@ -1037,11 +1043,11 @@ bool LoadAddOn(const char* name, bool demandLoad, CStatus* status) {
         const char* savedTaint = lua_tainted;
 
         if (++lua_taintexpected && !lua_taintedclosure) {
-            lua_tainted = addon->m_status ? addonName : nullptr;
+            lua_tainted = addon->m_status != UIADDON_SECURITY_SECURE ? addonName : nullptr;
         }
 
         const char* savedTag = lua_gctag;
-        lua_gctag = addon->m_status ? addonName : nullptr;
+        lua_gctag = addon->m_status != UIADDON_SECURITY_SECURE ? addonName : nullptr;
 
         CStatus addonStatus;
         MD5_CTX md5;
@@ -1082,8 +1088,8 @@ bool LoadAddOn(const char* name, bool demandLoad, CStatus* status) {
         MD5Final(digest, &md5);
 
 #ifndef DISABLE_SIGNATURE_CHECKS
-        if (!addon->m_status && memcmp(addon->m_digest, digest, sizeof(digest))) {
-            ClientPostClose(10);
+        if (addon->m_status == UIADDON_SECURITY_SECURE && memcmp(addon->m_digest, digest, sizeof(digest))) {
+            ClientPostClose(MSG_FRAMEXML_UI_CORRUPT);
         }
 #endif
 
@@ -1394,7 +1400,7 @@ static int32_t EnumAddOnsArchive(const char* fileName, void* param) {
 // VERIFY: 32ba47b7 auto
 // OFFSET: 0x005F8F30
 static int32_t EnumAddOnsDisk(OS_FILE_DATA& data, void* param) {
-    if ((data.flags & 0x10) && data.fileName[0] != '.') {
+    if ((data.flags & OS_FILE_ATTRIBUTE_DIRECTORY) && data.fileName[0] != '.') {
         LoadAddOnInfo(data.fileName);
     }
 
@@ -1480,7 +1486,7 @@ void LoadAddOnEnableState(const char* character) {
     }
 
     if (TSList<ADDONSTATELIST, TSGetLink<ADDONSTATELIST> >::IsEnd(list)) {
-        list = s_addOnStates.NewNode(2, 0, 8);
+        list = s_addOnStates.NewNode(TSLIST_LINK_BEFORE, 0, SMEM_FLAG_ZEROMEMORY);
         list->m_name = SStrDupA(character, __FILE__, __LINE__);
     }
 
@@ -1547,7 +1553,7 @@ void LoadAddOnEnableState(const char* character) {
 // VERIFY: 3bde2f06 manual
 // OFFSET: 0x005F5620
 void UnloadAddOns() {
-    int32_t changed = 0;
+    BOOL changed = 0;
     char path[260];
     SStrPrintf(path, sizeof(path), "WTF\\Account\\%s\\SavedVariables", s_addOnAccountName);
 
@@ -1698,14 +1704,14 @@ void UnloadAddOns() {
 
 // VERIFY: 1697dec4 auto
 // OFFSET: 0x005F7670
-int32_t GetAddOnSecurity(const char* name) {
+UIADDON_SECURITY GetAddOnSecurity(const char* name) {
     UIADDON* addon = s_addons.Ptr(name);
 
     if (addon) {
         return addon->m_status;
     }
 
-    return 1;
+    return UIADDON_SECURITY_INSECURE;
 }
 
 // VERIFY: 6b68ae99 manual
@@ -1761,7 +1767,7 @@ bool IsAddonVersionCheckEnabled() {
 
 // VERIFY: e8b33bcf auto
 // OFFSET: 0x005F4CB0
-void SetAddonVersionCheck(int32_t enable) {
+void SetAddonVersionCheck(BOOL enable) {
     if (enable) {
         g_checkAddonVersionVar->Set("1", true, false, false, true);
     } else {
@@ -1780,7 +1786,7 @@ const char* GetAddOnURL(const char* name) {
 
     const char* url = addon->m_url;
 
-    if (!url || !*url || addon->m_status == 2) {
+    if (!url || !*url || addon->m_status == UIADDON_SECURITY_BANNED) {
         return nullptr;
     }
 

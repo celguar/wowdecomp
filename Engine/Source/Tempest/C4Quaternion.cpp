@@ -5,6 +5,7 @@
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Tempest/C4Quaternion.h"
 #include "Engine/Source/Tempest/CMath.h"
+#include "Engine/Source/Storm/H/storm.h"
 
 // STATIC: 0x00AA2E4C
 static const uint32_t s_nextAxis[3] = { 1, 2, 0 };
@@ -38,7 +39,9 @@ static void FromRotationMatrixImpl(float trace, C4Quaternion& q, const float* m)
     out[i] = s * 0.5f;
     s = 0.5f / s;
     q.w = (m[k * N + j] - m[j * N + k]) * s;
+    STORM_ASSERT(j < 4); // 12213: "sub < eComponents"
     out[j] = (m[i * N + j] + m[j * N + i]) * s;
+    STORM_ASSERT(k < 4); // 12213: "sub < eComponents"
     out[k] = (m[i * N + k] + m[k * N + i]) * s;
 }
 
@@ -67,6 +70,11 @@ C4Quaternion::C4Quaternion(const C4QuaternionCompressed& compressed) {
 // VERIFY: 94bc14f8 manual
 // OFFSET: 0x00982400
 void C4Quaternion::FromAngleAxis(float angle, const C3Vector& axis) {
+#if defined(WOWDECOMP_ASSERTIONS)
+    float mag = axis.Mag();
+    STORM_ASSERT(CMath::fequal_(mag, 1.0f));
+#endif
+
     float half = angle * 0.5f;
     float c = cos(half);
     float s = sin(half);

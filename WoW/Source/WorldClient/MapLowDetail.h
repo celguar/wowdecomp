@@ -9,20 +9,27 @@
 #include "Engine/Source/Tempest/CAaBox.h"
 #include "Engine/Source/Tempest/CAaSphere.h"
 #include "WoW/Source/WorldClient/FVBBList.h"
+#include "WoW/Source/WorldClient/WorldConstants.h"
 
 class CMapObjDef;
 struct SMMapObjDef;
 
 class CMapAreaLow {
     public:
+    enum FLAGS : uint32_t {
+        NONE = 0x0,
+        // Never set in this client; when set, the shared full-grid index buffer is not used.
+        UNKNOWN_1 = 0x1,
+    };
+
     /* 0000 */ uint32_t m_objectIndex;
     /* 0004 */ CAaBox m_bbox;
     /* 001C */ CAaSphere m_sphere;
     /* 002C */ C3Vector m_topLeft;
     /* 0038 */ C2iVector m_index;
     /* 0040 */ uint32_t m_indexCount;
-    /* 0044 */ int16_t* m_heights;
-    /* 0048 */ uint16_t* m_holes;
+    /* 0044 */ const int16_t* m_heights;
+    /* 0048 */ const uint16_t* m_holes;
     /* 004C */ TSLink<CMapAreaLow> m_horizonLink;
     /* 0054 */ FVBBList::Block* m_block;
     /* 0058 */ uint32_t m_flags;
@@ -38,17 +45,21 @@ class CMapAreaLowHeap {
 };
 
 class CMapLowDetail {
-    public:
+    private:
     /* 0000 */ char* m_data;
     /* 0004 */ char* m_mapObjNames;
-    /* 0008 */ uint32_t* m_mapObjNameOffsets;
+    /* 0008 */ const uint32_t* m_mapObjNameOffsets;
     /* 000C */ SMMapObjDef* m_mapObjDefs;
     /* 0010 */ uint32_t m_mapObjDefCount;
-    /* 0014 */ uint32_t* m_areaOffsets;
-    /* 0018 */ CMapAreaLow* m_areas [4096];
+    /* 0014 */ const uint32_t* m_areaOffsets;
+    /* 0018 */ CMapAreaLow* m_areaTable [MAP_AREA_COUNT];
     /* 4018 */ TSGrowableArray<CMapObjDef*> m_mapObjDefList;
 
+    public:
     CMapLowDetail();
+#if defined(WOWDECOMP_ASSERTIONS)
+    ~CMapLowDetail();
+#endif
     void CullHorizonAreas(const C3Vector* pos);
     void Load(const char* mapPath, const char* mapName);
     void Purge();

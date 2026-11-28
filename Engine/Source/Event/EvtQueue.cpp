@@ -26,7 +26,7 @@ int32_t IEvtQueueCheckSyncMouseState(EvtContext* context, MOUSEBUTTON button) {
         return 0;
     }
 
-    return (context->m_queueSyncButtonState & button) != 0;
+    return context->QueueCheckSyncButton(button);
 }
 
 // VERIFY: 18d2b766 manual
@@ -38,9 +38,9 @@ void IEvtQueueRegister(EvtContext* context, EVENTID id, EVENTHANDLERFUNC handler
         return;
     }
 
-    TSExplicitList<EvtHandler, offsetof(EvtHandler, m_link)>& list = context->m_queueHandlerList[id];
+    TSExplicitList<EvtHandler, offsetof(EvtHandler, m_link)>& list = context->QueueGetHandlerList(id);
 
-    EvtHandler* evtHandler = list.NewNode(0, 0, 0);
+    EvtHandler* evtHandler = list.NewNode(TSLIST_NEWNODE_UNLINKED, 0, 0);
     evtHandler->m_priority = priority;
     evtHandler->m_param = param;
     evtHandler->m_func = handler;
@@ -52,7 +52,8 @@ void IEvtQueueRegister(EvtContext* context, EVENTID id, EVENTHANDLERFUNC handler
         existing = list.Next(existing);
     }
 
-    list.LinkNode(evtHandler, 2, existing);
+    list.LinkNode(evtHandler, TSLIST_LINK_BEFORE, existing);
+    STORM_ASSERT(context->IsCurrentContext()); // 12213: "IsCurrentContext()"
 }
 
 // VERIFY: ee77d145 auto
@@ -79,11 +80,11 @@ void IEvtQueuePost(EvtContext* context, EVENTID id, const void* data, uint32_t b
 // VERIFY: aa0a8976 manual
 // OFFSET: 0x004808A0
 static void UpdateSyncKeyState(EvtContext* context, KEY key, EVENTID& id) {
-    int32_t found = 0;
+    BOOL found = 0;
 
-    context->m_critsect.Enter();
+    context->QueueLockSyncKeys();
 
-    TSExplicitList<EvtKeyDown, offsetof(EvtKeyDown, m_link)>& list = context->m_queueSyncKeyDownList;
+    TSExplicitList<EvtKeyDown, offsetof(EvtKeyDown, m_link)>& list = context->QueueGetSyncKeys();
     EvtKeyDown* keyDown = list.Head();
 
     while (keyDown) {
@@ -100,11 +101,11 @@ static void UpdateSyncKeyState(EvtContext* context, KEY key, EVENTID& id) {
             id = EVENT_ID_KEYDOWN_REPEATING;
         }
 
-        EvtKeyDown* newKeyDown = list.NewNode(2, 0, 0);
+        EvtKeyDown* newKeyDown = list.NewNode(TSLIST_LINK_BEFORE, 0, 0);
         newKeyDown->m_key = key;
     }
 
-    context->m_critsect.Leave();
+    context->QueueUnlockSyncKeys();
 }
 
 // VERIFY: 03c42d9d auto
@@ -118,10 +119,10 @@ static void UpdateSyncState(EvtContext* context, EVENTID& id, const void* data) 
 
     switch (id) {
         case EVENT_ID_FOCUS:
-            context->m_queueSyncButtonState = 0;
-            context->m_critsect.Enter();
-            context->m_queueSyncKeyDownList.Clear();
-            context->m_critsect.Leave();
+            context->QueueClearSyncButtons(~uint32_t{0});
+            context->QueueLockSyncKeys();
+            context->QueueGetSyncKeys().Clear();
+            context->QueueUnlockSyncKeys();
             break;
 
         case EVENT_ID_KEYDOWN:
@@ -134,9 +135,9 @@ static void UpdateSyncState(EvtContext* context, EVENTID& id, const void* data) 
             uint32_t button = static_cast<const EVENT_DATA_MOUSE*>(data)->m_button;
 
             if (id == EVENT_ID_MOUSEDOWN) {
-                context->m_queueSyncButtonState |= button;
+                context->QueueSetSyncButtons(button);
             } else {
-                context->m_queueSyncButtonState &= ~button;
+                context->QueueClearSyncButtons(button);
             }
 
             break;
@@ -156,18 +157,18 @@ int32_t IEvtQueueCheckSyncKeyState(EvtContext* context, KEY key) {
         return 0;
     }
 
-    int32_t found = 0;
+    BOOL found = 0;
 
-    context->m_critsect.Enter();
+    context->QueueLockSyncKeys();
 
-    for (EvtKeyDown* keyDown = context->m_queueSyncKeyDownList.Head(); keyDown; keyDown = context->m_queueSyncKeyDownList.Next(keyDown)) {
+    for (EvtKeyDown* keyDown = context->QueueGetSyncKeys().Head(); keyDown; keyDown = context->QueueGetSyncKeys().Next(keyDown)) {
         if (keyDown->m_key == key) {
             found = 1;
             break;
         }
     }
 
-    context->m_critsect.Leave();
+    context->QueueUnlockSyncKeys();
 
     return found;
 }
@@ -189,7 +190,7 @@ void IEvtQueueDispatch(EvtContext* context, EVENTID id, const void* data) {
 
     IEvtSchedulerIsContextInteractive(context);
 
-    TSExplicitList<EvtHandler, offsetof(EvtHandler, m_link)>& list = context->m_queueHandlerList[id];
+    TSExplicitList<EvtHandler, offsetof(EvtHandler, m_link)>& list = context->QueueGetHandlerList(id);
 
     EvtHandler marker;
     marker.m_marker = 1;
@@ -198,7 +199,7 @@ void IEvtQueueDispatch(EvtContext* context, EVENTID id, const void* data) {
     EvtHandler* handler;
 
     while ((handler = list.Next(&marker)) != nullptr) {
-        list.LinkNode(&marker, 1, handler);
+        list.LinkNode(&marker, TSLIST_LINK_AFTER, handler);
 
         if (handler->m_marker) {
             continue;
@@ -210,6 +211,7 @@ void IEvtQueueDispatch(EvtContext* context, EVENTID id, const void* data) {
     }
 
     list.UnlinkNode(&marker);
+    STORM_ASSERT(context->IsCurrentContext()); // 12213: "IsCurrentContext()"
 }
 
 // VERIFY: 4f5a3a2c auto
@@ -249,7 +251,7 @@ void IEvtQueueUnregister(EvtContext* context, EVENTID id, EVENTHANDLERFUNC handl
             continue;
         }
 
-        TSExplicitList<EvtHandler, offsetof(EvtHandler, m_link)>& list = context->m_queueHandlerList[i];
+        TSExplicitList<EvtHandler, offsetof(EvtHandler, m_link)>& list = context->QueueGetHandlerList(static_cast<EVENTID>(i));
         EvtHandler* evtHandler = list.Head();
 
         while (evtHandler) {

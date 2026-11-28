@@ -1,10 +1,12 @@
 #include "MapChunk.h"
+#include "Engine/Source/Tempest/Color.h"
 #include "WoW/Source/WorldClient/WorldConstants.h"
 #include "WoW/Source/WorldClient/DetailDoodad.h"
 #include "WoW/Source/WorldClient/CDetailDoodadData.h"
 #include "Engine/Source/Tempest/CRandom.h"
 #include "Engine/Source/Tempest/C3Ray.h"
 #include "Engine/Source/Tempest/NTempest.h"
+#include <cfloat>
 #include <cmath>
 #include "Engine/Source/Base/CDataAllocator.h"
 #include "Engine/Source/Base/RCString.h"
@@ -56,7 +58,7 @@ static const uint32_t s_bitShift[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 float CMapChunk::s_geoToTex;
 
 // STATIC: 0x00D25498
-C3Vector CMapChunk::vertexList[145];
+C3Vector CMapChunk::vertexList[TERRAIN_CHUNK_VERTEX_COUNT];
 
 // STATIC: 0x00AEEE3C
 const int32_t CMapChunk::cornerVertexIndex[4] = { 0, 8, 136, 144 };
@@ -89,15 +91,15 @@ void CMapChunk::Purge() {
         this->m_renderChunk = nullptr;
     }
 
-    if (this->m_detailDoodadInst) {
-        CDetailDoodad::FreeInst(this->m_detailDoodadInst);
-        this->m_detailDoodadInst = nullptr;
+    if (this->detailDoodadInst) {
+        CDetailDoodad::FreeInst(this->detailDoodadInst);
+        this->detailDoodadInst = nullptr;
     }
 
-    CChunkLiquid* liquid = this->m_liquidChunkLinkList.Head();
+    CChunkLiquid* liquid = this->liquidsList.Head();
 
     while (liquid) {
-        CChunkLiquid* next = this->m_liquidChunkLinkList.Next(liquid);
+        CChunkLiquid* next = this->liquidsList.Next(liquid);
         liquid->m_chunkLink.Unlink();
         liquid->Purge();
         CMap::FreeChunkLiquid(liquid);
@@ -106,21 +108,21 @@ void CMapChunk::Purge() {
 
     this->m_sortListLink.Unlink();
 
-    for (CMapBaseObjLink* link = this->m_doodadDefLinkList.Head(); link;) {
-        CMapBaseObjLink* next = this->m_doodadDefLinkList.Next(link);
-        CMapDoodadDef* doodadDef = static_cast<CMapDoodadDef*>(link->m_owner);
+    for (CMapBaseObjLink* link = this->doodadDefLinkList.Head(); link;) {
+        CMapBaseObjLink* next = this->doodadDefLinkList.Next(link);
+        CMapDoodadDef* doodadDef = static_cast<CMapDoodadDef*>(link->owner);
         CMap::FreeBaseObjLink(link);
 
-        if (!(doodadDef->m_flags & 0x200)) {
+        if (!(doodadDef->m_flags & MAPOBJ_FLAG_IN_MAPOBJ)) {
             CMapDoodadDef::Purge(doodadDef);
         }
 
         link = next;
     }
 
-    for (CMapBaseObjLink* link = this->m_mapObjDefLinkList.Head(); link;) {
-        CMapBaseObjLink* next = this->m_mapObjDefLinkList.Next(link);
-        CMapObjDef* mapObjDef = static_cast<CMapObjDef*>(link->m_owner);
+    for (CMapBaseObjLink* link = this->mapObjDefLinkList.Head(); link;) {
+        CMapBaseObjLink* next = this->mapObjDefLinkList.Next(link);
+        CMapObjDef* mapObjDef = static_cast<CMapObjDef*>(link->owner);
         CMap::FreeBaseObjLink(link);
         CMap::PurgeMapObjDef(mapObjDef);
         link = next;
@@ -132,14 +134,14 @@ void CMapChunk::Purge() {
         link = next;
     }
 
-    for (CMapBaseObjLink* link = this->m_entityLinkList.Head(); link;) {
-        CMapBaseObjLink* next = this->m_entityLinkList.Next(link);
+    for (CMapBaseObjLink* link = this->entityLinkList.Head(); link;) {
+        CMapBaseObjLink* next = this->entityLinkList.Next(link);
         CMap::FreeBaseObjLink(link);
         link = next;
     }
 
-    for (CMapBaseObjLink* link = this->m_lightLinkList.Head(); link;) {
-        CMapBaseObjLink* next = this->m_lightLinkList.Next(link);
+    for (CMapBaseObjLink* link = this->lightLinkList.Head(); link;) {
+        CMapBaseObjLink* next = this->lightLinkList.Next(link);
         CMap::FreeBaseObjLink(link);
         link = next;
     }
@@ -156,89 +158,94 @@ void CMapChunk::SelectLights(CM2Lighting* lighting) {
     lighting->AddLight(&CMap::s_mapLight->m_light);
 
     if (CWorld::farFog > this->m_distToCamera && (this->m_flags & MAPOBJ_FLAG_UNPLACED)) {
+        STORM_ASSERT(lightLinkList.Head() == nullptr); // 12213: "lightLinkList.Head() == __null"
         this->m_flags = static_cast<MapObjFlag>(this->m_flags & ~MAPOBJ_FLAG_UNPLACED);
     }
 
     DayNight::DNInfo* info = DayNight::GetInfo();
-    C3Vector fogColor;
-    fogColor.x = info->m_fog.m_color.r * 0.0039215689f;
-    fogColor.y = info->m_fog.m_color.g * 0.0039215689f;
-    fogColor.z = info->m_fog.m_color.b * 0.0039215689f;
+    C3Vector fogColor(info->m_fog.m_color);
 
     lighting->SetFog(fogColor, info->m_fog.m_start, info->m_fog.m_end, info->m_fog.m_density);
 }
 
 // VERIFY: 092514c8 manual
 // OFFSET: 0x007C3A10
-void CMapChunk::ProcessIffChunks(bool a3) {
-    SIffChunk* headerChunk = reinterpret_cast<SIffChunk*>(this->m_chunkInfoBeginPtr);
-    this->m_header = reinterpret_cast<SMChunk*>(&headerChunk->m_data);
+void CMapChunk::ProcessIffChunks(bool firstUse) {
+    SIffChunk* iffChunk = reinterpret_cast<SIffChunk*>(this->m_chunkInfoBeginPtr);
+    STORM_ASSERT(iffChunk->token == SIffChunk::TOKEN_MCNK); // 12213: "iffChunk->token=='MCNK'"
+    this->m_header = reinterpret_cast<SMChunk*>(&iffChunk->m_data);
 
-    int32_t remaining = headerChunk->m_size - sizeof(SMChunk);
+    SMChunk* smChunk = this->m_header;
+
+    int32_t dataSize = iffChunk->m_size - sizeof(SMChunk);
     SIffChunk* chunk = reinterpret_cast<SIffChunk*>(reinterpret_cast<uint8_t*>(this->m_header) + sizeof(SMChunk));
 
-    while (remaining > 0) {
+    while (dataSize > 0) {
         uint8_t* data = reinterpret_cast<uint8_t*>(&chunk->m_data);
-        remaining -= offsetof(SIffChunk, m_data);
+        dataSize -= offsetof(SIffChunk, m_data);
 
-        switch (chunk->m_token) {
-            case 0x4D434E52:
+        switch (chunk->token) {
+            case SIffChunk::TOKEN_MCNR:
                 this->m_normals = reinterpret_cast<int8_t*>(data);
 
-                if (a3) {
+                if (firstUse) {
+                    STORM_ASSERT(smChunk->sizeAlpha >= offsetof(SIffChunk, m_data)); // 12213: "smChunk->sizeAlpha >= sizeof(SIffChunk)"
                     chunk->m_size = 448;
                 }
 
                 break;
 
-            case 0x4D435348:
+            case SIffChunk::TOKEN_MCSH:
                 this->m_shadowMap = data;
                 break;
 
-            case 0x4D435654:
+            case SIffChunk::TOKEN_MCVT:
                 this->m_height = reinterpret_cast<float*>(data);
                 break;
 
-            case 0x4D435246:
+            case SIffChunk::TOKEN_MCRF:
                 this->m_mcrfPtr = data;
                 break;
 
-            case 0x4D435345:
-                if (this->m_header->m_nSndEmitters) {
+            case SIffChunk::TOKEN_MCSE:
+                if (smChunk->m_nSndEmitters) {
                     this->m_soundEmitters = reinterpret_cast<CWSoundEmitter*>(data);
                 }
 
                 break;
 
-            case 0x4D434C59:
+            case SIffChunk::TOKEN_MCLY:
                 this->m_layers = reinterpret_cast<SMLayer*>(data);
                 break;
 
-            case 0x4D434C51:
-                if (this->m_header->m_sizeLiquid > 8) {
+            case SIffChunk::TOKEN_MCLQ:
+                if (smChunk->m_sizeLiquid > 8) {
                     this->m_liquid = reinterpret_cast<SMLiquidChunk*>(data);
-                    chunk->m_size = this->m_header->m_sizeLiquid - 8;
+                    chunk->m_size = smChunk->m_sizeLiquid - 8;
                 }
 
                 break;
 
-            case 0x4D43414C:
+            case SIffChunk::TOKEN_MCAL:
                 this->m_additionalShadowmap = data;
 
-                if (a3) {
-                    chunk->m_size = this->m_header->m_sizeAlpha - 8;
+                if (firstUse) {
+                    STORM_ASSERT(smChunk->sizeAlpha >= offsetof(SIffChunk, m_data)); // 12213: "smChunk->sizeAlpha >= sizeof(SIffChunk)"
+                    chunk->m_size = smChunk->sizeAlpha - 8;
                 }
 
                 break;
 
-            case 0x4D434356:
+            case SIffChunk::TOKEN_MCCV:
                 this->m_vertexShading = reinterpret_cast<uint32_t*>(data);
                 break;
         }
 
-        remaining -= chunk->m_size;
+        dataSize -= chunk->m_size;
         chunk = reinterpret_cast<SIffChunk*>(data + chunk->m_size);
     }
+
+    STORM_ASSERT(dataSize == 0);
 }
 
 // VERIFY: 86d6cd8c manual
@@ -246,17 +253,17 @@ void CMapChunk::ProcessIffChunks(bool a3) {
 void CMapChunk::InitializeVertexGrid() {
     C3Vector* vertex = CMapChunk::vertexList;
 
-    for (int32_t row = 0; row < 9; row++) {
+    for (int32_t row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
         float x = row * -SMOLTILE_SIZE;
 
-        for (int32_t col = 0; col < 9; col++) {
+        for (int32_t col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             vertex->x = x;
             vertex->y = 0.0f - col * SMOLTILE_SIZE;
             vertex++;
         }
 
-        if (row < 8) {
-            for (int32_t col = 0; col < 8; col++) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
+            for (int32_t col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 vertex->x = x - HALF_SMOLTILE_SIZE;
                 vertex->y = 0.0f - col * SMOLTILE_SIZE - HALF_SMOLTILE_SIZE;
                 vertex++;
@@ -284,7 +291,8 @@ void CMapChunk::Destroy() {
 // OFFSET: 0x007C3B40
 void CMapChunk::AllocRenderChunkAndBatch() {
     this->m_renderChunk = CMap::AllocRenderChunk();
-    this->m_renderChunk->AddBatch(this, nullptr, &this->m_topLeftCoords, 0);
+    STORM_ASSERT(m_renderChunk);
+    this->m_renderChunk->AddBatch(this, nullptr, &this->m_topLeftCoords, CMapRenderChunk::BATCH_FLAGS::BATCH_NONE);
 }
 
 // VERIFY: b0c09ba2 manual
@@ -293,17 +301,17 @@ int16_t CMapChunk::CreateIndices(char* buf, int32_t baseVertex) {
     uint16_t* indexDst = reinterpret_cast<uint16_t*>(buf);
     int16_t totalIndices = 0;
 
-    for (int row = 0; row < 8; ++row) {
-        for (int col = 0; col < 8; ++col) {
+    for (int row = 0; row < TERRAIN_TILES_PER_CHUNK_AXIS; ++row) {
+        for (int col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; ++col) {
             int holeMaskIndex = (row / 2) * 4 + (col / 2);
             if (this->m_header->m_holes & CMap::s_holeMask[holeMaskIndex])
                 continue;
 
             uint16_t TL = baseVertex + col;
             uint16_t TR = baseVertex + col + 1;
-            uint16_t C = baseVertex + col + 9;
-            uint16_t BL = baseVertex + col + 17;
-            uint16_t BR = baseVertex + col + 18;
+            uint16_t C = baseVertex + col + TERRAIN_VERTICES_PER_CHUNK_AXIS;
+            uint16_t BL = baseVertex + col + TERRAIN_CHUNK_VERTEX_ROW_STRIDE;
+            uint16_t BR = baseVertex + col + TERRAIN_CHUNK_VERTEX_ROW_STRIDE + 1;
 
             indexDst[0] = C;
             indexDst[1] = TL;
@@ -321,7 +329,7 @@ int16_t CMapChunk::CreateIndices(char* buf, int32_t baseVertex) {
             totalIndices += 12;
         }
 
-        baseVertex += 17;
+        baseVertex += TERRAIN_CHUNK_VERTEX_ROW_STRIDE;
     }
 
     return totalIndices;
@@ -351,8 +359,8 @@ void __fastcall CWorldScene::AddMapChunk(CMapChunk* mapChunk) {
 // VERIFY: d44747a1 manual
 // OFFSET: 0x007C3F30
 void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
-    static float cols[9];
-    static float rows[9];
+    static float cols[TERRAIN_VERTICES_PER_CHUNK_AXIS];
+    static float rows[TERRAIN_VERTICES_PER_CHUNK_AXIS];
 
     float left = 17066.666f - this->m_cOffset.x * 33.333332f;
     float top = 17066.666f - this->m_cOffset.y * 33.333332f;
@@ -378,8 +386,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
     float* height = this->m_height;
     int8_t* normals = this->m_normals;
 
-    for (int32_t row = 0; row < 9; row++) {
-        for (int32_t col = 0; col < 9; col++) {
+    for (int32_t row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
+        for (int32_t col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             v->m_position.x = rows[row];
             v->m_position.y = cols[col];
             v->m_position.z = this->m_topLeftCoords.z + height[col];
@@ -389,11 +397,11 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
             v++;
         }
 
-        height += 9;
-        normals += 27;
+        height += TERRAIN_VERTICES_PER_CHUNK_AXIS;
+        normals += 3 * TERRAIN_VERTICES_PER_CHUNK_AXIS;
 
-        if (row < 8) {
-            for (int32_t col = 0; col < 8; col++) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
+            for (int32_t col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 v->m_position.x = rows[row] - HALF_SMOLTILE_SIZE;
                 v->m_position.y = cols[col] - HALF_SMOLTILE_SIZE;
                 v->m_position.z = this->m_topLeftCoords.z + height[col];
@@ -403,8 +411,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
                 v++;
             }
 
-            height += 8;
-            normals += 24;
+            height += TERRAIN_TILES_PER_CHUNK_AXIS;
+            normals += 3 * TERRAIN_TILES_PER_CHUNK_AXIS;
         }
     }
 }
@@ -412,8 +420,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPN* v, const C3Vector& offset) {
 // VERIFY: 6a9c0ba2 manual
 // OFFSET: 0x007C4620
 void CMapChunk::CreateVerticesWorld(CGxVertexPNC* v, const C3Vector& offset) {
-    static float cols[9];
-    static float rows[9];
+    static float cols[TERRAIN_VERTICES_PER_CHUNK_AXIS];
+    static float rows[TERRAIN_VERTICES_PER_CHUNK_AXIS];
 
     float left = 17066.666f - this->m_cOffset.x * 33.333332f;
     float top = 17066.666f - this->m_cOffset.y * 33.333332f;
@@ -440,8 +448,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPNC* v, const C3Vector& offset) {
     uint32_t* shading = this->m_vertexShading;
     float* height = this->m_height;
 
-    for (int32_t row = 0; row < 9; row++) {
-        for (int32_t col = 0; col < 9; col++) {
+    for (int32_t row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
+        for (int32_t col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             v->m_position.x = rows[row];
             v->m_position.y = cols[col];
             v->m_position.z = this->m_topLeftCoords.z + *height;
@@ -467,8 +475,8 @@ void CMapChunk::CreateVerticesWorld(CGxVertexPNC* v, const C3Vector& offset) {
             shading++;
         }
 
-        if (row < 8) {
-            for (int32_t col = 0; col < 8; col++) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
+            for (int32_t col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 v->m_position.x = rows[row] - HALF_SMOLTILE_SIZE;
                 v->m_position.y = cols[col] - HALF_SMOLTILE_SIZE;
                 v->m_position.z = this->m_topLeftCoords.z + *height;
@@ -508,10 +516,10 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPN* v) {
     float* height = this->m_height;
     int8_t* normals = this->m_normals;
 
-    for (int row = 0; row < 9; row++) {
+    for (int row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
         const float outerX = (float)row * stepY;
 
-        for (int col = 0; col < 9; col++) {
+        for (int col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             v->m_position.x = outerX;
             v->m_position.y = (float)col * stepX;
             v->m_position.z = height[col];
@@ -521,13 +529,13 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPN* v) {
             v++;
         }
 
-        height += 9;
-        normals += 27;
+        height += TERRAIN_VERTICES_PER_CHUNK_AXIS;
+        normals += 3 * TERRAIN_VERTICES_PER_CHUNK_AXIS;
 
-        if (row < 8) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
             const float innerX = (float)row * stepX + 0.5f * stepY;
 
-            for (int col = 0; col < 8; col++) {
+            for (int col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 v->m_position.x = innerX;
                 v->m_position.y = (float)col * stepY + halfStepX;
                 v->m_position.z = height[col];
@@ -537,8 +545,8 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPN* v) {
                 v++;
             }
 
-            height += 8;
-            normals += 24;
+            height += TERRAIN_TILES_PER_CHUNK_AXIS;
+            normals += 3 * TERRAIN_TILES_PER_CHUNK_AXIS;
         }
     }
 }
@@ -556,8 +564,8 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPNC* v) {
     int8_t* normals = this->m_normals;
     uint32_t* shading = this->m_vertexShading;
 
-    for (int32_t row = 0; row < 9; row++) {
-        for (int32_t col = 0; col < 9; col++) {
+    for (int32_t row = 0; row < TERRAIN_VERTICES_PER_CHUNK_AXIS; row++) {
+        for (int32_t col = 0; col < TERRAIN_VERTICES_PER_CHUNK_AXIS; col++) {
             v->m_position.x = stepY * row;
             v->m_position.y = col * stepX;
             v->m_position.z = *height;
@@ -579,7 +587,7 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPNC* v) {
                     v->m_color = color;
                 }
             } else {
-                *reinterpret_cast<uint32_t*>(&v->m_color) = 0xFF7F7F7F;
+                *reinterpret_cast<uint32_t*>(&v->m_color) = COLOR_GRAY_127_ARGB;
             }
 
             height++;
@@ -588,10 +596,10 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPNC* v) {
             shading++;
         }
 
-        if (row < 8) {
+        if (row < TERRAIN_TILES_PER_CHUNK_AXIS) {
             float innerX = row * stepX + halfStepY;
 
-            for (int32_t col = 0; col < 8; col++) {
+            for (int32_t col = 0; col < TERRAIN_TILES_PER_CHUNK_AXIS; col++) {
                 v->m_position.x = innerX;
                 v->m_position.y = col * stepY + halfStepX;
                 v->m_position.z = *height;
@@ -613,7 +621,7 @@ void CMapChunk::CreateVerticesLocal(CGxVertexPNC* v) {
                         v->m_color = color;
                     }
                 } else {
-                    *reinterpret_cast<uint32_t*>(&v->m_color) = 0xFF7F7F7F;
+                    *reinterpret_cast<uint32_t*>(&v->m_color) = COLOR_GRAY_127_ARGB;
                 }
 
                 height++;
@@ -659,8 +667,8 @@ void CMapChunk::CreateBounds() {
     this->m_bbox.t.x = 17066.666f - 33.333332f * tileY;
     this->m_bbox.b.y = 17066.666f - 33.333332f * (tileX + 1);
     this->m_bbox.t.y = 17066.666f - 33.333332f * tileX;
-    this->m_bbox.b.z = 3.4028235e38f;
-    this->m_bbox.t.z = -3.4028235e38f;
+    this->m_bbox.b.z = FLT_MAX;
+    this->m_bbox.t.z = -FLT_MAX;
 
     float* h = this->m_height;
     int count = 29;
@@ -697,16 +705,17 @@ void CMapChunk::Batch() {
         return;
     }
 
+    STORM_ASSERT(m_renderChunk == nullptr); // 12213: "m_renderChunk == __null"
+
     if (CMap::enableChunkBatching) {
-        CMapArea* area = static_cast<CMapArea*>(this->m_parentLinkList.Head()->m_ref);
+        CMapArea* area = static_cast<CMapArea*>(this->m_parentLinkList.Head()->ref);
 
         C2iVector pos;
-        pos.x = this->m_aIndex.x & ~1;
-        pos.y = this->m_aIndex.y & ~1;
+        pos.x = this->aIndex.x & ~1;
+        pos.y = this->aIndex.y & ~1;
         area->BatchChunks(pos);
     } else {
-        this->m_renderChunk = CMap::AllocRenderChunk();
-        this->m_renderChunk->AddBatch(this, nullptr, &this->m_topLeftCoords, 0);
+        this->AllocRenderChunkAndBatch();
         this->m_bLoaded = 1;
     }
 }
@@ -733,16 +742,16 @@ void CMapChunk::GetLiquidBounds(CAaBox& box) const {
     box.t = this->m_bbox.t;
     box.b = this->m_bbox.b;
 
-    CChunkLiquid* liquid = const_cast<CMapChunk*>(this)->m_liquidChunkLinkList.Head();
+    CChunkLiquid* liquid = const_cast<CMapChunk*>(this)->liquidsList.Head();
 
     if (liquid) {
-        box.t.z = liquid->m_height.y;
-        box.b.z = liquid->m_height.x;
+        box.t.z = liquid->m_height.m_h;
+        box.b.z = liquid->m_height.m_l;
 
         do {
-            box.t.z = liquid->m_height.y >= box.t.z ? liquid->m_height.y : box.t.z;
-            box.b.z = liquid->m_height.x <= box.b.z ? liquid->m_height.x : box.b.z;
-            liquid = const_cast<CMapChunk*>(this)->m_liquidChunkLinkList.Next(liquid);
+            box.t.z = liquid->m_height.m_h >= box.t.z ? liquid->m_height.m_h : box.t.z;
+            box.b.z = liquid->m_height.m_l <= box.b.z ? liquid->m_height.m_l : box.b.z;
+            liquid = const_cast<CMapChunk*>(this)->liquidsList.Next(liquid);
         } while (liquid);
     }
 }
@@ -759,7 +768,7 @@ bool CMapChunk::GetLiquidHeight(const C2Vector& pos, float* height) const {
 
     C2Vector frac(pos.x - x, pos.y - y);
 
-    for (CChunkLiquid* liquid = const_cast<CMapChunk*>(this)->m_liquidChunkLinkList.Head(); liquid; liquid = const_cast<CMapChunk*>(this)->m_liquidChunkLinkList.Next(liquid)) {
+    for (CChunkLiquid* liquid = const_cast<CMapChunk*>(this)->liquidsList.Head(); liquid; liquid = const_cast<CMapChunk*>(this)->liquidsList.Next(liquid)) {
         if (liquid->TileExists(tile.x, tile.y) && liquid->GetHeight(frac, tile, *height)) {
             return true;
         }
@@ -770,50 +779,50 @@ bool CMapChunk::GetLiquidHeight(const C2Vector& pos, float* height) const {
 
 // VERIFY: bb038337 manual
 // OFFSET: 0x007C5690
-void CMapChunk::CreateLiquids(bool a3) {
-    CChunkLiquid* liquid = this->m_liquidChunkLinkList.Head();
+void CMapChunk::CreateLiquids(bool firstUse) {
+    CChunkLiquid* liquid = this->liquidsList.Head();
 
     while (liquid) {
         liquid->m_chunkLink.Unlink();
         liquid->Purge();
         CMap::FreeChunkLiquid(liquid);
-        liquid = this->m_liquidChunkLinkList.Next(liquid);
+        liquid = this->liquidsList.Next(liquid);
     }
 
     SMLiquidChunk* mclq = this->m_liquid;
 
     if (mclq) {
-        uint32_t flag = 4;
+        uint32_t flag = SMChunk::FLAGS::LIQUID_WATER;
 
         for (uint32_t i = 0; i < 4; i++) {
             if (flag & this->m_header->m_flags) {
-                uint32_t type = i + 1;
+                uint32_t type = LIQUID_TYPE_WATER + i;
 
-                if (s_mapId == 530 && i == 2) {
-                    type = 15;
+                if (s_mapId == MAP_EXPANSION01 && i == LIQUID_BASIC_TYPE_MAGMA) {
+                    type = LIQUID_TYPE_GREEN_LAVA;
                 }
 
                 LiquidTypeRec* typeRec = g_liquidTypeDB.GetRecord(type);
                 LiquidMaterialRec* materialRec = g_liquidMaterialDB.GetRecord(typeRec->m_materialID);
 
                 CChunkLiquid* chunkLiquid = CMap::AllocChunkLiquid();
-                this->m_liquidChunkLinkList.LinkToTail(chunkLiquid);
+                this->liquidsList.LinkToTail(chunkLiquid);
                 chunkLiquid->m_type = type;
                 chunkLiquid->m_owner = this;
                 chunkLiquid->m_vertexFormat = materialRec->m_lvf;
                 chunkLiquid->m_topLeftCoords = this->m_topLeftCoords;
-                chunkLiquid->m_height = *reinterpret_cast<C2Vector*>(&mclq->m_minHeight);
+                chunkLiquid->m_height = mclq->m_height;
 
                 uint8_t* verts = reinterpret_cast<uint8_t*>(mclq->m_verts);
                 chunkLiquid->m_tileBegin.x = 0;
                 chunkLiquid->m_tileBegin.y = 0;
-                chunkLiquid->m_tileEnd.x = 8;
-                chunkLiquid->m_tileEnd.y = 8;
+                chunkLiquid->m_tileEnd.x = LIQUID_TILES_PER_CHUNK_AXIS;
+                chunkLiquid->m_tileEnd.y = LIQUID_TILES_PER_CHUNK_AXIS;
 
                 void* mem = SMemAlloc(sizeof(Liquid::CChunkVertexData), __FILE__, __LINE__, 0);
                 Liquid::CChunkVertexData* vertexData = mem ? new (mem) Liquid::CChunkVertexData(verts, chunkLiquid->m_vertexFormat) : nullptr;
-                chunkLiquid->m_tiles = reinterpret_cast<uint8_t*>(&mclq->m_tiles);
-                chunkLiquid->m_vertexData = vertexData;
+                chunkLiquid->m_tiles = &mclq->m_tiles;
+                chunkLiquid->m_vtxData = vertexData;
                 mclq++;
 
                 chunkLiquid->CreateVertXY();
@@ -823,10 +832,10 @@ void CMapChunk::CreateLiquids(bool a3) {
         }
     }
 
-    CMapArea* area = static_cast<CMapArea*>(this->m_parentLinkList.Head()->m_ref);
+    CMapArea* area = static_cast<CMapArea*>(this->m_parentLinkList.Head()->ref);
 
     if (area->m_liquid && area->m_liquid->HasData()) {
-        const SMLiquidChunkDesc* chunkDesc = area->m_liquid->GetChunkDesc(this->m_aIndex.x, this->m_aIndex.y);
+        const SMLiquidChunkDesc* chunkDesc = area->m_liquid->GetChunkDesc(this->aIndex.x, this->aIndex.y);
         this->m_deepBits.SetRawData(const_cast<char*>(reinterpret_cast<const char*>(area->m_liquid->GetDeepTable(chunkDesc))), 64, false);
         this->m_fishableBits.SetRawData(const_cast<char*>(reinterpret_cast<const char*>(area->m_liquid->GetFishableTable(chunkDesc))), 64, false);
 
@@ -834,12 +843,12 @@ void CMapChunk::CreateLiquids(bool a3) {
             const SMLiquidInstance* instance = area->m_liquid->GetInstanceDesc(chunkDesc, i);
 
             CChunkLiquid* chunkLiquid = CMap::AllocChunkLiquid();
-            this->m_liquidChunkLinkList.LinkToTail(chunkLiquid);
+            this->liquidsList.LinkToTail(chunkLiquid);
             chunkLiquid->m_owner = this;
             chunkLiquid->m_type = instance->m_liquidType;
             chunkLiquid->m_vertexFormat = instance->m_vertexFormat;
             chunkLiquid->m_topLeftCoords = this->m_topLeftCoords;
-            chunkLiquid->m_height = *reinterpret_cast<const C2Vector*>(&instance->m_minHeight);
+            chunkLiquid->m_height = instance->m_heightRange;
 
             uint8_t yOffset = instance->m_yOffset;
             uint8_t xOffset = instance->m_xOffset;
@@ -849,7 +858,7 @@ void CMapChunk::CreateLiquids(bool a3) {
             chunkLiquid->m_tileEnd.y = xOffset + instance->m_width;
 
             void* mem = SMemAlloc(sizeof(Liquid::CInstanceVertexData), __FILE__, __LINE__, 0);
-            chunkLiquid->m_vertexData = mem ? new (mem) Liquid::CInstanceVertexData(area->m_liquid, instance) : nullptr;
+            chunkLiquid->m_vtxData = mem ? new (mem) Liquid::CInstanceVertexData(area->m_liquid, instance) : nullptr;
 
             uint32_t tileCount = instance->m_width * instance->m_height;
             chunkLiquid->m_tileBits.SetRawData(const_cast<char*>(reinterpret_cast<const char*>(area->m_liquid->GetExistsTable(instance))), tileCount, false);
@@ -857,9 +866,9 @@ void CMapChunk::CreateLiquids(bool a3) {
         }
     }
 
-    if (!this->m_liquidChunkLinkList.Head()) {
-        this->m_liquidBounds.b = C3Vector(3.4028235e38f, 3.4028235e38f, 3.4028235e38f);
-        this->m_liquidBounds.t = C3Vector(-3.4028235e38f, -3.4028235e38f, -3.4028235e38f);
+    if (!this->liquidsList.Head()) {
+        this->m_liquidBounds.b = C3Vector(FLT_MAX, FLT_MAX, FLT_MAX);
+        this->m_liquidBounds.t = C3Vector(-FLT_MAX, -FLT_MAX, -FLT_MAX);
     } else {
         this->GetLiquidBounds(this->m_liquidBounds);
     }
@@ -876,12 +885,12 @@ void CMapChunk::CullAndBucketChunk() {
     float camZ = CWorldScene::s_activeWorldView.z;
     C3Vector corner(CMapChunk::vertexList[index].x + this->m_topLeftCoords.x, CMapChunk::vertexList[index].y + this->m_topLeftCoords.y, this->m_height[index] + this->m_topLeftCoords.z);
 
-    for (CChunkLiquid* liquid = this->m_liquidChunkLinkList.Head(); liquid; liquid = this->m_liquidChunkLinkList.Next(liquid)) {
+    for (CChunkLiquid* liquid = this->liquidsList.Head(); liquid; liquid = this->liquidsList.Next(liquid)) {
         CAaBox box;
         liquid->GetAaBox(box);
 
         if (!CWorldScene::FrustumCull(&box)) {
-            corner.z = (camZ <= liquid->m_height.y ? camZ : liquid->m_height.y) < liquid->m_height.x ? liquid->m_height.x : (camZ > liquid->m_height.y ? liquid->m_height.y : camZ);
+            corner.z = (camZ <= liquid->m_height.m_h ? camZ : liquid->m_height.m_h) < liquid->m_height.m_l ? liquid->m_height.m_l : (camZ > liquid->m_height.m_h ? liquid->m_height.m_h : camZ);
             CWorldScene::AddToDistanceBucket(liquid, corner);
         }
     }
@@ -890,8 +899,8 @@ void CMapChunk::CullAndBucketChunk() {
 // VERIFY: 555895ad manual
 // OFFSET: 0x007C5C50
 CMapChunk::CMapChunk() {
-    this->m_aIndex.x = 0;
-    this->m_aIndex.y = 0;
+    this->aIndex.x = 0;
+    this->aIndex.y = 0;
     this->m_sOffset.x = 0;
     this->m_sOffset.y = 0;
     this->m_cOffset.x = 0;
@@ -902,20 +911,20 @@ CMapChunk::CMapChunk() {
     this->m_link.m_next = nullptr;
     this->m_sortListLink.m_prevLink = nullptr;
     this->m_sortListLink.m_next = nullptr;
-    this->m_doodadDefLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
-    this->m_mapObjDefLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
-    this->m_entityLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
-    this->m_lightLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
+    this->doodadDefLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
+    this->mapObjDefLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
+    this->entityLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
+    this->lightLinkList.SetLinkOffset(offsetof(CMapBaseObjLink, m_refLink));
     this->m_soundHandleList.SetLinkOffset(0);
-    this->m_type |= 4;
+    this->AddType(CMapBaseObj::Type_Chunk);
     this->m_distToCamera = 0.0f;
     this->m_flags = static_cast<MapObjFlag>(this->m_flags | MAPOBJ_FLAG_UNPLACED);
-    this->m_detailDoodadInst = nullptr;
+    this->detailDoodadInst = nullptr;
     this->m_renderChunk = nullptr;
     this->m_chunkInfoBeginPtr = nullptr;
     this->m_header = nullptr;
-    this->m_lowQualityTexMap = nullptr;
-    this->m_predTexture = nullptr;
+    this->m_predTex = nullptr;
+    this->m_noEffectDoodad = nullptr;
     this->m_height = nullptr;
     this->m_vertexShading = nullptr;
     this->m_normals = nullptr;
@@ -930,7 +939,7 @@ CMapChunk::CMapChunk() {
 
 // VERIFY: ecd160bb manual
 // OFFSET: 0x007C6060
-void CMapChunk::CreateSoundEmitters(bool a3) {
+void CMapChunk::CreateSoundEmitters(bool firstUse) {
     if (!this->m_soundHandleList.IsEnd(this->m_soundHandleList.Head())) {
         return;
     }
@@ -955,25 +964,28 @@ void CMapChunk::CreateSoundEmitters(bool a3) {
 
 // VERIFY: 80daf949 manual
 // OFFSET: 0x007C6150
-void CMapChunk::CreateRefs(CMapArea* area, uint32_t* mcrfPtr, uint32_t doodadRefs, uint32_t mapObjRefs) {
+void CMapChunk::CreateRefs(CMapArea* area, uint32_t* ref, uint32_t doodadRefs, uint32_t mapObjRefs) {
+    STORM_ASSERT(area);
+    STORM_ASSERT(ref);
+
     C3Vector center(17066.666f, 17066.666f, 0.0f);
-    uint32_t* mapObjRefList = &mcrfPtr[doodadRefs];
+    uint32_t* mapObjRefList = &ref[doodadRefs];
 
     for (uint32_t i = 0; i < mapObjRefs; i++) {
         SMMapObjDef* def = &area->m_mapObjDef[mapObjRefList[i]];
 
-        if (def->m_flags & 0x1) {
+        if (def->m_flags & SMMapObjDef::F_DESTROYABLE) {
             if (def->m_uniqueId != 0x5476ED || CMap::mapObjDefHash.Ptr(0x5476ED, CMap::s_mapObjDefHashKey)) {
                 continue;
             }
 
-            CDestructibleProxy* node = CMap::s_destructibleProxyList.Head();
+            CDestructibleProxy* node = CMap::destructibleProxies.Head();
 
-            while (!CMap::s_destructibleProxyList.IsEnd(node) && node->m_uniqueId != def->m_uniqueId) {
-                node = CMap::s_destructibleProxyList.RawNext(node);
+            while (!CMap::destructibleProxies.IsEnd(node) && node->m_uniqueId != def->m_uniqueId) {
+                node = CMap::destructibleProxies.RawNext(node);
             }
 
-            if (!CMap::s_destructibleProxyList.IsEnd(node)) {
+            if (!CMap::destructibleProxies.IsEnd(node)) {
                 continue;
             }
 
@@ -987,24 +999,25 @@ void CMapChunk::CreateRefs(CMapArea* area, uint32_t* mcrfPtr, uint32_t doodadRef
 
             if (proxy.m_sphere.r < 0.001f) {
                 proxy.m_sphere.r = 50.0f;
-                SysMsgPrintf(SYSMSG_ERROR, 2, "Destructible building WMO(%s) has invalid geobox", &area->m_wmoFileNames[area->m_wmoFilenamesOffsets[def->m_nameId]]);
+                SysMsgPrintf(SYSMSG_ERROR, SYSMSG_FILTER_WORLD, "Destructible building WMO(%s) has invalid geobox", &area->m_wmoFileNames[area->m_wmoFilenamesOffsets[def->m_nameId]]);
             }
 
             World::FindOrCreateDestructibleProxy(&proxy);
         } else {
             CMapObjDef* mapObjDef = CMap::CreateMapObjDef(&area->m_wmoFileNames[area->m_wmoFilenamesOffsets[def->m_nameId]], def, &center, true);
             CMapBaseObjLink* link = CMap::AllocBaseObjLink(mapObjDef);
-            link->m_ref = this;
-            this->m_mapObjDefLinkList.LinkToTail(link);
+            link->ref = this;
+            this->mapObjDefLinkList.LinkToTail(link);
         }
     }
 
     for (uint32_t i = 0; i < doodadRefs; i++) {
-        SMDoodadDef* def = &area->m_doodadDef[mcrfPtr[i]];
+        SMDoodadDef* def = &area->m_doodadDef[ref[i]];
         CMapDoodadDef* doodadDef = CMap::CreateDoodadDef(&area->m_m2FileNames[area->m_modelFilenamesOffsets[def->m_nameId]], def, &center);
+        STORM_ASSERT(doodadDef);
         CMapBaseObjLink* link = CMap::AllocBaseObjLink(doodadDef);
-        link->m_ref = this;
-        this->m_doodadDefLinkList.LinkToTail(link);
+        link->ref = this;
+        this->doodadDefLinkList.LinkToTail(link);
         doodadDef->m_diffuseLightScale = 1.0f;
         doodadDef->m_flags = static_cast<MapObjFlag>(doodadDef->m_flags | MAPOBJ_FLAG_EXTERIOR);
 
@@ -1016,83 +1029,92 @@ void CMapChunk::CreateRefs(CMapArea* area, uint32_t* mcrfPtr, uint32_t doodadRef
 
 // VERIFY: 637523f5 manual
 // OFFSET: 0x007C64B0
-void CMapChunk::Create(SIffChunk* headerChunk, bool a3) {
-    this->m_chunkInfoBeginPtr = reinterpret_cast<uint8_t*>(headerChunk);
-    this->ProcessIffChunks(a3);
+void CMapChunk::Create(SIffChunk* data, bool firstUse) {
+    STORM_ASSERT(data);
+    STORM_ASSERT(CMap::bActive);
+
+    this->m_chunkInfoBeginPtr = reinterpret_cast<uint8_t*>(data);
+    this->ProcessIffChunks(firstUse);
 
     this->m_areaId = this->m_header->m_areaid;
     this->m_topLeftCoords.x = 17066.666f - this->m_cOffset.y * 33.333332f;
     this->m_topLeftCoords.y = 17066.666f - this->m_cOffset.x * 33.333332f;
     this->m_topLeftCoords.z = 0.0f;
     this->m_topLeftCoords.z = this->m_header->m_position.z;
-    this->m_lowQualityTexMap = this->m_header->m_lowQualityTextureMap;
-    this->m_predTexture = reinterpret_cast<uint8_t*>(&this->m_header->m_predTex);
+    this->m_predTex = this->m_header->m_predTex;
+    this->m_noEffectDoodad = this->m_header->m_noEffectDoodad;
 
     this->CreateBounds();
-    this->CreateLiquids(a3);
-    this->CreateSoundEmitters(a3);
+    this->CreateLiquids(firstUse);
+    this->CreateSoundEmitters(firstUse);
 
-    this->m_flags = static_cast<MapObjFlag>(0);
+    this->m_flags = MAPOBJ_FLAG_NONE;
 
-    if (this->m_header->m_flags & 2) {
+    if (this->m_header->m_flags & SMChunk::FLAGS::IMPASSABLE) {
         this->m_flags = MAPOBJ_FLAG_IMPASSABLE;
     }
 
-    CMapArea* area = static_cast<CMapArea*>(this->m_parentLinkList.Head()->m_ref);
+#if defined(WOWDECOMP_ASSERTIONS)
+    const SMChunk* smChunk = this->m_header;
+    STORM_ASSERT(smChunk->indexX == static_cast<uint32_t>(aIndex.x)); // 12213: "smChunk->indexX == (uint32)aIndex.x"
+    STORM_ASSERT(smChunk->indexY == static_cast<uint32_t>(aIndex.y)); // 12213: "smChunk->indexY == (uint32)aIndex.y"
+#endif
+
+    CMapArea* area = static_cast<CMapArea*>(this->m_parentLinkList.Head()->ref);
     this->CreateRefs(area, reinterpret_cast<uint32_t*>(this->m_mcrfPtr), this->m_header->m_nDoodadRefs, this->m_header->m_nMapObjRefs);
-    area->m_mapChunks[16 * this->m_aIndex.y + this->m_aIndex.x] = this;
+    area->m_mapChunks[MAP_CHUNKS_PER_AREA_AXIS * this->aIndex.y + this->aIndex.x] = this;
     this->m_flags = static_cast<MapObjFlag>(this->m_flags | MAPOBJ_FLAG_PREPARED);
 }
 
 // VERIFY: 1d9777de manual
 // OFFSET: 0x007C65A0
 void CMapChunk::UpdateLights() {
-    for (CMapBaseObjLink* link = this->m_doodadDefLinkList.Head(); link; link = this->m_doodadDefLinkList.Next(link)) {
-        link->m_owner->m_flags = static_cast<MapObjFlag>(link->m_owner->m_flags | 0x1);
+    for (CMapBaseObjLink* link = this->doodadDefLinkList.Head(); link; link = this->doodadDefLinkList.Next(link)) {
+        link->owner->m_flags = static_cast<MapObjFlag>(link->owner->m_flags | MAPOBJ_FLAG_UNPLACED);
     }
 
-    for (CMapBaseObjLink* link = this->m_entityLinkList.Head(); link; link = this->m_entityLinkList.Next(link)) {
-        link->m_owner->m_flags = static_cast<MapObjFlag>(link->m_owner->m_flags | 0x1);
+    for (CMapBaseObjLink* link = this->entityLinkList.Head(); link; link = this->entityLinkList.Next(link)) {
+        link->owner->m_flags = static_cast<MapObjFlag>(link->owner->m_flags | MAPOBJ_FLAG_UNPLACED);
     }
 }
 
 // VERIFY: c9630247 manual
 // OFFSET: 0x007CFB10
 void CMapChunk::ClipBufferUpdate() {
-    uint32_t indices[9];
+    uint32_t indices[TERRAIN_VERTICES_PER_CHUNK_AXIS];
     uint32_t base = 0;
 
     if (CWorldScene::s_activeWorldView.x > CWorldScene::camTarget.x) {
-        base = 136;
+        base = (TERRAIN_VERTICES_PER_CHUNK_AXIS - 1) * TERRAIN_CHUNK_VERTEX_ROW_STRIDE;
     }
 
-    for (uint32_t i = 0; i < 9; i++) {
+    for (uint32_t i = 0; i < TERRAIN_VERTICES_PER_CHUNK_AXIS; i++) {
         indices[i] = i + base;
     }
 
-    CWorldOcclusion::UpdateBufferChunk(CMapChunk::vertexList, this->m_height, indices, 9, &this->m_topLeftCoords, this->m_header->m_holes);
+    CWorldOcclusion::UpdateBufferChunk(CMapChunk::vertexList, this->m_height, indices, TERRAIN_VERTICES_PER_CHUNK_AXIS, &this->m_topLeftCoords, this->m_header->m_holes);
 
     base = 0;
 
     if (CWorldScene::s_activeWorldView.y > CWorldScene::camTarget.y) {
-        base = 8;
+        base = TERRAIN_TILES_PER_CHUNK_AXIS;
     }
 
-    for (uint32_t i = 0; i < 9; i++) {
+    for (uint32_t i = 0; i < TERRAIN_VERTICES_PER_CHUNK_AXIS; i++) {
         indices[i] = base;
-        base += 17;
+        base += TERRAIN_CHUNK_VERTEX_ROW_STRIDE;
     }
 
-    CWorldOcclusion::UpdateBufferChunk(CMapChunk::vertexList, this->m_height, indices, 9, &this->m_topLeftCoords, this->m_header->m_holes);
+    CWorldOcclusion::UpdateBufferChunk(CMapChunk::vertexList, this->m_height, indices, TERRAIN_VERTICES_PER_CHUNK_AXIS, &this->m_topLeftCoords, this->m_header->m_holes);
 }
 
 // VERIFY: bd05b674 auto
 // OFFSET: 0x007D05F0
 int32_t CMapChunk::LoadDetailDoodadModels() {
-    int32_t loaded = 1;
+    BOOL loaded = 1;
 
     for (uint32_t i = 0; i < this->m_header->m_nLayers; i++) {
-        int32_t effectId = this->m_layers[i].m_offectId;
+        int32_t effectId = this->m_layers[i].m_effectId;
 
         if (!effectId) {
             continue;
@@ -1104,7 +1126,7 @@ int32_t CMapChunk::LoadDetailDoodadModels() {
             continue;
         }
 
-        for (uint32_t j = 0; j < 4; j++) {
+        for (uint32_t j = 0; j < NUM_GROUND_EFFECT_DOODADS; j++) {
             if (record->m_doodadID[j] && !CDetailDoodad::LoadModel(record->m_doodadID[j])) {
                 loaded = 0;
             }
@@ -1125,9 +1147,9 @@ void CMapChunk::CreateDetailDoodads() {
     seed.SetSeed(0);
     seed.SetSeed(this->m_cOffset.x | (this->m_cOffset.y << 16));
 
-    this->m_detailDoodadInst = CDetailDoodad::AllocInst();
-    this->m_detailDoodadInst->m_chunk = this;
-    CDetailDoodadInst* inst = this->m_detailDoodadInst;
+    this->detailDoodadInst = CDetailDoodad::AllocInst();
+    this->detailDoodadInst->m_chunk = this;
+    CDetailDoodadInst* inst = this->detailDoodadInst;
 
     if (CWorld::detailDoodadTest) {
         return;
@@ -1206,7 +1228,7 @@ void CMapChunk::CreateDetailDoodads() {
         int32_t x = s_cells[i].x;
         int32_t y = s_cells[i].y;
 
-        if ((this->m_predTexture[y] & s_bitMask[x]) >> s_bitShift[x]) {
+        if ((this->m_noEffectDoodad[y] & s_bitMask[x]) >> s_bitShift[x]) {
             continue;
         }
 
@@ -1214,8 +1236,8 @@ void CMapChunk::CreateDetailDoodads() {
             continue;
         }
 
-        uint32_t layer = (reinterpret_cast<uint16_t*>(this->m_lowQualityTexMap)[y] & CMap::s_2bitSplatMask[x]) >> CMap::s_2bitSplatShft[x];
-        GroundEffectTextureRec* record = g_groundEffectTextureDB.GetRecord(this->m_layers[layer].m_offectId);
+        uint32_t layer = (this->m_predTex[y] & CMap::s_2bitSplatMask[x]) >> CMap::s_2bitSplatShft[x];
+        GroundEffectTextureRec* record = g_groundEffectTextureDB.GetRecord(this->m_layers[layer].m_effectId);
 
         if (!record) {
             continue;
@@ -1231,7 +1253,7 @@ void CMapChunk::CreateDetailDoodads() {
         uint32_t slot = 0;
         uint32_t filled = 0;
 
-        for (uint32_t k = 0; k < 4; k++) {
+        for (uint32_t k = 0; k < NUM_GROUND_EFFECT_DOODADS; k++) {
             int32_t weight = record->m_doodadWeight[k];
             int32_t id = record->m_doodadID[k];
 
@@ -1287,7 +1309,7 @@ void CMapChunk::CreateDetailDoodads() {
                 continue;
             }
 
-            if ((data->m_record->m_flags & 2) || !this->m_vertexShading) {
+            if ((data->groundEffectDoodad->m_flags & GROUND_EFFECT_DOODAD_NO_VERTEX_SHADING) || !this->m_vertexShading) {
                 color.r = 0xFF;
                 color.g = 0xFF;
                 color.b = 0xFF;
@@ -1344,7 +1366,7 @@ void CMapChunk::CreateDetailDoodads() {
             position.y -= cellX;
             position.z = -((position.x * plane.n.x + position.y * plane.n.y + plane.d) / plane.n.z);
 
-            float rotation = (CRandom::sfloat_(seed) + 1.0f) * 3.1415927f;
+            float rotation = (CRandom::sfloat_(seed) + 1.0f) * PI;
             float scale = CRandom::sfloat_(seed) * 0.33f + 1.0f;
 
             inst->AddDoodad(id, position, rotation, scale, plane.n, static_cast<uint16_t>(tri), color);
@@ -1361,19 +1383,19 @@ void CMapChunk::RenderPrep() {
         float dx = CWorldScene::s_activeWorldView.x - this->m_sphere.c.x;
 
         if (CWorld::shadowMipLevel || dx * dx + dz * dz + dy * dy > 603729.0f) {
-            this->m_renderChunk->m_renderFlags |= 0x10;
+            this->m_renderChunk->m_layerFlags |= CMapRenderChunk::LayerFlags_ShouldMip;
         }
 
         this->m_renderChunk->RenderPrep();
     }
 
-    if ((CWorld::enables & Enable_DetailDoodads) && CWorld::detailDoodadDist > this->m_distToCamera) {
-        if (!this->m_detailDoodadInst) {
+    if ((CWorld::enables & Enables::Enable_DetailDoodads) && CWorld::detailDoodadDist > this->m_distToCamera) {
+        if (!this->detailDoodadInst) {
             this->CreateDetailDoodads();
         }
 
-        if (this->m_detailDoodadInst) {
-            CWorldScene::AddChunkToSortList(this->m_detailDoodadInst);
+        if (this->detailDoodadInst) {
+            CWorldScene::AddChunkToSortList(this->detailDoodadInst);
         }
     }
 }
@@ -1384,12 +1406,12 @@ bool CMapChunk::CanMergeChunkLayers(CMapChunk* chunkA, CMapChunk* chunkB) {
     chunkB->m_bLoaded = 1;
     chunkA->m_bLoaded = 1;
 
-    if (CMap::header.m_flags & 4) {
+    if (CMap::header.m_flags & SMMapHeader::MAP_FLAGS::BIG_ALPHA) {
         uint32_t count = chunkB->m_header->m_nLayers;
         SMLayer* layerA = chunkA->m_layers;
 
         for (uint32_t i = 0; i < chunkA->m_header->m_nLayers; i++, layerA++) {
-            if (layerA->m_flags & 0x4C0) {
+            if (layerA->m_flags & SMLayer::LAYER_FLAGS::BIG_ALPHA_MERGE_BLOCK_MASK) {
                 return false;
             }
 
@@ -1397,7 +1419,7 @@ bool CMapChunk::CanMergeChunkLayers(CMapChunk* chunkA, CMapChunk* chunkB) {
             bool found = false;
 
             for (uint32_t j = 0; j < chunkB->m_header->m_nLayers; j++, layerB++) {
-                if (layerB->m_flags & 0x4C0) {
+                if (layerB->m_flags & SMLayer::LAYER_FLAGS::BIG_ALPHA_MERGE_BLOCK_MASK) {
                     return false;
                 }
 
@@ -1425,7 +1447,7 @@ bool CMapChunk::CanMergeChunkLayers(CMapChunk* chunkA, CMapChunk* chunkB) {
         SMLayer& layerA = chunkA->m_layers[i];
         SMLayer& layerB = chunkB->m_layers[i];
 
-        if ((layerA.m_flags & 0xC0) || (layerB.m_flags & 0xC0) || layerB.m_textureId != layerA.m_textureId) {
+        if ((layerA.m_flags & SMLayer::LAYER_FLAGS::ANIMATED_OR_OVERBRIGHT) || (layerB.m_flags & SMLayer::LAYER_FLAGS::ANIMATED_OR_OVERBRIGHT) || layerB.m_textureId != layerA.m_textureId) {
             return false;
         }
     }
@@ -1436,13 +1458,13 @@ bool CMapChunk::CanMergeChunkLayers(CMapChunk* chunkA, CMapChunk* chunkB) {
 // VERIFY: 774ebb1a manual
 // OFFSET: 0x007D8730
 int32_t CMapChunk::Intersect(int32_t subX, int32_t subY, const C3Ray& ray, float* t) {
-    int32_t hit = 0;
+    BOOL hit = 0;
 
     if (this->m_header->m_holes & CMap::s_holeMask[4 * (subY >> 1) + (subX >> 1)]) {
         return 0;
     }
 
-    int32_t base = 16 * subY + subX + subY;
+    int32_t base = TERRAIN_CHUNK_VERTEX_ROW_STRIDE * subY + subX;
 
     for (uint32_t i = 0; i < 4; i++) {
         uint32_t tri[3] = { static_cast<uint32_t>(base + 9), static_cast<uint32_t>(base + CMap::s_fanIndices[2 * i + 1]), static_cast<uint32_t>(base + CMap::s_fanIndices[2 * i]) };
@@ -1451,7 +1473,7 @@ int32_t CMapChunk::Intersect(int32_t subX, int32_t subY, const C3Ray& ray, float
         CMapChunk::vertexList[tri[2]].z = this->m_height[tri[2]];
         float hitT = 0.0f;
 
-        if (NTempest::Intersect(ray, CMapChunk::vertexList, tri, &hitT, nullptr, 0.0099999998f)) {
+        if (NTempest::Intersect(ray, CMapChunk::vertexList, tri, &hitT, nullptr, 0.01f)) {
             hit = 1;
 
             if (hitT < *t && hitT >= 0.0f) {
@@ -1466,10 +1488,10 @@ int32_t CMapChunk::Intersect(int32_t subX, int32_t subY, const C3Ray& ray, float
 // VERIFY: ba2b9143 manual
 // OFFSET: 0x007D8840
 void CMapChunk::Intersect(CiRect* rect, CAaBox* box, TSGrowableArray<CFacet>* facets) {
-    int32_t base = 16 * rect->minY + rect->minX + rect->minY;
+    int32_t base = TERRAIN_CHUNK_VERTEX_ROW_STRIDE * rect->minY + rect->minX;
     float* height = &this->m_height[base];
     C3Vector* vertices = &CMapChunk::vertexList[base];
-    int32_t rowSkip = 17 - (rect->maxX - rect->minX + 1);
+    int32_t rowSkip = TERRAIN_CHUNK_VERTEX_ROW_STRIDE - (rect->maxX - rect->minX + 1);
 
     for (int32_t y = rect->minY; y <= rect->maxY; y++) {
         for (int32_t x = rect->minX; x <= rect->maxX; x++, height++, vertices++) {
@@ -1489,7 +1511,7 @@ void CMapChunk::Intersect(CiRect* rect, CAaBox* box, TSGrowableArray<CFacet>* fa
                 const int32_t* indices = &s_subVertexTriangles[tri];
 
                 if (outcodes[indices[0]] & outcodes[indices[1]] & outcodes[indices[2]]) {
-                    if (!(CWorld::enables & Enable_ShowQuery)) {
+                    if (!(CWorld::enables & Enables::Enable_CollisionDebug)) {
                         continue;
                     }
 
@@ -1515,7 +1537,7 @@ void CMapChunk::Intersect(CiRect* rect, CAaBox* box, TSGrowableArray<CFacet>* fa
                     facet->plane.n.x = e1.y * e2.z - e1.z * e2.y;
                     facet->plane.n.y = e1.z * e2.x - e2.z * e1.x;
                     facet->plane.n.z = e2.y * e1.x - e2.x * e1.y;
-                    float scale = 1.0f / sqrtf(facet->plane.n.x * facet->plane.n.x + facet->plane.n.y * facet->plane.n.y + facet->plane.n.z * facet->plane.n.z);
+                    float scale = 1.0f / sqrtf(facet->plane.n.SquaredMag());
                     facet->plane.n.x *= scale;
                     facet->plane.n.y *= scale;
                     facet->plane.n.z *= scale;
@@ -1524,7 +1546,7 @@ void CMapChunk::Intersect(CiRect* rect, CAaBox* box, TSGrowableArray<CFacet>* fa
                     facet->plane.From3Pos(facet->v[0], facet->v[1], facet->v[2]);
                 }
 
-                if (CWorld::enables & Enable_ShowQuery) {
+                if (CWorld::enables & Enables::Enable_CollisionDebug) {
                     CImVector color;
                     *reinterpret_cast<uint32_t*>(&color) = 0x8000FF00;
                     CMap::TestQueryAdd(*facet, color, nullptr);
@@ -1540,10 +1562,10 @@ void CMapChunk::Intersect(CiRect* rect, CAaBox* box, TSGrowableArray<CFacet>* fa
 // VERIFY: 2452b304 manual
 // OFFSET: 0x007D8E00
 void CMapChunk::Intersect(CiRect* rect, const CFrustum* frustum, TSGrowableArray<CFacet>* facets) {
-    int32_t base = 16 * rect->minY + rect->minX + rect->minY;
+    int32_t base = TERRAIN_CHUNK_VERTEX_ROW_STRIDE * rect->minY + rect->minX;
     C3Vector* vertices = &CMapChunk::vertexList[base];
     float* height = &this->m_height[base];
-    int32_t rowSkip = 17 - (rect->maxX - rect->minX + 1);
+    int32_t rowSkip = TERRAIN_CHUNK_VERTEX_ROW_STRIDE - (rect->maxX - rect->minX + 1);
 
     for (int32_t y = rect->minY; y <= rect->maxY; y++) {
         for (int32_t x = rect->minX; x <= rect->maxX; x++, vertices++, height++) {
@@ -1577,7 +1599,7 @@ void CMapChunk::Intersect(CiRect* rect, const CFrustum* frustum, TSGrowableArray
                     facet->plane.n.x = e1.y * e2.z - e1.z * e2.y;
                     facet->plane.n.y = e1.z * e2.x - e2.z * e1.x;
                     facet->plane.n.z = e2.y * e1.x - e2.x * e1.y;
-                    float scale = 1.0f / sqrtf(facet->plane.n.x * facet->plane.n.x + facet->plane.n.y * facet->plane.n.y + facet->plane.n.z * facet->plane.n.z);
+                    float scale = 1.0f / sqrtf(facet->plane.n.SquaredMag());
                     facet->plane.n.x *= scale;
                     facet->plane.n.y *= scale;
                     facet->plane.n.z *= scale;
@@ -1596,4 +1618,8 @@ void CMapChunk::Intersect(CiRect* rect, const CFrustum* frustum, TSGrowableArray
 // VERIFY: 15f51c4a manual
 // OFFSET: [0x007C5E50, 0x007C6480]
 CMapChunk::~CMapChunk() {
+    STORM_ASSERT(detailDoodadInst == nullptr); // 12213: "detailDoodadInst == __null"
+    STORM_ASSERT(m_refCount == 0);
+    STORM_ASSERT(m_renderChunk == nullptr); // 12213: "m_renderChunk == __null"
+    STORM_ASSERT(liquidsList.Head() == nullptr); // 12213: "liquidsList.Head()==__null"
 }

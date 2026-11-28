@@ -16,8 +16,14 @@ class CTexture;
 struct CVar;
 
 namespace FFX {
+    enum SHADER_TEXCOORD : int32_t {
+        NORMALIZED_COORDS = 0,
+        RECTANGLE_COORDS = 1,
+        TEXCOORD_COUNT = 2,
+    };
+
     struct Tex {
-        /* 0000 */ CTexture* m_texture;
+        /* 0000 */ CTexture* texture;
         /* 0004 */ C2iVector m_texSize;
         /* 000C */ C2iVector m_size;
         /* 0014 */ C2Vector m_texelSize;

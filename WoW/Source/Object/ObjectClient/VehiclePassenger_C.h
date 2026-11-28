@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "WoW/Source/Object/WGUID.h"
 #include "Engine/Source/Storm/H/stpl.h"
 #include "Engine/Source/Tempest/C3Vector.h"
@@ -15,6 +16,50 @@ class CGUnit_C;
 class CVehicle_C;
 class VehicleSeatRec;
 
+// Client runtime state, initialized to zero by Alloc; separate from VehicleSeatRec flags.
+// Names describe verified 3.3.5 behavior; original enumerator names are unavailable.
+enum VEHICLE_PASSENGER_FLAGS : uint32_t {
+    VEHICLE_PASSENGER_FLAG_NONE                                = 0x00000000u,
+    VEHICLE_PASSENGER_FLAG_END_VALUES_COMPUTED                 = 0x00000001u,
+    VEHICLE_PASSENGER_FLAG_LOWER_ANIM_START_DONE               = 0x00000002u,
+    VEHICLE_PASSENGER_FLAG_UPPER_ANIM_START_DONE               = 0x00000004u,
+    VEHICLE_PASSENGER_FLAG_MOVEMENT_STOPPED                    = 0x00000008u,
+    VEHICLE_PASSENGER_FLAG_USE_MODEL_TRANSFORM                 = 0x00000010u,
+    VEHICLE_PASSENGER_FLAG_SEAT_OFFSET_COMPUTED                = 0x00000020u,
+    VEHICLE_PASSENGER_FLAG_HAS_PASSENGER_ATTACHMENT            = 0x00000040u,
+    VEHICLE_PASSENGER_FLAG_TRANSITION_ANIM_WAIT_TIMED          = 0x00000080u,
+    VEHICLE_PASSENGER_FLAG_TRANSITION_ANIM_ENTERING            = 0x00000100u,
+    VEHICLE_PASSENGER_FLAG_WAITING_FOR_TRANSITION_ANIM         = 0x00000200u,
+    VEHICLE_PASSENGER_FLAG_HIDDEN_BY_SEAT                      = 0x00000400u,
+    VEHICLE_PASSENGER_FLAG_MIRRORING_VEHICLE_ANIMS             = 0x00000800u,
+    VEHICLE_PASSENGER_FLAG_WORLD_FACING_LOCKED                 = 0x00001000u,
+
+    // No meaning or writer has been recovered for the remaining bits.
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_13                          = 0x00002000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_14                          = 0x00004000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_15                          = 0x00008000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_16                          = 0x00010000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_17                          = 0x00020000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_18                          = 0x00040000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_19                          = 0x00080000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_20                          = 0x00100000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_21                          = 0x00200000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_22                          = 0x00400000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_23                          = 0x00800000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_24                          = 0x01000000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_25                          = 0x02000000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_26                          = 0x04000000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_27                          = 0x08000000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_28                          = 0x10000000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_29                          = 0x20000000u,
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_30                          = 0x40000000u,
+    // The existing callback tests bit 31; 3.3.5 tests bit 7 at 0x00749D6C instead.
+    VEHICLE_PASSENGER_FLAG_UNKNOWN_31                          = 0x80000000u,
+
+    VEHICLE_PASSENGER_FLAG_ANIM_START_DONE_MASK = VEHICLE_PASSENGER_FLAG_LOWER_ANIM_START_DONE
+        | VEHICLE_PASSENGER_FLAG_UPPER_ANIM_START_DONE,
+};
+
 struct VehiclePassengerRescueTransition {
     /* 0000 */ WOWGUID m_passengerGuid;
     /* 0008 */ WOWGUID m_vehicleGuid;
@@ -24,9 +69,26 @@ struct VehiclePassengerRescueTransition {
 
 class CVehiclePassenger_C {
     public:
+    // SignalTransitionUIEvents bits, named after the script event each one signals.
+    enum TRANSITION_UI_EVENTS : uint32_t {
+        TRANSITION_EVENT_ENTERING = 0x1, // UNIT_ENTERING_VEHICLE
+        TRANSITION_EVENT_ENTERED = 0x2,  // UNIT_ENTERED_VEHICLE
+        TRANSITION_EVENT_EXITING = 0x4,  // UNIT_EXITING_VEHICLE
+        TRANSITION_EVENT_EXITED = 0x8,   // UNIT_EXITED_VEHICLE
+    };
+
+    enum TRANSITION_STATE : int32_t {
+        STATE_NONE = 0,
+        STATE_ENTER_DELAY = 1,
+        STATE_ENTERING = 2,
+        STATE_RIDING = 3,
+        STATE_EXIT_DELAY = 4,
+        STATE_EXITING = 5,
+    };
+
     static uint32_t* s_passengerPool;
     static TSGrowableArray<CVehiclePassenger_C*>* s_pendingPassengers;
-    static uint32_t s_pendingCount;
+    static uint32_t s_addingRescueTransitions;
     static CVehiclePassenger_C* s_headPassenger;
     static CVehiclePassenger_C* s_tailPassenger;
     static TSGrowableArray<VehiclePassengerRescueTransition>* s_rescueTransitions;
@@ -38,9 +100,9 @@ class CVehiclePassenger_C {
     static void UninitSystem();
     static void PostRenderUpdateAll();
     static void UpdateAll(uint32_t time);
-    static void OnVehicleRideLoopAnimEnd(CGUnit_C* unit, int32_t& done, TSGrowableArray<CVehiclePassenger_C*>& passengers);
-    static void OnVehicleTransitionAnimEnd(CGUnit_C* unit, int32_t& done, TSGrowableArray<CVehiclePassenger_C*>& passengers);
-    static void AddPendingRescueTransition(WOWGUID passengerGuid, WOWGUID vehicleGuid, uint8_t seat, int32_t instant);
+    static void OnVehicleRideLoopAnimEnd(CGUnit_C* unit, BOOL& keepListening, TSGrowableArray<CVehiclePassenger_C*>& passengers);
+    static void OnVehicleTransitionAnimEnd(CGUnit_C* unit, BOOL& keepListening, TSGrowableArray<CVehiclePassenger_C*>& passengers);
+    static void AddPendingRescueTransition(WOWGUID passengerGuid, WOWGUID vehicleGuid, uint8_t seat, BOOL instant);
     static CVehiclePassenger_C* Alloc(CGUnit_C* unit);
     static void Init(CGUnit_C* unit);
     static void SendTransitionUIEvents(WOWGUID guid, const VehicleRec* vehicleRec, const VehicleSeatRec* seatRec, int32_t fromState, int32_t toState);
@@ -48,31 +110,31 @@ class CVehiclePassenger_C {
 
     void StopMovement();
     void BeginTransition(WOWGUID vehicleGuid, uint8_t seat, uint8_t instant);
-    void SetState(uint32_t state, CGUnit_C* vehicle, uint8_t seat, VehicleSeatRec* seatRec, uint32_t time, WOWGUID vehicleGuid);
+    void SetState(TRANSITION_STATE state, CGUnit_C* vehicle, uint8_t seat, VehicleSeatRec* seatRec, uint32_t time, WOWGUID vehicleGuid);
 
     /* 0000 */ uint32_t m_memHandle;
     /* 0004 */ CVehiclePassenger_C* m_prev;
     /* 0008 */ CVehiclePassenger_C* m_next;
     /* 000C */ CGUnit_C* m_unit;
-    /* 0010 */ uint32_t m_flags;
-    /* 0014 */ uint32_t m_state;
+    /* 0010 */ uint32_t m_flags; // VEHICLE_PASSENGER_FLAGS
+    /* 0014 */ TRANSITION_STATE m_state;
     /* 0018 */ uint32_t m_prevState;
-    /* 001C */ uint32_t unused_001C;
+    /* 001C */ uint32_t unknown_001C;
     /* 0020 */ WOWGUID m_vehicleGuid;
     /* 0028 */ WOWGUID m_transitionVehicleGuid;
     /* 0030 */ uint8_t m_seat;
     /* 0031 */ uint8_t m_transitionSeat;
-    /* 0032 */ uint8_t unused_0032 [2];
+    /* 0032 */ uint8_t unknown_0032 [2];
     /* 0034 */ uint32_t m_startTime;
     /* 0038 */ uint32_t m_endTime;
-    /* 003C */ uint32_t unused_003C;
+    /* 003C */ uint32_t unknown_003C;
     /* 0040 */ WOWGUID m_startRelativeGuid;
     /* 0048 */ float m_facingBlend;
     /* 004C */ uint32_t m_stopMovementTime;
     /* 0050 */ VehicleRec* m_vehicleRec;
     /* 0054 */ VehicleSeatRec* m_seatRec;
     /* 0058 */ WOWGUID m_rootVehicleGuid;
-    /* 0060 */ CDataStore* m_deferredTransitionSpline;
+    /* 0060 */ CDataStore* m_vehicleAnimDeferredSpline;
     /* 0064 */ uint32_t m_transitionAnimTimeout;
     /* 0068 */ WOWGUID m_transitionAnimVehicleGuid;
     /* 0070 */ WOWGUID m_boneAnimGuid;
@@ -90,13 +152,13 @@ class CVehiclePassenger_C {
     /* 00C8 */ float m_arcScale;
     /* 00CC */ C3Vector m_seatOffset;
     /* 00D8 */ float m_lockedWorldFacing;
-    /* 00DC */ uint32_t unused_00DC;
+    /* 00DC */ uint32_t unknown_00DC;
 
     CVehiclePassenger_C();
     void ClearFlag8();
     void DeleteAllDeferredVehicleTransitionAnimSplines();
-    int32_t IsWaitingForVehicleTransitionAnimGrabEvent(uint32_t eventId) const;
-    int32_t IsWaitingForVehicleTransitionAnimThrowEvent(uint32_t eventId) const;
+    BOOL IsWaitingForVehicleTransitionAnimGrabEvent(uint32_t eventId) const;
+    BOOL IsWaitingForVehicleTransitionAnimThrowEvent(uint32_t eventId) const;
     void UpdateSmoothFacing();
     void LockWorldFacingNextFrame(float facing);
     CGUnit_C* GetVehicleUnit() const;
@@ -111,10 +173,11 @@ class CVehiclePassenger_C {
     void StopBoneAnimIfSameBone(WOWGUID guid, const VehicleSeatRec* seat);
     void StartWaitingForVehicleTransitionAnim(WOWGUID guid, uint8_t seat, const VehicleSeatRec* seatRec, int32_t entering, CVehicle_C* vehicle);
     void ComputeSeatOffset(const VehicleSeatRec* seat, CM2Model* model);
-    int32_t ChooseSeatExitAnim(uint32_t flags, uint32_t* anim) const;
+    int32_t ChooseSeatExitAnim(uint32_t unusedSelectionMask, uint32_t* anim) const;
     int32_t GetLowerAnim(const VehicleSeatRec* seat) const;
     int32_t GetUpperAnim(const VehicleSeatRec* seat) const;
     CGUnit_C* GetStoredRootVehicleUnit() const;
+    CGUnit_C* GetUnit() const { return this->m_unit; }
     void StartMirroringVehicleAnims();
     void Uninit();
     void Update(uint32_t time);
@@ -122,17 +185,17 @@ class CVehiclePassenger_C {
     int32_t UpdateState(CGUnit_C* vehicle, VehicleSeatRec* seatRec, uint32_t time);
     C3Vector ComputeStartWorldPosition(const C3Vector& offset, const C3Vector& fallback) const;
     void OnAnimEnd(uint32_t anim);
-    int32_t PickHighPriorityAnimation(int32_t unused_a2, uint32_t* anim) const;
+    int32_t PickHighPriorityAnimation(int32_t unusedSelectionMask, uint32_t* anim) const;
     C3Vector ComputeInterpolatedUnitPosition() const;
     int32_t OverridesModelAnimation() const;
 
     void UpdateModel();
-    int32_t IsInTransitionMotion() const;
-    int32_t IsEntering() const;
+    BOOL IsInTransitionMotion() const;
+    BOOL IsEntering() const;
     void ComputeModelTransform(C44Matrix& matrix, CM2Model*& model, CGUnit_C* vehicle, const VehicleSeatRec* seat, uint32_t attachment, float facing);
     void ComputeEndValues(CGUnit_C* vehicle, VehicleSeatRec* seatRec, uint32_t time, C3Vector& endPosition);
     int32_t PostSetState(CGUnit_C* vehicle, VehicleSeatRec* seatRec, uint32_t time);
-    void OnUpdateTransport(WOWGUID transport, uint8_t seat, CGUnit_C* vehicle, int32_t deferred);
+    void OnUpdateTransport(WOWGUID transport, uint8_t seat, CGUnit_C* vehicle, BOOL deferred);
     int32_t CheckForVehicleTransitionAnimTimeout();
     void StopWaitingForVehicleTransitionAnim();
     void ExecuteAllDeferredVehicleTransitionAnimSplines();

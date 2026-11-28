@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/BLPFile/Types.h"
 #include "Engine/Source/Services/Types.h"
 
@@ -14,7 +15,7 @@ class CBLPFile {
     /* 0000 */ MipBits* m_images;
     /* 0004 */ BLPHeader m_header;
     /* 0498 */ void* m_inMemoryImage;
-    /* 049C */ int32_t m_inMemoryNeedsFree;
+    /* 049C */ BOOL m_inMemoryNeedsFree;
     /* 04A0 */ uint32_t m_numLevels;
     /* 04A4 */ uint32_t m_quality;
     /* 04A8 */ uint32_t m_colorMapping;
@@ -30,7 +31,7 @@ class CBLPFile {
     int32_t GetFormatSize(PIXEL_FORMAT format, uint32_t mipLevel, uint32_t* size, uint32_t* stride) const;
     uint32_t HasMips() const;
     uint32_t Height(uint32_t mipLevel) const;
-    int32_t IsValidMip(uint32_t mipLevel) const;
+    BOOL IsValidMip(uint32_t mipLevel) const;
     int32_t Lock(PIXEL_FORMAT format, uint32_t mipLevel, uint8_t*& data, uint32_t& stride);
     int32_t Lock2(const char* fileName, PIXEL_FORMAT format, uint32_t mipLevel, uint8_t* data, uint32_t& stride);
     int32_t LockChain(PIXEL_FORMAT format, MipBits*& images, uint32_t mipLevel);

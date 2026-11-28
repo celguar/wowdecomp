@@ -7,24 +7,33 @@
 
 class CDataStore;
 
+// Names inferred from the dance request builder: FALLBACK plays the DanceMoves record's
+// m_fallback move instead of m_moveId itself.
+enum DANCEMOVE_TYPE : uint8_t {
+    DANCEMOVE_TYPE_DIRECT = 0,
+    DANCEMOVE_TYPE_FALLBACK = 1,
+};
+
 struct DANCEMOVE {
     /* 0000 */ int16_t m_moveId;
     /* 0002 */ uint8_t m_chance;
-    /* 0003 */ uint8_t m_type;
+    /* 0003 */ uint8_t m_type; // DANCEMOVE_TYPE
 };
 
 class DanceCache {
     public:
     static const uint32_t s_cacheVersion = 1;
+    // A response ID with this bit set denies the low-bit ID (name inferred from ReceiveDance).
+    static const uint32_t ID_DENIED_FLAG = 0x80000000;
 
     /* 0000 */ int32_t m_id;
-    /* 0004 */ uint32_t unused_0004;
+    /* 0004 */ uint32_t unknown_0004;
     /* 0008 */ WOWGUID m_guid;
     /* 0010 */ char m_name[128];
     /* 0090 */ DANCEMOVE* m_data;
     /* 0094 */ uint32_t m_dataCount;
     /* 0098 */ uint32_t m_version;
-    /* 009C */ uint32_t unused_009C;
+    /* 009C */ uint32_t unknown_009C;
 
     DanceCache();
     ~DanceCache();

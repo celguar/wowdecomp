@@ -72,7 +72,7 @@ void __stdcall Rain::GetMotionBlurMatrix(C33Matrix* matrix) {
     float dirZ = invLength * 0.0f * 0.0f;
     float dirX = wind.x * invLength;
     C3Vector axis(dirY - dirZ, dirZ - dirX, dirX * 0.0f - 0.0f * dirY);
-    float axisSq = axis.x * axis.x + axis.y * axis.y + axis.z * axis.z;
+    float axisSq = axis.SquaredMag();
 
     if (fabs(axisSq) < 0.001f) {
         return;
@@ -82,7 +82,7 @@ void __stdcall Rain::GetMotionBlurMatrix(C33Matrix* matrix) {
     axis.x *= invAxis;
     axis.y *= invAxis;
     axis.z *= invAxis;
-    matrix->Rotate(angle * 0.017453292f, axis, true);
+    matrix->Rotate(angle * DEG_TO_RAD, axis, true);
 }
 
 // VERIFY: 1f283a72 manual
@@ -175,10 +175,10 @@ void Rain::InitDrop(RainDropParticle* drop, float time) {
     float randomY = CRandom::ufloat_(g_rndSeed);
     C3Vector offset((CRandom::ufloat_(g_rndSeed) - 0.5f) * size.x, (randomY - 0.5f) * size.y, size.z * 0.0f);
     float randomAngle = CRandom::ufloat_(g_rndSeed);
-    float angle = (randomAngle - 0.5f) * (this->m_intensity * 0.20943952f + 0.052359879f) - 1.5700001f;
+    float angle = (randomAngle - 0.5f) * (this->m_intensity * 0.20943952f + 0.052359879f) - 1.57f;
     float c = cos(angle);
     float s = sin(angle);
-    float baseSpeed = this->m_intensity * 9.4899998f + 0.0099999998f;
+    float baseSpeed = this->m_intensity * 9.49f + 0.01f;
     float spread = (CRandom::ufloat_(g_rndSeed) - 0.5f) * this->m_intensity;
     float speed = spread + spread + baseSpeed;
     float fall = -28.0f - this->m_intensity * 4.0f;
@@ -192,7 +192,7 @@ void Rain::InitDrop(RainDropParticle* drop, float time) {
     drop->m_position.z = offset.z - t * drop->m_velocity.z;
     Weather* weather = World::s_weather;
     C3Vector axis(0.0f, 0.0f, 0.0f);
-    CMath::sincos_(weather->m_facing - 1.5707964f, &axis.y, &axis.x);
+    CMath::sincos_(weather->m_facing - HALF_PI, &axis.y, &axis.x);
     float tilt = weather->m_speed * 0.055555556f;
 
     if (tilt < 0.0f) {
@@ -372,9 +372,9 @@ void Rain::UpdatePackets() {
         return;
     }
 
-    float tick = 0.016666999f;
+    float tick = 0.016667f;
 
-    if (FrameTime::s_tickTimeSec < 0.016666999f) {
+    if (FrameTime::s_tickTimeSec < 0.016667f) {
         tick = FrameTime::s_tickTimeSec;
     }
 
@@ -418,7 +418,7 @@ void Rain::RenderPatterPacketsSW() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 5);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod2x);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
@@ -515,7 +515,7 @@ void Rain::RenderDropPacketsSW() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 5);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod2x);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_ColorOp0, GxTexOp_Mod);
     GxRsSet(GxRs_AlphaOp0, GxTexOp_Mod);
@@ -575,9 +575,9 @@ void Rain::RenderDropPacketsSW() {
             side.x *= scale;
             side.y *= scale;
             side.z *= scale;
-            vertices[0].p = side * -0.050000001f + head;
+            vertices[0].p = side * -0.05f + head;
             vertices[0].tc = tex0;
-            vertices[1].p = head + side * 0.050000001f;
+            vertices[1].p = head + side * 0.05f;
             vertices[1].tc = tex1;
             C3Vector streak = direction * 2.0f;
             vertices[2].p.x = blur.a0 * streak.x + blur.a1 * streak.y + blur.a2 * streak.z + tail.x;
@@ -599,7 +599,7 @@ void Rain::RenderDropPacketsSW() {
             batch.m_count = vertexCount;
             batch.m_minIndex = 0;
             batch.m_maxIndex = 0;
-            g_theGxDevicePtr->Draw(&batch, 0);
+            GxDraw(&batch, 0);
         }
     }
 
@@ -620,7 +620,7 @@ void Rain::RenderPatterPackets() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 5);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod2x);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);
@@ -636,14 +636,7 @@ void Rain::RenderPatterPackets() {
     C44Matrix view;
     GxXformView(view);
     C44Matrix projection;
-    projection = g_theGxDevicePtr->m_projNative;
-
-    if (g_theGxDevicePtr->DeviceApi() == GxApi_OpenGl) {
-        projection.c0 *= -1.0f;
-        projection.c1 *= -1.0f;
-        projection.c2 *= -1.0f;
-        projection.c3 = -1.0f * projection.c3;
-    }
+    GxXformProjNative(projection);
 
     float camera[4] = { CWorldScene::s_activeWorldView.x, CWorldScene::s_activeWorldView.y, CWorldScene::s_activeWorldView.z, 1.0f };
     C44Matrix viewProj = (view * projection).Transpose();
@@ -700,7 +693,7 @@ void Rain::RenderDropPackets() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 5);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Mod2x);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);
@@ -716,14 +709,7 @@ void Rain::RenderDropPackets() {
     C44Matrix view;
     GxXformView(view);
     C44Matrix projection;
-    projection = g_theGxDevicePtr->m_projNative;
-
-    if (g_theGxDevicePtr->DeviceApi() == GxApi_OpenGl) {
-        projection.c0 *= -1.0f;
-        projection.c1 *= -1.0f;
-        projection.c2 *= -1.0f;
-        projection.c3 = -1.0f * projection.c3;
-    }
+    GxXformProjNative(projection);
 
     float camera[4] = { CWorldScene::s_activeWorldView.x, CWorldScene::s_activeWorldView.y, CWorldScene::s_activeWorldView.z, 1.0f };
     C44Matrix viewProj = (view * projection).Transpose();
@@ -742,8 +728,8 @@ void Rain::RenderDropPackets() {
     float texV[4] = { 0.0f, 1.0f, 0.0f, 0.0f };
     float texU[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
     float half[4] = { 0.5f, 0.0f, 0.0f, 0.0f };
-    float widthLeft[4] = { -0.050000001f, -0.050000001f, -0.050000001f, 0.0f };
-    float widthRight[4] = { 0.050000001f, 0.050000001f, 0.050000001f, 0.0f };
+    float widthLeft[4] = { -0.05f, -0.05f, -0.05f, 0.0f };
+    float widthRight[4] = { 0.05f, 0.05f, 0.05f, 0.0f };
     float zero0[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     float zero1[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     float zero2[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -784,7 +770,7 @@ void Rain::RenderDropPackets() {
 void Rain::Render() {
     this->UpdatePackets();
 
-    if (CWorldScene::s_unk_ADF570.m_maxViewDepth < 0.0f) {
+    if (CWorldScene::s_worldPortalView.m_maxViewDepth < 0.0f) {
         return;
     }
 
@@ -816,7 +802,7 @@ Rain::~Rain() {
 
 // VERIFY: 7c030b6b manual
 // OFFSET: 0x0078CA90
-Rain::Rain(float width, float height) : m_bbox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), m_mists(12.0f, C3Vector(44.0f, 44.0f, 25.0f), "textures\\Weather\\SnowMist01.blp", -1.5700001f, 0.34906587f, 5.0f, 1.2f, 128) {
+Rain::Rain(float width, float height) : m_bbox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), m_mists(12.0f, C3Vector(44.0f, 44.0f, 25.0f), "textures\\Weather\\SnowMist01.blp", -1.57f, 0.34906587f, 5.0f, 1.2f, 128) {
     this->m_useWeatherShaders = 1;
     this->m_fadeOut = 0;
     this->m_rainDropPacketList.m_activePacketsCount = 0;

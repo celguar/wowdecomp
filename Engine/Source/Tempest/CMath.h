@@ -6,7 +6,18 @@
 #include <cstdint>
 
 static const float PI = 3.1415927f;
+static const float HALF_PI = 1.5707964f;
 static const float TWO_PI = 6.2831855f;
+static const float DEG_TO_RAD = 0.017453292f; // PI / 180
+static const float RAD_TO_DEG = 57.29578f; // 180 / PI
+static const float ONE_OVER_255 = 0.0039215689f; // Scales a byte (color channel, progress) to 0..1
+
+enum : uint32_t {
+    rexp = 0x3F800000, // Float exponent bias, encoded as the bits of 1.0f.
+    rmant = 0x7FFFFF, // Float stored fraction bits.
+    lrexp = 0x3FF00000, // Double exponent bias in its high word.
+    lrmant = 0xFFFFF, // Double stored fraction bits in its high word.
+};
 
 class CMath {
     public:
@@ -14,12 +25,17 @@ class CMath {
     static double exp_(float x);
     static double exp2_(double x);
     static bool fequal(float a, float b);
+    static bool finite_(float x) {
+        return std::isfinite(x);
+    }
     static int32_t fint_(float f);
     static int32_t fint_n(float f);
     static int32_t ftrunc(float f);
     static int32_t ftol_round_0_255_(float f);
     static double log2_(double x);
     static bool fnotequal(float a, float b);
+    static bool fequal_(float a, float b);
+    static bool fnotequal_(float a, float b);
     static float normalizeAnglePi(float angle);
     static float normalizeAngleNegPiToPi_(float angle);
     static float normalizeangle0to2pi_(float angle);
@@ -33,6 +49,7 @@ class CMath {
 
 class CSoftFloat {
     public:
+    static constexpr int32_t EXPONENT_MASK = 0x7F800000;
     static CSoftFloat Ceil(const CSoftFloat& value);
     static uint32_t CountLeadingZeros(uint32_t value);
     static CSoftFloat Floor(const CSoftFloat& value);
@@ -58,6 +75,16 @@ int32_t RoundToInt64(float value);
 void ClampInPlace(float& value, float min, float max);
 bool fnotequal(float a, float b);
 int32_t IsNaN(double value);
+
+// INLINED
+inline bool CMath::fequal_(float a, float b) {
+    return ::fequal(a, b);
+}
+
+// INLINED
+inline bool CMath::fnotequal_(float a, float b) {
+    return ::fnotequal(a, b);
+}
 
 // VERIFY: 03d90c2d auto
 // OFFSET: 0x005FFF80

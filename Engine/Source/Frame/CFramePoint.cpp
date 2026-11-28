@@ -33,11 +33,11 @@ void CFramePoint::SetRelative(CLayoutFrame* relative, FRAMEPOINT framePoint, flo
     this->m_y = y;
     this->m_relative = relative;
 
-    uint32_t busy = this->m_flags & 2;
-    this->m_flags = 0;
+    uint32_t busy = this->m_flags & POINT_FLAGS::FLAG_READING_RELATIVE_RECT;
+    this->m_flags = POINT_FLAGS::FLAG_NONE;
 
     if (busy) {
-        this->m_flags |= 6;
+        this->m_flags |= POINT_FLAGS::FLAG_BUSY_CHANGED_MASK;
     }
 }
 
@@ -49,28 +49,31 @@ void CFramePoint::MarkUnused() {
     this->m_y = 0.0f;
     this->m_relative = nullptr;
 
-    uint32_t busy = this->m_flags & 2;
-    this->m_flags = 8;
+    uint32_t busy = this->m_flags & POINT_FLAGS::FLAG_READING_RELATIVE_RECT;
+    this->m_flags = POINT_FLAGS::FLAG_UNUSED;
 
     if (busy) {
-        this->m_flags |= 6;
+        this->m_flags |= POINT_FLAGS::FLAG_BUSY_CHANGED_MASK;
     }
 }
 
 // VERIFY: 6d9e350f manual
 // OFFSET: 0x0049C830
 int32_t CFramePoint::GetRelativeRect(CRect& rect) {
-    uint32_t busy = this->m_flags & 2;
+    uint32_t busy = this->m_flags & POINT_FLAGS::FLAG_READING_RELATIVE_RECT;
     int32_t result = 0;
 
     if (!busy) {
-        this->m_flags |= 2;
+        this->m_flags |= POINT_FLAGS::FLAG_READING_RELATIVE_RECT;
     }
 
-    this->m_flags &= ~4u;
+    this->m_flags &= ~POINT_FLAGS::FLAG_CHANGED_DURING_READ;
 
-    if (!this->m_relative->IsResizePending() || (this->m_relative->Resize(1), !(this->m_flags & 4))) {
-        if (!(this->m_relative->m_layoutFlags & 0x200) || (this->m_relative->SetDeferredResize(0), !(this->m_flags & 4))) {
+    STORM_ASSERT(m_relative);
+    if (!this->m_relative->IsResizePending() || (this->m_relative->Resize(1), !(this->m_flags & POINT_FLAGS::FLAG_CHANGED_DURING_READ))) {
+        STORM_ASSERT(m_relative);
+        if (!(this->m_relative->m_layoutFlags & CLayoutFrame::LayoutFlags::LAYOUT_DEFERRED_RESIZE) || (this->m_relative->SetDeferredResize(0), !(this->m_flags & POINT_FLAGS::FLAG_CHANGED_DURING_READ))) {
+            STORM_ASSERT(m_relative);
             if (this->m_relative->GetRect(&rect)) {
                 if (this->m_relative->IsAttachmentOrigin()) {
                     float offsetX = -rect.minX;
@@ -87,7 +90,7 @@ int32_t CFramePoint::GetRelativeRect(CRect& rect) {
     }
 
     if (!busy) {
-        this->m_flags &= ~2u;
+        this->m_flags &= ~POINT_FLAGS::FLAG_READING_RELATIVE_RECT;
     }
 
     return result;
@@ -156,15 +159,18 @@ float CFramePoint::Y(float scale) {
 // VERIFY: 9e24f527 manual
 // OFFSET: 0x0049CA40
 CFramePoint::CFramePoint(CLayoutFrame* relative, FRAMEPOINT framePoint, float x, float y) {
+    // 12213: "(relative != __null) && (framePoint != FRAMEPOINT_NUMPOINTS)"
+    STORM_ASSERT((relative != nullptr) && (framePoint != FRAMEPOINT_NUMPOINTS));
+
     this->m_x = x;
     this->m_framePoint = framePoint;
     this->m_y = y;
     this->m_relative = relative;
 
-    uint32_t busy = this->m_flags & 2;
-    this->m_flags = 0;
+    uint32_t busy = this->m_flags & POINT_FLAGS::FLAG_READING_RELATIVE_RECT;
+    this->m_flags = POINT_FLAGS::FLAG_NONE;
 
     if (busy) {
-        this->m_flags |= 6;
+        this->m_flags |= POINT_FLAGS::FLAG_BUSY_CHANGED_MASK;
     }
 }

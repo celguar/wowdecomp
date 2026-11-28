@@ -4,69 +4,84 @@
 #include "Engine/Source/Services/TextBlock.h"
 #include "Engine/Source/Base/Coordinate.h"
 #include "Engine/Source/Gxu/GxuFont.h"
+#include "Engine/Source/Gxu/GxuFontFont.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/CImVector.h"
+class TEXTBLOCK : public CHandleObject {
+    public:
+    /* 0008 */ CGxString* string;
+
+    TEXTBLOCK();
+    virtual ~TEXTBLOCK();
+};
+
+struct FONTHASHOBJ : public CHandleObject, public TSHashObject<FONTHASHOBJ, HASHKEY_STR> {
+    /* 0020 */ CGxFont* font;
+
+    FONTHASHOBJ();
+    virtual ~FONTHASHOBJ();
+};
 
 // STATIC: 0x00B4A2A8
 static TSHashTable<FONTHASHOBJ, HASHKEY_STR> s_fontHash;
 
 // INLINED
 TEXTBLOCK::TEXTBLOCK() {
-    this->m_string = nullptr;
+    this->string = nullptr;
 }
 
 // INLINED
 FONTHASHOBJ::FONTHASHOBJ() {
-    this->m_font = nullptr;
+    this->font = nullptr;
 }
 
 // VERIFY: 411a7a2f auto
 // OFFSET: 0x004BD870
 static uint32_t ConvertStringFlags(uint32_t flags) {
-    uint32_t result = (flags & 0x100) != 0;
+    uint32_t result = (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_SHADOW) != 0;
 
-    if (flags & 0x200) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_FIXED_SIZE) {
         result |= 0x4;
     }
 
-    if (flags & 0x400) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_UNIFORM_COLOR) {
         result |= 0x8;
     }
 
-    if (flags & 0x800) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_FIXED_WIDTH) {
         result |= 0x10;
     }
 
-    if (flags & 0x40) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NO_WORD_WRAP) {
         result |= 0x2;
     }
 
-    if (flags & 0x1000) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_NON_SPACE_WRAP) {
         result |= 0x40;
     }
 
-    if (flags & 0x2000) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_COLOR_CODES) {
         result |= 0x100;
     }
 
-    if (flags & 0x4000) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_NEWLINE_CODES) {
         result |= 0x200;
     }
 
-    if (flags & 0x8000) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_HYPERLINK_CODES) {
         result |= 0x400;
     }
 
-    if (flags & 0x80) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_PIPE_CODES) {
         result |= 0x800;
     }
 
-    if (flags & 0x10000) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_IGNORE_TEXTURE_CODES) {
         result |= 0x1000;
     }
 
-    if (flags & 0x20000) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_INDENTED) {
         result |= 0x2000;
     }
 
@@ -75,14 +90,17 @@ static uint32_t ConvertStringFlags(uint32_t flags) {
 
 // VERIFY: 2b778814 auto
 // OFFSET: 0x004BD900
-int32_t TextBlockSetGradient(HTEXTBLOCK string, int32_t start, int32_t length) {
-    return GxuFontStringSetGradient(reinterpret_cast<TEXTBLOCK*>(string)->m_string, start, length);
+int32_t TextBlockSetGradient(HTEXTBLOCK text, int32_t start, int32_t length) {
+    STORM_ASSERT(text);
+    const auto* textPtr = reinterpret_cast<const TEXTBLOCK*>(text);
+    STORM_ASSERT(textPtr);
+    return GxuFontStringSetGradient(textPtr->string, start, length);
 }
 
 // VERIFY: 77b154ef manual
 // OFFSET: 0x004BD920
 TEXTBLOCK::~TEXTBLOCK() {
-    GxuFontDestroyString(this->m_string);
+    GxuFontDestroyString(this->string);
 }
 
 // VERIFY: 1ca29484 auto
@@ -93,7 +111,7 @@ const char* TextBlockGetFontName(HTEXTFONT font) {
         return nullptr;
     }
 
-    return GxuFontGetFontName(reinterpret_cast<FONTHASHOBJ*>(font)->m_font);
+    return GxuFontGetFontName(reinterpret_cast<FONTHASHOBJ*>(font)->font);
 }
 
 // VERIFY: 007ea268 auto
@@ -104,15 +122,15 @@ uint32_t TextBlockGetFontFlags(HTEXTFONT font) {
         return 0;
     }
 
-    uint32_t fontFlags = GxuFontGetFontFlags(reinterpret_cast<FONTHASHOBJ*>(font)->m_font);
-    uint32_t flags = (fontFlags & 0x1) != 0;
+    uint32_t fontFlags = GxuFontGetFontFlags(reinterpret_cast<FONTHASHOBJ*>(font)->font);
+    uint32_t flags = (fontFlags & CGxFont::FONT_FLAGS::FONT_OUTLINE) != 0;
 
-    if (fontFlags & 0x8) {
-        flags |= 0x4;
+    if (fontFlags & CGxFont::FONT_FLAGS::FONT_THICK_OUTLINE) {
+        flags |= TEXTBLOCK_FONT_THICKOUTLINE;
     }
 
-    if (fontFlags & 0x2) {
-        flags |= 0x2;
+    if (fontFlags & CGxFont::FONT_FLAGS::FONT_MONOCHROME) {
+        flags |= TEXTBLOCK_FONT_MONOCHROME;
     }
 
     return flags;
@@ -126,7 +144,7 @@ CGxFont* TextBlockGetFontPtr(HTEXTFONT font) {
         return nullptr;
     }
 
-    return reinterpret_cast<FONTHASHOBJ*>(font)->m_font;
+    return reinterpret_cast<FONTHASHOBJ*>(font)->font;
 }
 
 // VERIFY: 76dd741a auto
@@ -137,7 +155,7 @@ CGxString* TextBlockGetStringPtr(HTEXTBLOCK string) {
         return nullptr;
     }
 
-    return reinterpret_cast<TEXTBLOCK*>(string)->m_string;
+    return reinterpret_cast<TEXTBLOCK*>(string)->string;
 }
 
 // VERIFY: bc267847 auto
@@ -150,7 +168,7 @@ void TextBlockAddShadow(HTEXTBLOCK string, CImVector color, const C2Vector& offs
 
     C2Vector ndcOffset = offset;
     DDCToNDC(offset.x, offset.y, &ndcOffset.x, &ndcOffset.y);
-    GxuFontAddShadow(reinterpret_cast<TEXTBLOCK*>(string)->m_string, color, ndcOffset);
+    GxuFontAddShadow(reinterpret_cast<TEXTBLOCK*>(string)->string, color, ndcOffset);
 }
 
 // VERIFY: 5d029466 auto
@@ -161,7 +179,7 @@ void TextBlockRemoveShadow(HTEXTBLOCK string) {
         return;
     }
 
-    GxuFontRemoveShadow(reinterpret_cast<TEXTBLOCK*>(string)->m_string);
+    GxuFontRemoveShadow(reinterpret_cast<TEXTBLOCK*>(string)->string);
 }
 
 // VERIFY: e87143c4 manual
@@ -173,30 +191,31 @@ HTEXTBLOCK TextBlockCreate(HTEXTFONT font, const char* text, const CImVector& co
     }
 
     void* mem = SMemAlloc(sizeof(TEXTBLOCK), "HTEXTBLOCK", SLOG_OBJECT, 0);
-    TEXTBLOCK* textBlock = mem ? new (mem) TEXTBLOCK : nullptr;
+    TEXTBLOCK* ptb = mem ? new (mem) TEXTBLOCK : nullptr;
 
     C3Vector ndcPosition(0.0f, 0.0f, position.z);
     DDCToNDC(position.x, position.y, &ndcPosition.x, &ndcPosition.y);
 
     EGxFontHJusts horzJust = GxHJ_Center;
 
-    if (flags & 0x4) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_RIGHT) {
         horzJust = GxHJ_Right;
-    } else if (!(flags & 0x2) && (flags & 0x1)) {
+    } else if (!(flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_CENTER) && (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_LEFT)) {
         horzJust = GxHJ_Left;
     }
 
     EGxFontVJusts vertJust = GxVJ_Middle;
 
-    if (flags & 0x8) {
+    if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_TOP) {
         vertJust = GxVJ_Top;
-    } else if (flags & 0x20) {
+    } else if (flags & TEXTBLOCK_STYLE_FLAGS::TEXTBLOCK_JUSTIFY_BOTTOM) {
         vertJust = GxVJ_Bottom;
     }
 
-    GxuFontCreateString(reinterpret_cast<FONTHASHOBJ*>(font)->m_font, text, DDCToNDCHeight(fontHeight), ndcPosition, DDCToNDCWidth(blockWidth), DDCToNDCHeight(blockHeight), DDCToNDCHeight(lineSpacing), textBlock->m_string, vertJust, horzJust, ConvertStringFlags(flags), color, DDCToNDCWidth(charSpacing), scale);
+    GxuFontCreateString(reinterpret_cast<FONTHASHOBJ*>(font)->font, text, DDCToNDCHeight(fontHeight), ndcPosition, DDCToNDCWidth(blockWidth), DDCToNDCHeight(blockHeight), DDCToNDCHeight(lineSpacing), ptb->string, vertJust, horzJust, ConvertStringFlags(flags), color, DDCToNDCWidth(charSpacing), scale);
 
-    return reinterpret_cast<HTEXTBLOCK>(HandleCreate(textBlock, "HTEXTBLOCK"));
+    STORM_ASSERT(ptb->string);
+    return reinterpret_cast<HTEXTBLOCK>(HandleCreate(ptb, "HTEXTBLOCK"));
 }
 
 // VERIFY: 3c68977b auto
@@ -209,13 +228,17 @@ void TextBlockSetStringPos(HTEXTBLOCK string, const C3Vector& position) {
 
     C3Vector ndcPosition(0.0f, 0.0f, position.z);
     DDCToNDC(position.x, position.y, &ndcPosition.x, &ndcPosition.y);
-    GxuFontSetStringPosition(reinterpret_cast<TEXTBLOCK*>(string)->m_string, ndcPosition);
+    const auto* ptb = reinterpret_cast<const TEXTBLOCK*>(string);
+    STORM_ASSERT(ptb->string);
+    GxuFontSetStringPosition(ptb->string, ndcPosition);
 }
 
 // VERIFY: 7827f7e0 manual
 // OFFSET: 0x004BDC50
 C3Vector TextBlockGetStringPos(HTEXTBLOCK string) {
-    C3Vector ndcPosition = GxuFontGetStringPosition(reinterpret_cast<TEXTBLOCK*>(string)->m_string);
+    const auto* ptb = reinterpret_cast<const TEXTBLOCK*>(string);
+    STORM_ASSERT(ptb->string);
+    C3Vector ndcPosition = GxuFontGetStringPosition(ptb->string);
     C3Vector position(0.0f, 0.0f, ndcPosition.z);
     NDCToDDC(ndcPosition.x, ndcPosition.y, &position.x, &position.y);
 
@@ -230,7 +253,7 @@ void TextBlockUpdateColor(HTEXTBLOCK string, const CImVector& color) {
         return;
     }
 
-    GxuFontSetStringColor(reinterpret_cast<TEXTBLOCK*>(string)->m_string, color);
+    GxuFontSetStringColor(reinterpret_cast<TEXTBLOCK*>(string)->string, color);
 }
 
 // VERIFY: 77525dd6 auto
@@ -243,7 +266,7 @@ void TextBlockGetTextExtent(HTEXTFONT font, const char* text, uint32_t numBytes,
 
     *extent = 0.0f;
 
-    CGxFont* face = reinterpret_cast<FONTHASHOBJ*>(font)->m_font;
+    CGxFont* face = reinterpret_cast<FONTHASHOBJ*>(font)->font;
 
     if (!face) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
@@ -257,7 +280,7 @@ void TextBlockGetTextExtent(HTEXTFONT font, const char* text, uint32_t numBytes,
 // VERIFY: 664108fa manual
 // OFFSET: 0x004BDD80
 float TextBlockGetWrappedTextHeight(HTEXTFONT font, const char* text, float fontHeight, float blockWidth, const C2Vector& shadowOffset, float scale, float spacing, uint32_t flags) {
-    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->m_font) {
+    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->font) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return 0.0f;
     }
@@ -265,7 +288,7 @@ float TextBlockGetWrappedTextHeight(HTEXTFONT font, const char* text, float font
     C2Vector ndcShadow = shadowOffset;
     DDCToNDC(ndcShadow.x, ndcShadow.y, &ndcShadow.x, &ndcShadow.y);
 
-    float height = GxuFontGetWrappedTextHeight(reinterpret_cast<FONTHASHOBJ*>(font)->m_font, text, DDCToNDCHeight(fontHeight), DDCToNDCWidth(blockWidth), ndcShadow, scale, DDCToNDCHeight(spacing), ConvertStringFlags(flags));
+    float height = GxuFontGetWrappedTextHeight(reinterpret_cast<FONTHASHOBJ*>(font)->font, text, DDCToNDCHeight(fontHeight), DDCToNDCWidth(blockWidth), ndcShadow, scale, DDCToNDCHeight(spacing), ConvertStringFlags(flags));
 
     return NDCToDDCHeight(height);
 }
@@ -273,12 +296,12 @@ float TextBlockGetWrappedTextHeight(HTEXTFONT font, const char* text, float font
 // VERIFY: a9437d87 manual
 // OFFSET: 0x004BDE40
 uint32_t TextBlockGetMaxCharsWithinWidth(HTEXTFONT font, const char* text, float fontHeight, float maxWidth, uint32_t numBytes, float* extent, float shadowWidth, float scale, float unused, uint32_t flags) {
-    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->m_font) {
+    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->font) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return 0;
     }
 
-    uint32_t numChars = GxuFontGetMaxCharsWithinWidth(reinterpret_cast<FONTHASHOBJ*>(font)->m_font, text, DDCToNDCHeight(fontHeight), DDCToNDCWidth(maxWidth), numBytes, extent, DDCToNDCWidth(shadowWidth), scale, DDCToNDCWidth(unused), ConvertStringFlags(flags));
+    uint32_t numChars = GxuFontGetMaxCharsWithinWidth(reinterpret_cast<FONTHASHOBJ*>(font)->font, text, DDCToNDCHeight(fontHeight), DDCToNDCWidth(maxWidth), numBytes, extent, DDCToNDCWidth(shadowWidth), scale, DDCToNDCWidth(unused), ConvertStringFlags(flags));
     NDCToDDC(*extent, 0.0f, extent, nullptr);
 
     return numChars;
@@ -287,23 +310,23 @@ uint32_t TextBlockGetMaxCharsWithinWidth(HTEXTFONT font, const char* text, float
 // VERIFY: ec57cb90 manual
 // OFFSET: 0x004BDEF0
 uint32_t TextBlockGetMaxCharsWithinWidthAndHeight(HTEXTFONT font, const char* text, float fontHeight, float blockWidth, float blockHeight, uint32_t numBytes, float shadowWidth, float scale, float spacing, uint32_t flags) {
-    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->m_font) {
+    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->font) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return 0;
     }
 
-    return GxuFontGetMaxCharsWithinWidthAndHeight(reinterpret_cast<FONTHASHOBJ*>(font)->m_font, text, DDCToNDCHeight(fontHeight), DDCToNDCWidth(blockWidth), DDCToNDCHeight(blockHeight), numBytes, DDCToNDCWidth(shadowWidth), scale, DDCToNDCHeight(spacing), ConvertStringFlags(flags));
+    return GxuFontGetMaxCharsWithinWidthAndHeight(reinterpret_cast<FONTHASHOBJ*>(font)->font, text, DDCToNDCHeight(fontHeight), DDCToNDCWidth(blockWidth), DDCToNDCHeight(blockHeight), numBytes, DDCToNDCWidth(shadowWidth), scale, DDCToNDCHeight(spacing), ConvertStringFlags(flags));
 }
 
 // VERIFY: 2166778f manual
 // OFFSET: 0x004BDF90
 uint32_t TextBlockGetMaxCharsWithinWidthFromEnd(HTEXTFONT font, const char* text, float fontHeight, float maxWidth, uint32_t numBytes, float* extent, float shadowWidth, float scale, float unused, uint32_t flags) {
-    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->m_font) {
+    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->font) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return 0;
     }
 
-    uint32_t numChars = GxuFontGetMaxCharsWithinWidthFromEnd(reinterpret_cast<FONTHASHOBJ*>(font)->m_font, text, DDCToNDCHeight(fontHeight), DDCToNDCWidth(maxWidth), numBytes, extent, DDCToNDCWidth(shadowWidth), scale, DDCToNDCWidth(unused), ConvertStringFlags(flags));
+    uint32_t numChars = GxuFontGetMaxCharsWithinWidthFromEnd(reinterpret_cast<FONTHASHOBJ*>(font)->font, text, DDCToNDCHeight(fontHeight), DDCToNDCWidth(maxWidth), numBytes, extent, DDCToNDCWidth(shadowWidth), scale, DDCToNDCWidth(unused), ConvertStringFlags(flags));
     NDCToDDC(*extent, 0.0f, extent, nullptr);
 
     return numChars;
@@ -312,19 +335,19 @@ uint32_t TextBlockGetMaxCharsWithinWidthFromEnd(HTEXTFONT font, const char* text
 // VERIFY: db0dc9c8 auto
 // OFFSET: 0x004BE040
 uint32_t TextBlockWrapText(HTEXTFONT font, const char* text, float fontHeight, float blockWidth, uint32_t* lineStarts, uint32_t maxLines, float shadowWidth, float scale, float unused, uint32_t flags) {
-    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->m_font) {
+    if (!font || !text || !reinterpret_cast<FONTHASHOBJ*>(font)->font) {
         SErrSetLastError(STORM_ERROR_INVALID_PARAMETER);
         return 0;
     }
 
-    return GxuFontWrapText(reinterpret_cast<FONTHASHOBJ*>(font)->m_font, text, SStrLen(text), DDCToNDCHeight(fontHeight), DDCToNDCWidth(blockWidth), lineStarts, maxLines, DDCToNDCWidth(shadowWidth), scale, DDCToNDCWidth(unused), ConvertStringFlags(flags));
+    return GxuFontWrapText(reinterpret_cast<FONTHASHOBJ*>(font)->font, text, SStrLen(text), DDCToNDCHeight(fontHeight), DDCToNDCWidth(blockWidth), lineStarts, maxLines, DDCToNDCWidth(shadowWidth), scale, DDCToNDCWidth(unused), ConvertStringFlags(flags));
 }
 
 // VERIFY: 6a182661 manual
 // OFFSET: 0x004BE500
 FONTHASHOBJ::~FONTHASHOBJ() {
-    if (this->m_font) {
-        GxuFontDestroyFont(this->m_font);
+    if (this->font) {
+        GxuFontDestroyFont(this->font);
     }
 }
 
@@ -352,29 +375,30 @@ HTEXTFONT TextBlockGenerateFont(const char* fontName, uint32_t fontFlags, float 
     char key[276];
     SStrPrintf(key, sizeof(key), "%s-%d-%f", fontName, fontFlags, height);
 
-    FONTHASHOBJ* hashObj = s_fontHash.Ptr(key);
+    FONTHASHOBJ* fontObj = s_fontHash.Ptr(key);
 
-    if (hashObj) {
-        return reinterpret_cast<HTEXTFONT>(HandleCreate(hashObj, "HTEXTFONT"));
+    if (fontObj) {
+        STORM_ASSERT(fontObj->font);
+        return reinterpret_cast<HTEXTFONT>(HandleCreate(fontObj, "HTEXTFONT"));
     }
 
-    hashObj = s_fontHash.New(SStrHashHT(key), key, 0, 0);
+    fontObj = s_fontHash.New(SStrHashHT(key), key, 0, 0);
 
-    uint32_t gxFlags = (fontFlags & 0x1) != 0;
+    uint32_t gxFlags = (fontFlags & TEXTBLOCK_FONT_OUTLINE) != 0;
 
-    if (fontFlags & 0x4) {
-        gxFlags |= 0x8;
+    if (fontFlags & TEXTBLOCK_FONT_THICKOUTLINE) {
+        gxFlags |= CGxFont::FONT_FLAGS::FONT_THICK_OUTLINE;
     }
 
-    if (fontFlags & 0x2) {
-        gxFlags |= 0x2;
+    if (fontFlags & TEXTBLOCK_FONT_MONOCHROME) {
+        gxFlags |= CGxFont::FONT_FLAGS::FONT_MONOCHROME;
     }
 
-    if (GxuFontCreateFont(fontName, height, hashObj->m_font, gxFlags)) {
-        return reinterpret_cast<HTEXTFONT>(HandleCreate(hashObj, "HTEXTFONT"));
+    if (GxuFontCreateFont(fontName, height, fontObj->font, gxFlags)) {
+        return reinterpret_cast<HTEXTFONT>(HandleCreate(fontObj, "HTEXTFONT"));
     }
 
-    s_fontHash.Delete(hashObj);
+    s_fontHash.Delete(fontObj);
 
     return nullptr;
 }

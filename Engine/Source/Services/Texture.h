@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <windows.h>
 #include "Engine/Source/Base/Handle.h"
 #include "Engine/Source/Base/Status.h"
 #include "Engine/Source/BLPFile/Types.h"
@@ -31,10 +32,13 @@ enum TEXFILETYPE {
 
 class CGxTexCache {
     public:
-    /* 0000 */ CGxTex* m_gxTex;
+    /* 0000 */ CGxTex* gxTex;
     /* 0004 */ uint32_t m_time;
     /* 0008 */ uint32_t m_size;
     /* 000C */ TSLink<CGxTexCache> m_link;
+
+    CGxTexCache();
+    ~CGxTexCache();
 };
 
 struct HASHKEY_TEXTUREFILE {
@@ -48,11 +52,19 @@ struct HASHKEY_TEXTUREFILE {
 
 class CTexture : public CHandleObject, public TSHashObject<CTexture, HASHKEY_TEXTUREFILE> {
     public:
+    enum FLAGS : int32_t {
+        NONE = 0,
+        IS_OPAQUE = 1,
+        UNKNOWN_2 = 2,
+        USE_ATLAS = 4,
+        STREAMING_ASYNC = 0x20,
+    };
+
     /* 0028 */ uint16_t m_flags;
     /* 002A */ uint8_t m_bestMip;
     /* 002B */ uint8_t m_alphaBits;
     /* 002C */ CStatus m_status;
-    /* 0040 */ CAsyncObject* m_asyncObject;
+    /* 0040 */ CAsyncObject* asyncObject;
     /* 0044 */ CGxTex* m_gxTex;
     /* 0048 */ EGxTexTarget m_gxTexTarget;
     /* 004C */ uint16_t m_gxWidth;
@@ -60,8 +72,8 @@ class CTexture : public CHandleObject, public TSHashObject<CTexture, HASHKEY_TEX
     /* 0050 */ EGxTexFormat m_gxTexFormat;
     /* 0054 */ EGxTexFormat m_dataFormat;
     /* 0058 */ CGxTexFlags m_gxTexFlags;
-    /* 005C */ CTextureAtlas* m_atlas;
-    /* 0060 */ int32_t m_atlasBlockIndex;
+    /* 005C */ CTextureAtlas* atlas;
+    /* 0060 */ int32_t atlasBlockIndex;
     /* 0064 */ TSLink<CTexture> m_link;
     /* 006C */ char m_filename[260];
 
@@ -77,7 +89,7 @@ class CTextureAtlas {
     static void Free(CTextureAtlas* atlas, CTexture* texture);
     static CTextureAtlas* Get(CTexture* texture);
 
-    /* 0000 */ uint16_t m_count;
+    /* 0000 */ uint16_t m_refCount;
     /* 0002 */ uint16_t m_dirty;
     /* 0004 */ uint32_t m_width;
     /* 0008 */ uint32_t m_height;
@@ -102,7 +114,7 @@ class CTextureAtlas {
 void AsyncTextureDestroyedCallback(CAsyncObject* object);
 void AsyncTextureFailureCallback(CTexture* texture);
 void AsyncTextureHandler();
-void AsyncTextureProcess(CAsyncObject* object, int32_t immediate);
+void AsyncTextureProcess(CAsyncObject* object, BOOL immediate);
 int32_t AsyncTextureStatus();
 void AsyncTextureSuccessCallback(CTexture* texture);
 void AsyncTextureWait(CTexture* texture);
@@ -144,15 +156,15 @@ SFileImpl* TextureCreateOpenFile(const char* fileName, int32_t flags);
 CTexture* TextureCreateSolid(const CImVector& color);
 void TextureDestroy();
 TEXFILETYPE TextureDiscoverFileType(const char* fileName);
-void TextureEnableAtlas(int32_t enable);
+void TextureEnableAtlas(BOOL enable);
 void TextureFreeGxTex(CGxTex* gxTex, const char* name);
 void TextureFreeMippedImg(MipBits* bits);
 void TextureFreeMippedImg(MipBits* bits, PIXEL_FORMAT format, uint32_t width, uint32_t height);
 void TextureGenerateMips(uint32_t width, uint32_t height, uint32_t firstLevel, uint32_t levelCount, MipBits* images);
-CGxTex* TextureGetGxTex(CTexture* texture, int32_t wait, CStatus* status);
+CGxTex* TextureGetGxTex(CTexture* texture, BOOL wait, CStatus* status);
 int32_t TextureGetAtlasOffsetAndScale(CTexture* texture, C2Vector& offset, float& scale);
 uint32_t TextureGetBytesPerBlock(PIXEL_FORMAT format);
-int32_t TextureGetDimensions(CTexture* texture, uint32_t* width, uint32_t* height, int32_t wait);
+int32_t TextureGetDimensions(CTexture* texture, uint32_t* width, uint32_t* height, BOOL wait);
 const char* TextureGetFilename(CTexture* texture);
 void TextureGetGxTexFlags(CTexture* texture, CGxTexFlags* texFlags);
 int32_t TextureGetRefCnt(CTexture* texture);

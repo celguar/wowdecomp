@@ -1,4 +1,5 @@
 #include "QuestFrame.h"
+#include "WoW/Source/Object/QuestCache.h"
 #include <cstdint>
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
@@ -85,14 +86,14 @@ static int32_t Script_GetRewardTalents(lua_State* L) {
 // VERIFY: db1d2e60 auto
 // OFFSET: 0x0058BDD0
 static int32_t Script_GetNumAvailableQuests(lua_State* L) {
-    lua_pushnumber(L, CGQuestInfo::m_numQuests);
+    lua_pushnumber(L, CGQuestInfo::GetNumQuests());
     return 1;
 }
 
 // VERIFY: 2f7697ab auto
 // OFFSET: 0x0058BE00
 static int32_t Script_GetNumActiveQuests(lua_State* L) {
-    lua_pushnumber(L, CGQuestInfo::m_numInProgress);
+    lua_pushnumber(L, CGQuestInfo::GetNumQuestsInProgress());
     return 1;
 }
 
@@ -134,7 +135,7 @@ static int32_t Script_GetSuggestedGroupNum(lua_State* L) {
 // VERIFY: f7458957 auto
 // OFFSET: 0x0058C470
 static int32_t Script_GetMaxDailyQuests(lua_State* L) {
-    lua_pushnumber(L, 25.0);
+    lua_pushnumber(L, MAX_DAILY_QUESTS);
     return 1;
 }
 
@@ -148,7 +149,7 @@ static int32_t Script_GetRewardArenaPoints(lua_State* L) {
 // VERIFY: 4ceaaf96 auto
 // OFFSET: 0x0058C430
 static int32_t Script_QuestGetAutoAccept(lua_State* L) {
-    if (CGQuestInfo::m_questFlags & 0x80000) {
+    if (CGQuestInfo::m_questFlags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_AUTO_ACCEPT) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -160,7 +161,7 @@ static int32_t Script_QuestGetAutoAccept(lua_State* L) {
 // VERIFY: 87727b0c auto
 // OFFSET: 0x0058C4D0
 static int32_t Script_QuestIsDaily(lua_State* L) {
-    if (CGQuestInfo::m_questFlags & 0x1000) {
+    if (CGQuestInfo::m_questFlags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_DAILY) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -172,7 +173,7 @@ static int32_t Script_QuestIsDaily(lua_State* L) {
 // VERIFY: dfc603b7 auto
 // OFFSET: 0x0058C510
 static int32_t Script_QuestIsWeekly(lua_State* L) {
-    if (CGQuestInfo::m_questFlags & 0x8000) {
+    if (CGQuestInfo::m_questFlags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_WEEKLY) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -184,7 +185,7 @@ static int32_t Script_QuestIsWeekly(lua_State* L) {
 // VERIFY: 1f1988d2 auto
 // OFFSET: 0x0058C3E0
 static int32_t Script_QuestFlagsPVP(lua_State* L) {
-    if (s_isPvPRealm || !(CGQuestInfo::m_questFlags & 0x2000)) {
+    if (s_isPvPRealm || !(CGQuestInfo::m_questFlags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_PVP)) {
         lua_pushnil(L);
         return 1;
     }
@@ -209,7 +210,7 @@ static int32_t Script_ConfirmAcceptQuest(lua_State* L) {
 static int32_t Script_GetNumQuestRewards(lua_State* L) {
     uint32_t count = 0;
 
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < MAX_REQUIRED_ITEMS; i++) {
         if (!CGQuestInfo::m_questItems[i].m_reward.m_itemID) {
             break;
         }
@@ -226,7 +227,7 @@ static int32_t Script_GetNumQuestRewards(lua_State* L) {
 static int32_t Script_GetNumQuestChoices(lua_State* L) {
     uint32_t count = 0;
 
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < MAX_REQUIRED_ITEMS; i++) {
         if (!CGQuestInfo::m_questItems[i].m_choice.m_itemID) {
             break;
         }
@@ -243,7 +244,7 @@ static int32_t Script_GetNumQuestChoices(lua_State* L) {
 static int32_t Script_GetNumQuestItems(lua_State* L) {
     uint32_t count = 0;
 
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < MAX_REQUIRED_ITEMS; i++) {
         if (!CGQuestInfo::m_questItems[i].m_required.m_displayID) {
             break;
         }
@@ -265,8 +266,8 @@ static int32_t Script_GetAvailableTitle(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < CGQuestInfo::m_numQuests) {
-        lua_pushstring(L, CGQuestInfo::m_availableQuests[index].m_title);
+    if (index < CGQuestInfo::GetNumQuests()) {
+        lua_pushstring(L, CGQuestInfo::GetAvailableQuest(index).m_title);
     } else {
         lua_pushstring(L, nullptr);
     }
@@ -285,8 +286,8 @@ static int32_t Script_GetAvailableLevel(lua_State* L) {
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
     int32_t level;
 
-    if (index < CGQuestInfo::m_numQuests) {
-        level = CGQuestInfo::m_availableQuests[index].m_level;
+    if (index < CGQuestInfo::GetNumQuests()) {
+        level = CGQuestInfo::GetAvailableQuest(index).m_level;
     } else {
         level = 0;
     }
@@ -306,8 +307,8 @@ static int32_t Script_GetActiveLevel(lua_State* L) {
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
     int32_t level;
 
-    if (index < CGQuestInfo::m_numInProgress) {
-        level = CGQuestInfo::m_inProgressQuests[index].m_level;
+    if (index < CGQuestInfo::GetNumQuestsInProgress()) {
+        level = CGQuestInfo::GetQuestInProgress(index).m_level;
     } else {
         level = 0;
     }
@@ -323,7 +324,7 @@ static int32_t Script_GetDailyQuestsCompleted(lua_State* L) {
     int32_t count = 0;
 
     if (player) {
-        for (uint32_t i = 0; i < 25; i++) {
+        for (uint32_t i = 0; i < MAX_DAILY_QUESTS; i++) {
             if (player->m_player->m_playerFieldDailyQuests1[i]) {
                 count++;
             }
@@ -343,7 +344,7 @@ static int32_t Script_GetActiveTitle(lua_State* L) {
     }
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
-    lua_pushstring(L, index < CGQuestInfo::m_numInProgress ? CGQuestInfo::m_inProgressQuests[index].m_title : nullptr);
+    lua_pushstring(L, index < CGQuestInfo::GetNumQuestsInProgress() ? CGQuestInfo::GetQuestInProgress(index).m_title : nullptr);
     lua_pushboolean(L, CGQuestInfo::IsQuestCompleteAt(index));
     return 2;
 }
@@ -422,7 +423,7 @@ static int32_t Script_IsAvailableQuestTrivial(lua_State* L) {
     }
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
-    int32_t level = index < CGQuestInfo::m_numQuests ? CGQuestInfo::m_availableQuests[index].m_level : 0;
+    int32_t level = index < CGQuestInfo::GetNumQuests() ? CGQuestInfo::GetAvailableQuest(index).m_level : 0;
 
     if (CGQuestInfo::IsLowLevel(level)) {
         lua_pushnumber(L, 1.0);
@@ -442,7 +443,7 @@ static int32_t Script_IsActiveQuestTrivial(lua_State* L) {
     }
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
-    int32_t level = index < CGQuestInfo::m_numInProgress ? CGQuestInfo::m_inProgressQuests[index].m_level : 0;
+    int32_t level = index < CGQuestInfo::GetNumQuestsInProgress() ? CGQuestInfo::GetQuestInProgress(index).m_level : 0;
 
     if (CGQuestInfo::IsLowLevel(level)) {
         lua_pushnumber(L, 1.0);
@@ -546,7 +547,7 @@ static int32_t Script_GetRewardSpell(lua_State* L) {
 
             lua_pushstring(L, spell.m_name);
 
-            if (spell.m_attributes & 0x20) {
+            if (spell.m_attributes & SPELL_ATTR0::SPELL_ATTR0_IS_TRADESKILL) {
                 lua_pushnumber(L, 1.0);
             } else {
                 lua_pushnil(L);
@@ -559,7 +560,7 @@ static int32_t Script_GetRewardSpell(lua_State* L) {
                 SpellRec cast;
 
                 if (g_spellDB.GetRecord(castId, &cast)) {
-                    for (uint32_t i = 0; i < 3; i++) {
+                    for (uint32_t i = 0; i < NUM_SPELL_EFFECTS; i++) {
                         if (cast.m_effect[i] == SPELL_EFFECT_LEARN_SPELL || cast.m_effect[i] == SPELL_EFFECT_LEARN_PET_SPELL) {
                             learns = true;
                             break;
@@ -597,11 +598,11 @@ static int32_t Script_GetRewardTitle(lua_State* L) {
         return 1;
     }
 
-    int32_t gender = player ? player->m_player->m_playerBytes3[0] : 0;
+    int32_t gender = player ? player->m_player->sex : UNITSEX_MALE;
     char format[256];
     format[0] = 0;
 
-    if (gender == 1) {
+    if (gender == UNITSEX_FEMALE) {
         if (strcmp(title->m_name1, "")) {
             strcpy(format, title->m_name1);
         } else {
@@ -673,7 +674,7 @@ static int32_t Script_GetAvailableQuestInfo(lua_State* L) {
     }
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
-    int32_t level = index < CGQuestInfo::m_numQuests ? CGQuestInfo::m_availableQuests[index].m_level : 0;
+    int32_t level = index < CGQuestInfo::GetNumQuests() ? CGQuestInfo::GetAvailableQuest(index).m_level : 0;
 
     if (CGQuestInfo::IsLowLevel(level)) {
         lua_pushnumber(L, 1.0);
@@ -683,7 +684,7 @@ static int32_t Script_GetAvailableQuestInfo(lua_State* L) {
 
     index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < CGQuestInfo::m_numQuests && (CGQuestInfo::m_availableQuests[index].m_flags & 0x1000)) {
+    if (index < CGQuestInfo::GetNumQuests() && (CGQuestInfo::GetAvailableQuest(index).m_flags & QUEST_TEMPLATE_FLAGS::QUEST_FLAG_DAILY)) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -691,7 +692,7 @@ static int32_t Script_GetAvailableQuestInfo(lua_State* L) {
 
     index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index < CGQuestInfo::m_numQuests && CGQuestInfo::m_availableQuests[index].m_repeatable) {
+    if (index < CGQuestInfo::GetNumQuests() && CGQuestInfo::GetAvailableQuest(index).m_repeatable) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);

@@ -31,7 +31,7 @@ CAaBox Sand::GetBoundingBox() const {
 void Sand::Render() {
     this->UpdatePackets();
 
-    if (CWorldScene::s_unk_ADF570.m_maxViewDepth < 0.0f) {
+    if (CWorldScene::s_worldPortalView.m_maxViewDepth < 0.0f) {
         return;
     }
 
@@ -67,10 +67,10 @@ void Sand::InitGrain(SandGrainParticle* grain, float time) {
     float randomZ = CRandom::ufloat_(g_rndSeed);
     float randomY = CRandom::ufloat_(g_rndSeed);
     float randomX = CRandom::ufloat_(g_rndSeed);
-    grain->m_position.x = (randomX * 0.15000001f + 0.85000002f) * size.x;
+    grain->m_position.x = (randomX * 0.15f + 0.85f) * size.x;
     grain->m_position.y = (randomY - 0.5f) * size.y;
     grain->m_position.z = (randomZ - 0.5f) * size.z;
-    float angle = (CRandom::ufloat_(g_rndSeed) - 0.5f) * 0.34906587f - 1.5700001f;
+    float angle = (CRandom::ufloat_(g_rndSeed) - 0.5f) * 0.34906587f - 1.57f;
     float c = cos(angle);
     float s = sin(angle);
     float speed = (CRandom::ufloat_(g_rndSeed) - 0.5f) * 0.66666669f + 18.666666f;
@@ -88,7 +88,7 @@ void Sand::InitGrain(SandGrainParticle* grain, float time) {
     grain->m_position.x = grain->m_position.x + CWorldScene::s_activeWorldView.x;
     grain->m_position.y = grain->m_position.y + CWorldScene::s_activeWorldView.y;
     grain->m_position.z = grain->m_position.z + CWorldScene::s_activeWorldView.z;
-    float distance = (CRandom::ufloat_(g_rndSeed) - 0.5f) * 0.30000001f + 3.2f;
+    float distance = (CRandom::ufloat_(g_rndSeed) - 0.5f) * 0.3f + 3.2f;
 
     if (World::s_weather->m_grid->GetHeight(&grain->m_position) >= grain->m_position.z) {
         grain->m_startTime = 0.0f;
@@ -197,9 +197,9 @@ void Sand::UpdatePackets() {
         return;
     }
 
-    float tick = 0.016666999f;
+    float tick = 0.016667f;
 
-    if (FrameTime::s_tickTimeSec < 0.016666999f) {
+    if (FrameTime::s_tickTimeSec < 0.016667f) {
         tick = FrameTime::s_tickTimeSec;
     }
 
@@ -240,7 +240,7 @@ void Sand::RenderPackets() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);
@@ -338,7 +338,7 @@ void Sand::RenderPacketsShader() {
     }
 
     g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, 2);
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
     GxRsSet(GxRs_AlphaRef, static_cast<int32_t>(CGxDevice::s_alphaRef[g_theGxDevicePtr->m_appRenderStates.m_data[GxRs_BlendingMode].m_value.m_data.i[0]]));
     GxRsSet(GxRs_DepthWrite, 0);
     GxRsSet(GxRs_Lighting, 0);
@@ -356,14 +356,7 @@ void Sand::RenderPacketsShader() {
     C44Matrix view;
     GxXformView(view);
     C44Matrix projection;
-    projection = g_theGxDevicePtr->m_projNative;
-
-    if (g_theGxDevicePtr->DeviceApi() == GxApi_OpenGl) {
-        projection.c0 *= -1.0f;
-        projection.c1 *= -1.0f;
-        projection.c2 *= -1.0f;
-        projection.c3 = -1.0f * projection.c3;
-    }
+    GxXformProjNative(projection);
 
     float camera[4] = { CWorldScene::s_activeWorldView.x, CWorldScene::s_activeWorldView.y, CWorldScene::s_activeWorldView.z, 1.0f };
     C44Matrix viewProj = (view * projection).Transpose();
@@ -375,7 +368,7 @@ void Sand::RenderPacketsShader() {
     window.maxY = 0.0f;
     window.maxX = 0.0f;
     g_theGxDevicePtr->CapsWindowSize(window);
-    float params[4] = { -0.050000001f, 1.5f, (window.maxY - window.minY) * 0.0024999999f, 0.0f };
+    float params[4] = { -0.05f, 1.5f, (window.maxY - window.minY) * 0.0025f, 0.0f };
     g_theGxDevicePtr->ShaderConstantsSet(GxSh_Vertex, 9, params, 1);
     C4Vector fog(DayNight::GetInfo()->m_fog.m_color);
     g_theGxDevicePtr->ShaderConstantsSet(GxSh_Vertex, 0, reinterpret_cast<const float*>(&fog), 1);
@@ -403,7 +396,7 @@ void Sand::RenderPacketsShader() {
 
 // VERIFY: cd8bb19f manual
 // OFFSET: 0x0078CF20
-Sand::Sand(float width, float height) : m_bbox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), m_mists(12.0f, C3Vector(44.0f, 44.0f, 25.0f), "textures\\Weather\\WeatherMistGrainy01.blp", -1.5700001f, 0.34906587f, 15.0f, 4.5f, 128) {
+Sand::Sand(float width, float height) : m_bbox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), m_mists(12.0f, C3Vector(44.0f, 44.0f, 25.0f), "textures\\Weather\\WeatherMistGrainy01.blp", -1.57f, 0.34906587f, 15.0f, 4.5f, 128) {
     this->m_useWeatherShaders = 1;
     this->m_fadeOut = 0;
     this->m_sandGrainPacketList.m_activePacketsCount = 0;
